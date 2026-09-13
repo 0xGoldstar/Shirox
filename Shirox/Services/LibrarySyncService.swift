@@ -177,7 +177,9 @@ final class LibrarySyncService: ObservableObject {
             (anilist, mal) = await runSync(direction, pairing)
         case .overwrite, .mirror:
             let plan = LibrarySyncPlanner.overwritePlan(
-                from: pairing, overwriting: direction.target ?? .mal,
+                from: pairing,
+                writing: direction.target ?? .mal,
+                reading: direction.source ?? .anilist,
                 sourceMediaIds: direction.target == .mal
                     ? Set(anilistEntries.map(\.media.id)) : Set(malEntries.map(\.media.id)),
                 deletingExtras: direction.kind == .mirror)
@@ -206,7 +208,9 @@ final class LibrarySyncService: ObservableObject {
                 ? await anilistIds(for: malEntries) : [:]
         )
         return LibrarySyncPlanner.overwritePlan(
-            from: pairing, overwriting: direction.target ?? .mal,
+            from: pairing,
+            writing: direction.target ?? .mal,
+            reading: direction.source ?? .anilist,
             sourceMediaIds: direction.target == .mal
                 ? Set(anilistEntries.map(\.media.id)) : Set(malEntries.map(\.media.id)),
             deletingExtras: direction.kind == .mirror)
