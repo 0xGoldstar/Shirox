@@ -19,7 +19,7 @@ struct SettingsView: View {
     @StateObject private var librarySync = LibrarySyncService.shared
     @State private var pendingSyncDirection: LibrarySyncService.Direction?
     @State private var previewDirection: LibrarySyncService.Direction?
-    @State private var replacePlan: LibraryReplacePlan?
+    @State private var overwritePlan: LibraryOverwritePlan?
     @AppStorage("autoNextEpisode") private var autoNextEpisode = true
     @AppStorage("autoSkipSegments") private var autoSkipSegments = true
     @AppStorage("watchedPercentage") private var watchedPercentage = 90.0
@@ -224,8 +224,8 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Section("Replace Library") {
-                        ForEach(LibrarySyncService.Direction.replaceCases) { direction in
+                    Section("Overwrite Library") {
+                        ForEach(LibrarySyncService.Direction.overwriteCases) { direction in
                             syncRow(direction)
                         }
                         Text("Use when one account is simply the one you want to keep. Overwrites the other with it — progress, status, score and rewatch count — even where that means going backwards. Titles only the overwritten account has are left in place. This can't be undone.")
@@ -237,7 +237,7 @@ struct SettingsView: View {
                         ForEach(LibrarySyncService.Direction.mirrorCases) { direction in
                             syncRow(direction)
                         }
-                        Text("Everything Replace does, and the overwritten account also loses any entry the other doesn't have, ending up an exact copy. Entries whose match can't be confirmed are kept rather than deleted. This can't be undone.")
+                        Text("Everything Overwrite does, and the overwritten account also loses any entry the other doesn't have, ending up an exact copy. Entries whose match can't be confirmed are kept rather than deleted. This can't be undone.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -568,16 +568,16 @@ struct SettingsView: View {
                 Text(direction.confirmationMessage)
             }
             .sheet(isPresented: Binding(
-                get: { replacePlan != nil && previewDirection != nil },
-                set: { if !$0 { replacePlan = nil; previewDirection = nil } }
+                get: { overwritePlan != nil && previewDirection != nil },
+                set: { if !$0 { overwritePlan = nil; previewDirection = nil } }
             )) {
-                if let plan = replacePlan, let direction = previewDirection {
-                    ReplacePreviewSheet(direction: direction, plan: plan) {
-                        replacePlan = nil
+                if let plan = overwritePlan, let direction = previewDirection {
+                    OverwritePreviewSheet(direction: direction, plan: plan) {
+                        overwritePlan = nil
                         previewDirection = nil
                         Task { await librarySync.apply(plan, for: direction) }
                     } onCancel: {
-                        replacePlan = nil
+                        overwritePlan = nil
                         previewDirection = nil
                     }
                 }
@@ -591,7 +591,7 @@ struct SettingsView: View {
         }
     }
 
-    /// One row in the Sync / Replace / Mirror sections. Safe runs get a confirmation dialog;
+    /// One row in the Sync / Overwrite / Mirror sections. Safe runs get a confirmation dialog;
     /// destructive ones get a full preview of what they would change.
     @ViewBuilder
     private func syncRow(_ direction: LibrarySyncService.Direction) -> some View {
@@ -600,7 +600,7 @@ struct SettingsView: View {
                 // Destructive runs are never launched straight from a tap — they go through a
                 // preview of exactly what they would change.
                 previewDirection = direction
-                Task { replacePlan = await librarySync.preview(direction) }
+                Task { overwritePlan = await librarySync.preview(direction) }
             } else {
                 pendingSyncDirection = direction
             }
@@ -1256,12 +1256,12 @@ private struct ProvidersSettingsSection: View {
 }
 
 
-/// Shows exactly what a replace or mirror would do before it does any of it. These runs can't be
+/// Shows exactly what an overwrite or mirror would do before it does any of it. These runs can't be
 /// undone, so the deletions are listed by name rather than just counted — a number is easy to
 /// wave through, a list of titles you recognise is not.
-private struct ReplacePreviewSheet: View {
+private struct OverwritePreviewSheet: View {
     let direction: LibrarySyncService.Direction
-    let plan: LibraryReplacePlan
+    let plan: LibraryOverwritePlan
     let onConfirm: () -> Void
     let onCancel: () -> Void
 

@@ -13,7 +13,7 @@ import Combine
 /// library, and running it twice changes nothing the second time. That property is what makes
 /// ``Direction/both`` safe: a two-way merge is the same decision run once per side.
 ///
-/// The replace and mirror runs deliberately give that up. They exist because sometimes one
+/// The overwrite and mirror runs deliberately give that up. They exist because sometimes one
 /// account is simply the one you want, and they destroy whatever the other held.
 @MainActor
 final class LibrarySyncService: ObservableObject {
@@ -25,22 +25,22 @@ final class LibrarySyncService: ObservableObject {
         case aniListToMAL
         case malToAniList
         /// Overwrite the destination with the source, extras left in place.
-        case replaceAniListWithMAL
-        case replaceMALWithAniList
+        case overwriteAniListFromMAL
+        case overwriteMALFromAniList
         /// Overwrite *and* delete, leaving the destination an exact copy.
         case mirrorAniListFromMAL
         case mirrorMALFromAniList
 
         var id: String { rawValue }
 
-        enum Kind { case merge, copyForward, replace, mirror }
+        enum Kind { case merge, copyForward, overwrite, mirror }
 
         var kind: Kind {
             switch self {
-            case .both:                                       return .merge
-            case .aniListToMAL, .malToAniList:                return .copyForward
-            case .replaceAniListWithMAL, .replaceMALWithAniList: return .replace
-            case .mirrorAniListFromMAL, .mirrorMALFromAniList:   return .mirror
+            case .both:                                              return .merge
+            case .aniListToMAL, .malToAniList:                       return .copyForward
+            case .overwriteAniListFromMAL, .overwriteMALFromAniList: return .overwrite
+            case .mirrorAniListFromMAL, .mirrorMALFromAniList:       return .mirror
             }
         }
 
@@ -49,9 +49,9 @@ final class LibrarySyncService: ObservableObject {
             switch self {
             case .both:
                 return nil
-            case .aniListToMAL, .replaceMALWithAniList, .mirrorMALFromAniList:
+            case .aniListToMAL, .overwriteMALFromAniList, .mirrorMALFromAniList:
                 return .mal
-            case .malToAniList, .replaceAniListWithMAL, .mirrorAniListFromMAL:
+            case .malToAniList, .overwriteAniListFromMAL, .mirrorAniListFromMAL:
                 return .anilist
             }
         }
@@ -64,24 +64,24 @@ final class LibrarySyncService: ObservableObject {
         var writesToMAL: Bool { target == nil || target == .mal }
 
         /// Whether this run can destroy history the app cannot get back.
-        var isDestructive: Bool { kind == .replace || kind == .mirror }
+        var isDestructive: Bool { kind == .overwrite || kind == .mirror }
 
         /// The safe runs and the destructive ones are listed separately, so they never sit in
         /// the same tap target.
         static var syncCases: [Direction] { [.both, .aniListToMAL, .malToAniList] }
-        static var replaceCases: [Direction] { [.replaceAniListWithMAL, .replaceMALWithAniList] }
+        static var overwriteCases: [Direction] { [.overwriteAniListFromMAL, .overwriteMALFromAniList] }
         static var mirrorCases: [Direction] { [.mirrorAniListFromMAL, .mirrorMALFromAniList] }
 
         /// Always reads *source → destination*, so the arrow head points at the account that
-        /// changes. "Replace AniList with MyAnimeList" was ambiguous in English about which of
+        /// changes. "Overwrite AniList with MyAnimeList" was ambiguous in English about which of
         /// the two was about to be overwritten; an arrow isn't.
         var title: String {
             switch self {
             case .both:
                 return "AniList ⇄ MyAnimeList"
-            case .aniListToMAL, .replaceMALWithAniList, .mirrorMALFromAniList:
+            case .aniListToMAL, .overwriteMALFromAniList, .mirrorMALFromAniList:
                 return "AniList → MyAnimeList"
-            case .malToAniList, .replaceAniListWithMAL, .mirrorAniListFromMAL:
+            case .malToAniList, .overwriteAniListFromMAL, .mirrorAniListFromMAL:
                 return "MyAnimeList → AniList"
             }
         }
@@ -91,7 +91,7 @@ final class LibrarySyncService: ObservableObject {
             switch kind {
             case .merge:       return "Merges both, keeping whichever is further along"
             case .copyForward: return "Adds to and advances \(targetName)"
-            case .replace:     return "Overwrites \(targetName)"
+            case .overwrite:   return "Overwrites \(targetName)"
             case .mirror:      return "Overwrites \(targetName) and deletes its extras"
             }
         }
@@ -100,7 +100,7 @@ final class LibrarySyncService: ObservableObject {
             switch kind {
             case .merge:       return "Sync Both Ways"
             case .copyForward: return "Copy to \(targetName)"
-            case .replace:     return "Overwrite \(targetName)?"
+            case .overwrite:   return "Overwrite \(targetName)?"
             case .mirror:      return "Erase and Replace \(targetName)?"
             }
         }
@@ -109,7 +109,7 @@ final class LibrarySyncService: ObservableObject {
             switch kind {
             case .merge:       return "Sync"
             case .copyForward: return "Copy"
-            case .replace:     return "Overwrite \(targetName)"
+            case .overwrite:   return "Overwrite \(targetName)"
             case .mirror:      return "Erase and Replace"
             }
         }
@@ -123,7 +123,7 @@ final class LibrarySyncService: ObservableObject {
                 return "Adds anything missing from \(targetName) and moves its progress forward "
                      + "to match \(sourceName). Titles already further along on \(targetName) "
                      + "are left untouched."
-            case .replace:
+            case .overwrite:
                 return "Overwrites \(targetName) with \(sourceName) — progress, status, score and "
                      + "rewatch count — including where \(targetName) is further along. Titles "
                      + "only \(targetName) has are left alone. This can't be undone."
@@ -175,9 +175,9 @@ final class LibrarySyncService: ObservableObject {
         switch direction.kind {
         case .merge, .copyForward:
             (anilist, mal) = await runSync(direction, pairing)
-        case .replace, .mirror:
-            let plan = LibrarySyncPlanner.replacePlan(
-                from: pairing, replacing: direction.target ?? .mal,
+        case .overwrite, .mirror:
+            let plan = LibrarySyncPlanner.overwritePlan(
+                from: pairing, overwriting: direction.target ?? .mal,
                 sourceMediaIds: direction.target == .mal
                     ? Set(anilistEntries.map(\.media.id)) : Set(malEntries.map(\.media.id)),
                 deletingExtras: direction.kind == .mirror)
@@ -188,10 +188,10 @@ final class LibrarySyncService: ObservableObject {
         report(direction, anilist: anilist, mal: mal)
     }
 
-    /// Works out everything a replace or mirror would do **without writing anything**, so it can
+    /// Works out everything an overwrite or mirror would do **without writing anything**, so it can
     /// be shown to somebody first. These runs can't be undone; this is the last point at which a
     /// mistake is still free.
-    func preview(_ direction: Direction) async -> LibraryReplacePlan? {
+    func preview(_ direction: Direction) async -> LibraryOverwritePlan? {
         guard !isRunning, direction.isDestructive else { return nil }
         isRunning = true
         statusText = "Checking…"
@@ -205,8 +205,8 @@ final class LibrarySyncService: ObservableObject {
             anilistIdForMALId: (direction.target == .anilist || direction.kind == .mirror)
                 ? await anilistIds(for: malEntries) : [:]
         )
-        return LibrarySyncPlanner.replacePlan(
-            from: pairing, replacing: direction.target ?? .mal,
+        return LibrarySyncPlanner.overwritePlan(
+            from: pairing, overwriting: direction.target ?? .mal,
             sourceMediaIds: direction.target == .mal
                 ? Set(anilistEntries.map(\.media.id)) : Set(malEntries.map(\.media.id)),
             deletingExtras: direction.kind == .mirror)
@@ -214,7 +214,7 @@ final class LibrarySyncService: ObservableObject {
 
     /// Carries out exactly the plan that was shown — not a freshly recomputed one, so what gets
     /// written is what was agreed to.
-    func apply(_ plan: LibraryReplacePlan, for direction: Direction) async {
+    func apply(_ plan: LibraryOverwritePlan, for direction: Direction) async {
         guard !isRunning else { return }
         isRunning = true
         defer { isRunning = false; statusText = "" }
@@ -288,10 +288,10 @@ final class LibrarySyncService: ObservableObject {
         }
     }
 
-    // MARK: - Replace and mirror runs
+    // MARK: - Overwrite and mirror runs
 
     /// Runs a plan: overwrites first, then removals.
-    private func execute(_ plan: LibraryReplacePlan) async -> LibrarySyncSummary {
+    private func execute(_ plan: LibraryOverwritePlan) async -> LibrarySyncSummary {
         var summary = LibrarySyncSummary()
         summary.unmatched = plan.unmatched
         summary.upToDate = plan.unchanged

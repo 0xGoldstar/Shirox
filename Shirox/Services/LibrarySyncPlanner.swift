@@ -21,9 +21,9 @@ enum LibrarySide {
     var name: String { self == .anilist ? "AniList" : "MyAnimeList" }
 }
 
-/// What a *replace* run should do with a single title. Unlike ``LibrarySyncDecision`` this
+/// What an *overwrite* run should do with a single title. Unlike ``LibrarySyncDecision`` this
 /// carries no notion of "ahead": the destination is made to match the source, full stop.
-enum LibraryReplaceDecision: Equatable {
+enum LibraryOverwriteDecision: Equatable {
     case create(status: MediaListStatus, progress: Int, score: Double, timesRewatched: Int?)
     case overwrite(status: MediaListStatus, progress: Int, score: Double, timesRewatched: Int?)
     /// Already identical. Not a safety check — it keeps a re-run from spending hundreds of
@@ -31,7 +31,7 @@ enum LibraryReplaceDecision: Equatable {
     case skipIdentical
 }
 
-/// One write a replace or mirror run intends to make, resolved down to what the API needs.
+/// One write an overwrite or mirror run intends to make, resolved down to what the API needs.
 struct PlannedWrite: Equatable {
     let side: LibrarySide
     /// Media id on `side` — what both services' update calls take.
@@ -54,9 +54,9 @@ struct PlannedDeletion: Equatable {
     let title: String
 }
 
-/// Everything a replace or mirror run would do, worked out before anything is written, so it can
+/// Everything an overwrite or mirror run would do, worked out before anything is written, so it can
 /// be shown to somebody before they commit to it.
-struct LibraryReplacePlan {
+struct LibraryOverwritePlan {
     var writes: [PlannedWrite] = []
     var deletions: [PlannedDeletion] = []
     /// Entries already identical, which the run will skip.
@@ -256,7 +256,7 @@ enum LibrarySyncPlanner {
     /// Every safeguard in ``decide(source:target:)`` is deliberately absent here: progress moves
     /// down as readily as up, and an unrated source clears a rating. That is what the caller
     /// asked for, and it cannot be undone from inside the app.
-    static func replace(source: LibraryEntry, target: LibraryEntry?) -> LibraryReplaceDecision {
+    static func overwrite(source: LibraryEntry, target: LibraryEntry?) -> LibraryOverwriteDecision {
         guard let target else {
             return .create(
                 status: source.status, progress: source.progress,
@@ -274,26 +274,26 @@ enum LibrarySyncPlanner {
             score: source.score, timesRewatched: source.timesRewatched)
     }
 
-    /// Everything a replace or mirror run would do, without doing any of it.
+    /// Everything an overwrite or mirror run would do, without doing any of it.
     ///
     /// Working the whole plan out up front is what lets the app show somebody the damage before
     /// they authorise it — these runs can't be undone, so "N entries will be deleted, here they
     /// are" is the last point at which a mistake is still cheap.
-    static func replacePlan(
+    static func overwritePlan(
         from pairing: LibraryPairing,
-        replacing target: LibrarySide,
+        overwriting target: LibrarySide,
         sourceMediaIds: Set<Int>,
         deletingExtras: Bool
-    ) -> LibraryReplacePlan {
+    ) -> LibraryOverwritePlan {
         let intoMAL = target == .mal
-        var plan = LibraryReplacePlan()
+        var plan = LibraryOverwritePlan()
         plan.unmatched = intoMAL ? pairing.unmatchedAniList : pairing.unmatchedMAL
 
         for pair in pairing.pairs {
             guard let source = intoMAL ? pair.anilist : pair.mal else { continue }
             let existing = intoMAL ? pair.mal : pair.anilist
 
-            switch replace(source: source, target: existing) {
+            switch overwrite(source: source, target: existing) {
             case .skipIdentical:
                 plan.unchanged += 1
             case .create(let status, let progress, let score, let timesRewatched),
@@ -311,7 +311,7 @@ enum LibrarySyncPlanner {
         guard deletingExtras else { return plan }
 
         plan.keptUnverified = intoMAL ? pairing.unmatchedMAL.count : pairing.unmatchedAniList.count
-        plan.deletions = deletions(from: pairing, replacing: target, sourceMediaIds: sourceMediaIds)
+        plan.deletions = deletions(from: pairing, overwriting: target, sourceMediaIds: sourceMediaIds)
             .compactMap { pair in
                 guard let doomed = intoMAL ? pair.mal : pair.anilist else { return nil }
                 return PlannedDeletion(
@@ -332,7 +332,7 @@ enum LibrarySyncPlanner {
     /// is absent. Anything unverifiable is kept.
     static func deletions(
         from pairing: LibraryPairing,
-        replacing target: LibrarySide,
+        overwriting target: LibrarySide,
         sourceMediaIds: Set<Int>
     ) -> [LibraryPair] {
         pairing.pairs.filter { pair in
