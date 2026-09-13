@@ -15,10 +15,20 @@ enum LibrarySyncDecision: Equatable {
     case skipLeftDiffering(source: MediaListStatus, target: MediaListStatus)
 }
 
-/// Which of the two accounts a decision applies to.
-enum LibrarySide {
+/// Which account a decision applies to.
+///
+/// `String`-backed and `CaseIterable` so the pairing containers below can be keyed by side and
+/// iterated in a stable order. The name used to be a ternary — `self == .anilist ? … : …` —
+/// which silently labelled any future third side "MyAnimeList".
+enum LibrarySide: String, CaseIterable {
     case anilist, mal
-    var name: String { self == .anilist ? "AniList" : "MyAnimeList" }
+
+    var name: String {
+        switch self {
+        case .anilist: return "AniList"
+        case .mal:     return "MyAnimeList"
+        }
+    }
 }
 
 /// What an *overwrite* run should do with a single title. Unlike ``LibrarySyncDecision`` this
@@ -69,26 +79,34 @@ struct LibraryOverwritePlan {
     var isEmpty: Bool { writes.isEmpty && deletions.isEmpty }
 }
 
-/// One title as it stands on both services, ready to be merged. Either side may be nil when
-/// only one service knows the title; the ids are always present, because without somewhere to
-/// write to there is nothing to merge.
+/// One title as it stands on each side, ready to be merged.
+///
+/// A side may have an id but no entry, which is how "that service has never seen this title"
+/// is represented. A side with neither is simply absent from both dictionaries — there is
+/// nowhere to write to, so there is nothing to merge.
 struct LibraryPair {
-    let anilistId: Int
-    let malId: Int
-    var anilist: LibraryEntry?
-    var mal: LibraryEntry?
+    /// This title's id on each side that has an id for it.
+    var ids: [LibrarySide: Int]
+    /// The entry each side actually holds. A side can have an id here but no entry — that is
+    /// exactly how "the target has never seen this title" is represented, and `decide` relies on
+    /// it by taking an optional target.
+    var entries: [LibrarySide: LibraryEntry]
+
+    func id(on side: LibrarySide) -> Int? { ids[side] }
+    func entry(on side: LibrarySide) -> LibraryEntry? { entries[side] }
 }
 
 /// The union of both libraries, plus the titles that could not be placed.
 struct LibraryPairing {
     var pairs: [LibraryPair] = []
-    /// AniList titles with no MyAnimeList id, so there was nothing to write to there.
-    var unmatchedAniList: [String] = []
-    /// MyAnimeList titles with no AniList id.
-    var unmatchedMAL: [String] = []
+    /// Per side: that side's titles with no counterpart id, so there was nothing to write to.
+    var unmatchedBySide: [LibrarySide: [String]] = [:]
 
-    /// Everything that couldn't be placed, for a run that covers both directions.
-    var unmatched: [String] { unmatchedAniList + unmatchedMAL }
+    func unmatched(on side: LibrarySide) -> [String] { unmatchedBySide[side] ?? [] }
+
+    /// Everything that couldn't be placed, for a run that covers every direction. Ordered by
+    /// `LibrarySide.allCases` so a summary sentence reads the same way on every run.
+    var unmatched: [String] { LibrarySide.allCases.flatMap { unmatched(on: $0) } }
 }
 
 /// Pure decision logic for merging a tracking library between AniList and MyAnimeList.
@@ -228,22 +246,26 @@ enum LibrarySyncPlanner {
 
         for entry in anilist {
             guard let malId = malIdForAniListId[entry.media.id] else {
-                pairing.unmatchedAniList.append(entry.media.title.displayTitle)
+                pairing.unmatchedBySide[.anilist, default: []].append(entry.media.title.displayTitle)
                 continue
             }
             claimed.insert(malId)
-            pairing.pairs.append(LibraryPair(
-                anilistId: entry.media.id, malId: malId, anilist: entry, mal: malByID[malId]))
+            var pair = LibraryPair(
+                ids: [.anilist: entry.media.id, .mal: malId],
+                entries: [.anilist: entry])
+            if let malEntry = malByID[malId] { pair.entries[.mal] = malEntry }
+            pairing.pairs.append(pair)
         }
 
         // Whatever MyAnimeList has that the pass above didn't already account for.
         for entry in mal where !claimed.contains(entry.media.id) {
             guard let anilistId = anilistIdForMALId[entry.media.id] else {
-                pairing.unmatchedMAL.append(entry.media.title.displayTitle)
+                pairing.unmatchedBySide[.mal, default: []].append(entry.media.title.displayTitle)
                 continue
             }
             pairing.pairs.append(LibraryPair(
-                anilistId: anilistId, malId: entry.media.id, anilist: nil, mal: entry))
+                ids: [.anilist: anilistId, .mal: entry.media.id],
+                entries: [.mal: entry]))
         }
 
         return pairing
@@ -281,27 +303,28 @@ enum LibrarySyncPlanner {
     /// are" is the last point at which a mistake is still cheap.
     static func overwritePlan(
         from pairing: LibraryPairing,
-        overwriting target: LibrarySide,
+        writing target: LibrarySide,
+        reading source: LibrarySide,
         sourceMediaIds: Set<Int>,
         deletingExtras: Bool
     ) -> LibraryOverwritePlan {
-        let intoMAL = target == .mal
         var plan = LibraryOverwritePlan()
-        plan.unmatched = intoMAL ? pairing.unmatchedAniList : pairing.unmatchedMAL
+        plan.unmatched = pairing.unmatched(on: source)
 
         for pair in pairing.pairs {
-            guard let source = intoMAL ? pair.anilist : pair.mal else { continue }
-            let existing = intoMAL ? pair.mal : pair.anilist
+            guard let sourceEntry = pair.entry(on: source) else { continue }
+            guard let targetId = pair.id(on: target) else { continue }
+            let existing = pair.entry(on: target)
 
-            switch overwrite(source: source, target: existing) {
+            switch overwrite(source: sourceEntry, target: existing) {
             case .skipIdentical:
                 plan.unchanged += 1
             case .create(let status, let progress, let score, let timesRewatched),
                  .overwrite(let status, let progress, let score, let timesRewatched):
                 plan.writes.append(PlannedWrite(
                     side: target,
-                    id: intoMAL ? pair.malId : pair.anilistId,
-                    title: source.media.title.displayTitle,
+                    id: targetId,
+                    title: sourceEntry.media.title.displayTitle,
                     isNew: existing == nil,
                     status: status, progress: progress,
                     score: score, timesRewatched: timesRewatched))
@@ -310,17 +333,25 @@ enum LibrarySyncPlanner {
 
         guard deletingExtras else { return plan }
 
-        plan.keptUnverified = intoMAL ? pairing.unmatchedMAL.count : pairing.unmatchedAniList.count
-        plan.deletions = deletions(from: pairing, overwriting: target, sourceMediaIds: sourceMediaIds)
+        plan.keptUnverified = pairing.unmatched(on: target).count
+        plan.deletions = deletions(
+            from: pairing, writing: target, reading: source, sourceMediaIds: sourceMediaIds)
             .compactMap { pair in
-                guard let doomed = intoMAL ? pair.mal : pair.anilist else { return nil }
+                guard let doomed = pair.entry(on: target),
+                      let id = deletionId(for: target, pair: pair, entry: doomed) else { return nil }
                 return PlannedDeletion(
-                    side: target,
-                    // MyAnimeList deletes by media id; AniList needs the list entry's own id.
-                    id: intoMAL ? pair.malId : doomed.id,
-                    title: doomed.media.title.displayTitle)
+                    side: target, id: id, title: doomed.media.title.displayTitle)
             }
         return plan
+    }
+
+    /// The id `side` deletes by. AniList needs the *list entry's* own id; MyAnimeList deletes by
+    /// media id. Resolved in one place so a caller cannot pass the wrong one.
+    static func deletionId(for side: LibrarySide, pair: LibraryPair, entry: LibraryEntry) -> Int? {
+        switch side {
+        case .anilist: return entry.id
+        case .mal:     return pair.id(on: .mal)
+        }
     }
 
     /// The destination entries a mirror run should delete.
@@ -332,16 +363,17 @@ enum LibrarySyncPlanner {
     /// is absent. Anything unverifiable is kept.
     static func deletions(
         from pairing: LibraryPairing,
-        overwriting target: LibrarySide,
+        writing target: LibrarySide,
+        reading source: LibrarySide,
         sourceMediaIds: Set<Int>
     ) -> [LibraryPair] {
         pairing.pairs.filter { pair in
-            switch target {
-            case .mal:
-                return pair.mal != nil && pair.anilist == nil && !sourceMediaIds.contains(pair.anilistId)
-            case .anilist:
-                return pair.anilist != nil && pair.mal == nil && !sourceMediaIds.contains(pair.malId)
-            }
+            // The target holds it and the source does not — necessary, but not sufficient.
+            guard pair.entry(on: target) != nil, pair.entry(on: source) == nil else { return false }
+            // Deletion needs positive proof: the entry resolves to a source-side id, and that id
+            // really is absent from the source. No id at all means unverifiable, so it is kept.
+            guard let sourceId = pair.id(on: source) else { return false }
+            return !sourceMediaIds.contains(sourceId)
         }
     }
 }

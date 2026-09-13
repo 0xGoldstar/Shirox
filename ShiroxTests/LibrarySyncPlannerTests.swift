@@ -262,10 +262,10 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [900: 100])
 
         XCTAssertEqual(pairing.pairs.count, 1)
-        XCTAssertEqual(pairing.pairs.first?.anilistId, 100)
-        XCTAssertEqual(pairing.pairs.first?.malId, 900)
-        XCTAssertEqual(pairing.pairs.first?.anilist?.progress, 5)
-        XCTAssertEqual(pairing.pairs.first?.mal?.progress, 2)
+        XCTAssertEqual(pairing.pairs.first?.id(on: .anilist), 100)
+        XCTAssertEqual(pairing.pairs.first?.id(on: .mal), 900)
+        XCTAssertEqual(pairing.pairs.first?.entry(on: .anilist)?.progress, 5)
+        XCTAssertEqual(pairing.pairs.first?.entry(on: .mal)?.progress, 2)
         XCTAssertTrue(pairing.unmatched.isEmpty)
     }
 
@@ -279,12 +279,12 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [901: 101])
 
         XCTAssertEqual(pairing.pairs.count, 2)
-        let anilistOnly = pairing.pairs.first { $0.anilistId == 100 }
-        XCTAssertNotNil(anilistOnly?.anilist)
-        XCTAssertNil(anilistOnly?.mal)
-        let malOnly = pairing.pairs.first { $0.anilistId == 101 }
-        XCTAssertNil(malOnly?.anilist)
-        XCTAssertNotNil(malOnly?.mal)
+        let anilistOnly = pairing.pairs.first { $0.id(on: .anilist) == 100 }
+        XCTAssertNotNil(anilistOnly?.entry(on: .anilist))
+        XCTAssertNil(anilistOnly?.entry(on: .mal))
+        let malOnly = pairing.pairs.first { $0.id(on: .anilist) == 101 }
+        XCTAssertNil(malOnly?.entry(on: .anilist))
+        XCTAssertNotNil(malOnly?.entry(on: .mal))
     }
 
     /// A title present on both must not also come back as a MyAnimeList-only entry.
@@ -392,9 +392,9 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [901: 101])
 
         let deletions = LibrarySyncPlanner.deletions(
-            from: pairing, overwriting: .mal, sourceMediaIds: [100])
+            from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100])
 
-        XCTAssertEqual(deletions.map(\.malId), [901])
+        XCTAssertEqual(deletions.compactMap { $0.id(on: .mal) }, [901])
     }
 
     func testMirrorKeepsEntriesTheSourceStillHas() {
@@ -405,7 +405,7 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [900: 100])
 
         let deletions = LibrarySyncPlanner.deletions(
-            from: pairing, overwriting: .mal, sourceMediaIds: [100])
+            from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100])
 
         XCTAssertTrue(deletions.isEmpty)
     }
@@ -420,10 +420,10 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [:])
 
         let deletions = LibrarySyncPlanner.deletions(
-            from: pairing, overwriting: .mal, sourceMediaIds: [100])
+            from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100])
 
         XCTAssertTrue(deletions.isEmpty)
-        XCTAssertEqual(pairing.unmatchedMAL, ["Title 902"])
+        XCTAssertEqual(pairing.unmatched(on: .mal), ["Title 902"])
     }
 
     /// THE ONE THAT MATTERS: the source *does* have this title, but its own id lookup failed, so
@@ -436,7 +436,7 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [901: 101])
 
         let deletions = LibrarySyncPlanner.deletions(
-            from: pairing, overwriting: .mal, sourceMediaIds: [100, 101])
+            from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100, 101])
 
         XCTAssertTrue(deletions.isEmpty)
     }
@@ -449,9 +449,9 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [900: 100])
 
         let deletions = LibrarySyncPlanner.deletions(
-            from: pairing, overwriting: .anilist, sourceMediaIds: [900])
+            from: pairing, writing: .anilist, reading: .mal, sourceMediaIds: [900])
 
-        XCTAssertEqual(deletions.map(\.anilistId), [101])
+        XCTAssertEqual(deletions.compactMap { $0.id(on: .anilist) }, [101])
     }
 
     func testSummarySentenceReportsDeletionsAndUnverifiedEntries() {
@@ -472,7 +472,7 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [:])
 
         let plan = LibrarySyncPlanner.overwritePlan(
-            from: pairing, overwriting: .mal, sourceMediaIds: [100, 101], deletingExtras: false)
+            from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100, 101], deletingExtras: false)
 
         XCTAssertEqual(plan.writes.count, 2)
         XCTAssertEqual(plan.writes.first { $0.id == 900 }?.isNew, false)
@@ -488,7 +488,7 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [900: 100])
 
         let plan = LibrarySyncPlanner.overwritePlan(
-            from: pairing, overwriting: .mal, sourceMediaIds: [100], deletingExtras: false)
+            from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100], deletingExtras: false)
 
         XCTAssertTrue(plan.writes.isEmpty)
         XCTAssertEqual(plan.unchanged, 1)
@@ -503,7 +503,7 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [901: 101])
 
         let plan = LibrarySyncPlanner.overwritePlan(
-            from: pairing, overwriting: .mal, sourceMediaIds: [100], deletingExtras: false)
+            from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100], deletingExtras: false)
 
         XCTAssertTrue(plan.deletions.isEmpty)
     }
@@ -516,7 +516,7 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [901: 101])
 
         let plan = LibrarySyncPlanner.overwritePlan(
-            from: pairing, overwriting: .mal, sourceMediaIds: [100], deletingExtras: true)
+            from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100], deletingExtras: true)
 
         XCTAssertEqual(plan.deletions.map(\.title), ["Title 901"])
         XCTAssertEqual(plan.deletions.map(\.id), [901])
@@ -532,7 +532,7 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [:])
 
         let plan = LibrarySyncPlanner.overwritePlan(
-            from: pairing, overwriting: .anilist, sourceMediaIds: [], deletingExtras: true)
+            from: pairing, writing: .anilist, reading: .mal, sourceMediaIds: [], deletingExtras: true)
 
         XCTAssertEqual(plan.deletions.map(\.id), [5000])
     }
@@ -545,7 +545,7 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [:])
 
         let plan = LibrarySyncPlanner.overwritePlan(
-            from: pairing, overwriting: .mal, sourceMediaIds: [100], deletingExtras: true)
+            from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100], deletingExtras: true)
 
         XCTAssertEqual(plan.unmatched, ["Title 100"])
         XCTAssertEqual(plan.keptUnverified, 1)
