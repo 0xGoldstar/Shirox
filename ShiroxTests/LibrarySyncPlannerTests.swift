@@ -262,10 +262,10 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [900: 100])
 
         XCTAssertEqual(pairing.pairs.count, 1)
-        XCTAssertEqual(pairing.pairs.first?.anilistId, 100)
-        XCTAssertEqual(pairing.pairs.first?.malId, 900)
-        XCTAssertEqual(pairing.pairs.first?.anilist?.progress, 5)
-        XCTAssertEqual(pairing.pairs.first?.mal?.progress, 2)
+        XCTAssertEqual(pairing.pairs.first?.id(on: .anilist), 100)
+        XCTAssertEqual(pairing.pairs.first?.id(on: .mal), 900)
+        XCTAssertEqual(pairing.pairs.first?.entry(on: .anilist)?.progress, 5)
+        XCTAssertEqual(pairing.pairs.first?.entry(on: .mal)?.progress, 2)
         XCTAssertTrue(pairing.unmatched.isEmpty)
     }
 
@@ -279,12 +279,12 @@ final class LibrarySyncPlannerTests: XCTestCase {
             anilistIdForMALId: [901: 101])
 
         XCTAssertEqual(pairing.pairs.count, 2)
-        let anilistOnly = pairing.pairs.first { $0.anilistId == 100 }
-        XCTAssertNotNil(anilistOnly?.anilist)
-        XCTAssertNil(anilistOnly?.mal)
-        let malOnly = pairing.pairs.first { $0.anilistId == 101 }
-        XCTAssertNil(malOnly?.anilist)
-        XCTAssertNotNil(malOnly?.mal)
+        let anilistOnly = pairing.pairs.first { $0.id(on: .anilist) == 100 }
+        XCTAssertNotNil(anilistOnly?.entry(on: .anilist))
+        XCTAssertNil(anilistOnly?.entry(on: .mal))
+        let malOnly = pairing.pairs.first { $0.id(on: .anilist) == 101 }
+        XCTAssertNil(malOnly?.entry(on: .anilist))
+        XCTAssertNotNil(malOnly?.entry(on: .mal))
     }
 
     /// A title present on both must not also come back as a MyAnimeList-only entry.
@@ -394,7 +394,7 @@ final class LibrarySyncPlannerTests: XCTestCase {
         let deletions = LibrarySyncPlanner.deletions(
             from: pairing, overwriting: .mal, sourceMediaIds: [100])
 
-        XCTAssertEqual(deletions.map(\.malId), [901])
+        XCTAssertEqual(deletions.compactMap { $0.id(on: .mal) }, [901])
     }
 
     func testMirrorKeepsEntriesTheSourceStillHas() {
@@ -423,7 +423,7 @@ final class LibrarySyncPlannerTests: XCTestCase {
             from: pairing, overwriting: .mal, sourceMediaIds: [100])
 
         XCTAssertTrue(deletions.isEmpty)
-        XCTAssertEqual(pairing.unmatchedMAL, ["Title 902"])
+        XCTAssertEqual(pairing.unmatched(on: .mal), ["Title 902"])
     }
 
     /// THE ONE THAT MATTERS: the source *does* have this title, but its own id lookup failed, so
@@ -451,7 +451,7 @@ final class LibrarySyncPlannerTests: XCTestCase {
         let deletions = LibrarySyncPlanner.deletions(
             from: pairing, overwriting: .anilist, sourceMediaIds: [900])
 
-        XCTAssertEqual(deletions.map(\.anilistId), [101])
+        XCTAssertEqual(deletions.compactMap { $0.id(on: .anilist) }, [101])
     }
 
     func testSummarySentenceReportsDeletionsAndUnverifiedEntries() {

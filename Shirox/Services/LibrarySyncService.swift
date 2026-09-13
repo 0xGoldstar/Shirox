@@ -232,29 +232,30 @@ final class LibrarySyncService: ObservableObject {
     ) async -> (anilist: LibrarySyncSummary, mal: LibrarySyncSummary) {
         var anilist = LibrarySyncSummary()
         var mal = LibrarySyncSummary()
-        if direction.writesToMAL { mal.unmatched = pairing.unmatchedAniList }
-        if direction.writesToAniList { anilist.unmatched = pairing.unmatchedMAL }
+        if direction.writesToMAL { mal.unmatched = pairing.unmatched(on: .anilist) }
+        if direction.writesToAniList { anilist.unmatched = pairing.unmatched(on: .mal) }
 
         // A pair with nothing on the side being read from has nothing to contribute.
-        let workable = pairing.pairs.filter {
-            (direction.writesToMAL && $0.anilist != nil) || (direction.writesToAniList && $0.mal != nil)
+        let workable = pairing.pairs.filter { pair in
+            (direction.writesToMAL && pair.entry(on: .anilist) != nil)
+                || (direction.writesToAniList && pair.entry(on: .mal) != nil)
         }
 
         for (index, pair) in workable.enumerated() {
             statusText = "Syncing \(index + 1) of \(workable.count)"
 
-            if direction.writesToMAL, let source = pair.anilist {
+            if direction.writesToMAL, let source = pair.entry(on: .anilist), let malId = pair.id(on: .mal) {
                 mal.record(await apply(
-                    LibrarySyncPlanner.decide(source: source, target: pair.mal),
-                    to: .mal, id: pair.malId,
-                    title: source.media.title.displayTitle, hadEntry: pair.mal != nil))
+                    LibrarySyncPlanner.decide(source: source, target: pair.entry(on: .mal)),
+                    to: .mal, id: malId,
+                    title: source.media.title.displayTitle, hadEntry: pair.entry(on: .mal) != nil))
             }
 
-            if direction.writesToAniList, let source = pair.mal {
+            if direction.writesToAniList, let source = pair.entry(on: .mal), let anilistId = pair.id(on: .anilist) {
                 anilist.record(await apply(
-                    LibrarySyncPlanner.decide(source: source, target: pair.anilist),
-                    to: .anilist, id: pair.anilistId,
-                    title: source.media.title.displayTitle, hadEntry: pair.anilist != nil))
+                    LibrarySyncPlanner.decide(source: source, target: pair.entry(on: .anilist)),
+                    to: .anilist, id: anilistId,
+                    title: source.media.title.displayTitle, hadEntry: pair.entry(on: .anilist) != nil))
             }
         }
         return (anilist, mal)
