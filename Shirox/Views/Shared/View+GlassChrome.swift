@@ -97,8 +97,9 @@ extension View {
     }
 
     /// A navigation title that stays out of the way until it's needed: nothing sits over
-    /// the artwork, and the title fades in on a blurred bar only once the hero title
-    /// marked by `heroTitleAnchor` has slid underneath it.
+    /// the artwork, and the title fades in — bare, over the scroll view's soft edge
+    /// effect — only once the hero title marked by `heroTitleAnchor` has slid
+    /// underneath it.
     ///
     /// Detail screens run their banner full-bleed behind a transparent navigation bar,
     /// where a permanent inline title both fought the artwork for contrast and repeated
@@ -154,16 +155,18 @@ private struct ScrollAwareNavTitle: ViewModifier {
             .font(.headline)
             .lineLimit(1)
             .truncationMode(.tail)
+            // The bar carries no background of its own. These screens set
+            // `softScrollEdges`, which already fades the artwork out under the toolbar;
+            // a material slab and a hairline would paint the crisp `.hard` edge back on
+            // top of it the moment the title appeared. A halo in the window background
+            // colour — light behind dark text, dark behind light — keeps the title
+            // legible against whatever is still showing through the fade.
+            .shadow(color: .adaptiveSystemBackground, radius: 2)
+            .shadow(color: .adaptiveSystemBackground, radius: 7)
             // Keeps the title clear of the back button and the trailing toolbar items.
             .padding(.horizontal, 72)
             .frame(maxWidth: .infinity, minHeight: Self.barHeight)
             .padding(.top, topInset)
-            .background(.ultraThinMaterial)
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(Color.primary.opacity(0.1))
-                    .frame(height: 0.5)
-            }
             // Driven straight off scroll position, so it needs no animation of its own:
             // the fade already tracks the finger.
             .opacity(progress)
