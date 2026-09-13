@@ -112,7 +112,7 @@ struct PlayerBottomBar: View {
             .foregroundStyle(.white)
             .padding(.horizontal, isPad ? 20 : 14)
             .frame(height: isPad ? 48 : 36)
-            .glassChrome(Capsule(), enabled: playerLiquidGlass, off: Color.white.opacity(0.2))
+            .mediaGlassChrome(Capsule(), enabled: playerLiquidGlass, off: Color.white.opacity(0.2))
         }
         .buttonStyle(.plain)
         .opacity(hasActiveSkipSegment ? 0 : 1)
@@ -199,7 +199,7 @@ struct PlayerBottomBar: View {
         }
         .padding(.horizontal, isPad ? 6 : 4)
         .padding(.vertical, 1)
-        .glassChrome(Capsule(), enabled: playerLiquidGlass, off: Color.white.opacity(0.2))
+        .mediaGlassChrome(Capsule(), enabled: playerLiquidGlass, off: Color.white.opacity(0.2))
     }
 
     // MARK: - Helpers

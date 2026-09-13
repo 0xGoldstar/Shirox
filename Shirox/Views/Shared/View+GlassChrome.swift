@@ -1,5 +1,11 @@
 import SwiftUI
 
+/// The appearance the player's and reader's glass is resolved against.
+///
+/// Lives in one place because which of the two reads correctly is a judgement about
+/// how the material behaves over video and artwork, not something the code can derive.
+private let mediaChromeAppearance: ColorScheme = .light
+
 extension View {
     /// Liquid Glass on iOS/macOS 26+ when `enabled`; otherwise the caller's
     /// classic `off` background. Below 26 the glass branch is unreachable, so
@@ -9,12 +15,14 @@ extension View {
     ///   - shape: the shape the background/glass is clipped to (e.g. `Circle()`, `Capsule()`).
     ///   - enabled: whether Liquid Glass is requested (from the relevant `@AppStorage` toggle).
     ///   - tint: optional colored wash for the glass / classic fill (used for active-state buttons).
+    ///   - appearance: pins the appearance the glass resolves against; nil follows the device.
     ///   - off: the classic background used when glass is unavailable or disabled.
     @ViewBuilder
     func glassChrome(
         _ shape: some Shape,
         enabled: Bool,
         tint: Color? = nil,
+        appearance: ColorScheme? = nil,
         off: some ShapeStyle
     ) -> some View {
         if enabled, #available(iOS 26.0, macOS 26.0, *) {
@@ -24,8 +32,40 @@ extension View {
             // full-screen seek view — which hides the controls instead).
             glassEffect(.regular.tint(tint).interactive(), in: shape)
                 .contentShape(shape)
+                .glassAppearance(appearance)
         } else {
             background(shape.fill(off))
+        }
+    }
+
+    /// Glass for controls laid over media — the video player and the manga reader.
+    ///
+    /// Both draw their symbols straight onto video or artwork in a fixed colour, so the
+    /// chrome behind them has to resolve the same way every time to stay legible. Regular
+    /// glass is adaptive and the device's appearance moves it, which over dark content
+    /// leaves the symbols washing out against chrome that has gone bright. Pinning it takes
+    /// the device setting out of the question: the controls look the same either way.
+    ///
+    /// Only the glass is pinned. The classic `off` fallback still follows the device, and
+    /// ordinary app chrome — the download toast, say — goes on calling ``glassChrome``.
+    func mediaGlassChrome(
+        _ shape: some Shape,
+        enabled: Bool,
+        tint: Color? = nil,
+        off: some ShapeStyle
+    ) -> some View {
+        glassChrome(shape, enabled: enabled, tint: tint, appearance: mediaChromeAppearance, off: off)
+    }
+
+    /// Set *after* `glassEffect` so it sits above the glass in the view tree, which is the
+    /// direction environment values travel; applied underneath it, the glass would never
+    /// see it. Nil leaves whatever the surrounding screen already established.
+    @ViewBuilder
+    fileprivate func glassAppearance(_ scheme: ColorScheme?) -> some View {
+        if let scheme {
+            environment(\.colorScheme, scheme)
+        } else {
+            self
         }
     }
 }

@@ -1127,8 +1127,8 @@ private extension View {
     /// button); pass `nil` for plain glass.
     @ViewBuilder
     func readerGlass(_ shape: some Shape, tint: Color? = nil, enabled: Bool) -> some View {
-        glassChrome(shape, enabled: enabled, tint: tint,
-                    off: tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.ultraThinMaterial))
+        mediaGlassChrome(shape, enabled: enabled, tint: tint,
+                         off: tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.ultraThinMaterial))
     }
 }
 #endif

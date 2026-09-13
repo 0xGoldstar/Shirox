@@ -88,7 +88,7 @@ struct CastOverlayView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
-                .glassChrome(Capsule(), enabled: playerLiquidGlass, off: .ultraThinMaterial)
+                .mediaGlassChrome(Capsule(), enabled: playerLiquidGlass, off: .ultraThinMaterial)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 32)

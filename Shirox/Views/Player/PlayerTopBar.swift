@@ -40,7 +40,7 @@ struct PlayerTopBar: View {
                             .font(.system(size: isPad ? 24 : 18, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(width: isPad ? 56 : 44, height: isPad ? 56 : 44)
-                            .glassChrome(Circle(), enabled: playerLiquidGlass, off: Color.white.opacity(0.25))
+                            .mediaGlassChrome(Circle(), enabled: playerLiquidGlass, off: Color.white.opacity(0.25))
                             .shadow(color: .black.opacity(0.3), radius: 6)
                     }
                     .buttonStyle(.plain)
@@ -62,7 +62,7 @@ struct PlayerTopBar: View {
                             .padding(.vertical, isPad ? 12 : 8)
                     }
                 }
-                .glassChrome(Capsule(), enabled: playerLiquidGlass, off: Color.white.opacity(0.2))
+                .mediaGlassChrome(Capsule(), enabled: playerLiquidGlass, off: Color.white.opacity(0.2))
             }
         }
         .padding(.horizontal, isPad ? 30 : 20)

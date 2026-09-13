@@ -24,7 +24,7 @@ struct PlayerSkipButton: View {
             .foregroundStyle(.white)
             .padding(.horizontal, isPad ? 20 : 14)
             .frame(height: isPad ? 48 : 36)
-            .glassChrome(Capsule(), enabled: playerLiquidGlass, off: Color.white.opacity(0.2))
+            .mediaGlassChrome(Capsule(), enabled: playerLiquidGlass, off: Color.white.opacity(0.2))
         }
         .buttonStyle(.plain)
     }

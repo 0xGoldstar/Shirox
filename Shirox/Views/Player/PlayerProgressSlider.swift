@@ -112,7 +112,7 @@ struct PlayerProgressSlider: View {
                 ZStack(alignment: .leading) {
                     Color.clear
                         .frame(width: subWidth, height: barHeight)
-                        .glassChrome(RoundedRectangle(cornerRadius: r), enabled: playerLiquidGlass, off: Color.white.opacity(0.2))
+                        .mediaGlassChrome(RoundedRectangle(cornerRadius: r), enabled: playerLiquidGlass, off: Color.white.opacity(0.2))
                     RoundedRectangle(cornerRadius: r)
                         .fill(Color.white.opacity(0.5))
                         .frame(width: subBarFill(L: L, R: R, value: buffered, subWidth: subWidth))

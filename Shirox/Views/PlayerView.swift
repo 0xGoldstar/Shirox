@@ -782,7 +782,7 @@ struct PlayerView: View {
                 Text("2× Speed").font(.caption.weight(.semibold))
             }
             .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 6)
-            .glassChrome(Capsule(), enabled: playerLiquidGlass, off: .ultraThinMaterial)
+            .mediaGlassChrome(Capsule(), enabled: playerLiquidGlass, off: .ultraThinMaterial)
             Spacer()
         }
         // Sits just below the Dynamic Island / notch. Controls are hidden while
@@ -815,7 +815,7 @@ struct PlayerView: View {
                 .foregroundStyle(.white.opacity(0.6))
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
-        .glassChrome(Capsule(), enabled: playerLiquidGlass, off: .ultraThinMaterial)
+        .mediaGlassChrome(Capsule(), enabled: playerLiquidGlass, off: .ultraThinMaterial)
         .transition(.opacity.combined(with: .scale(scale: 0.92)))
         .animation(.easeOut(duration: 0.15), value: isVideoScrubbing)
         .allowsHitTesting(false)
@@ -995,7 +995,7 @@ struct PlayerView: View {
                     Image(systemName: "lock.fill")
                         .font(.system(size: isPad ? 24 : 18, weight: .semibold))
                         .foregroundStyle(.white).padding(isPad ? 16 : 12)
-                        .glassChrome(Circle(), enabled: playerLiquidGlass, off: .ultraThinMaterial)
+                        .mediaGlassChrome(Circle(), enabled: playerLiquidGlass, off: .ultraThinMaterial)
                 }
                 .buttonStyle(.plain).padding(.leading, isPad ? 30 : 20).padding(.top, isPad ? 30 : 20)
                 Spacer()
@@ -1019,7 +1019,7 @@ struct PlayerView: View {
                         Image(systemName: "xmark")
                             .font(.system(size: isPad ? 24 : 18, weight: .semibold)).foregroundStyle(.white)
                             .frame(width: isPad ? 56 : 44, height: isPad ? 56 : 44)
-                            .glassChrome(Circle(), enabled: playerLiquidGlass, off: Color.white.opacity(0.25))
+                            .mediaGlassChrome(Circle(), enabled: playerLiquidGlass, off: Color.white.opacity(0.25))
                             .shadow(color: .black.opacity(0.3), radius: 6)
                     }
                     .buttonStyle(.plain)
@@ -1076,7 +1076,7 @@ struct PlayerView: View {
                             .font(.system(size: isPad ? 24 : 18, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(width: isPad ? 56 : 44, height: isPad ? 56 : 44)
-                            .glassChrome(Circle(), enabled: playerLiquidGlass, off: Color.white.opacity(0.25))
+                            .mediaGlassChrome(Circle(), enabled: playerLiquidGlass, off: Color.white.opacity(0.25))
                             .shadow(color: .black.opacity(0.3), radius: 6)
                     }
                     .buttonStyle(.plain)
