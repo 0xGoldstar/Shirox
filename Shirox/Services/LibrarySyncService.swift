@@ -11,129 +11,13 @@ import Combine
 /// The sync runs go through ``LibrarySyncPlanner/decide(source:target:)``, which only ever moves
 /// an entry forward — running one in the wrong direction is a no-op rather than a way to wipe a
 /// library, and running it twice changes nothing the second time. That property is what makes
-/// ``Direction/both`` safe: a two-way merge is the same decision run once per side.
+/// the all-ways merge safe: it is the same decision run once per side.
 ///
 /// The overwrite and mirror runs deliberately give that up. They exist because sometimes one
 /// account is simply the one you want, and they destroy whatever the other held.
 @MainActor
 final class LibrarySyncService: ObservableObject {
     static let shared = LibrarySyncService()
-
-    enum Direction: String, CaseIterable, Identifiable {
-        /// Merge both ways at once: per title, whichever account is further along wins.
-        case both
-        case aniListToMAL
-        case malToAniList
-        /// Overwrite the destination with the source, extras left in place.
-        case overwriteAniListFromMAL
-        case overwriteMALFromAniList
-        /// Overwrite *and* delete, leaving the destination an exact copy.
-        case mirrorAniListFromMAL
-        case mirrorMALFromAniList
-
-        var id: String { rawValue }
-
-        enum Kind { case merge, copyForward, overwrite, mirror }
-
-        var kind: Kind {
-            switch self {
-            case .both:                                              return .merge
-            case .aniListToMAL, .malToAniList:                       return .copyForward
-            case .overwriteAniListFromMAL, .overwriteMALFromAniList: return .overwrite
-            case .mirrorAniListFromMAL, .mirrorMALFromAniList:       return .mirror
-            }
-        }
-
-        /// The account being written to; nil for the two-way merge, which writes to both.
-        var target: LibrarySide? {
-            switch self {
-            case .both:
-                return nil
-            case .aniListToMAL, .overwriteMALFromAniList, .mirrorMALFromAniList:
-                return .mal
-            case .malToAniList, .overwriteAniListFromMAL, .mirrorAniListFromMAL:
-                return .anilist
-            }
-        }
-
-        var source: LibrarySide? { target.map { $0 == .mal ? .anilist : .mal } }
-        var sourceName: String { source?.name ?? "" }
-        var targetName: String { target?.name ?? "" }
-
-        var writesToAniList: Bool { target == nil || target == .anilist }
-        var writesToMAL: Bool { target == nil || target == .mal }
-
-        /// Whether this run can destroy history the app cannot get back.
-        var isDestructive: Bool { kind == .overwrite || kind == .mirror }
-
-        /// The safe runs and the destructive ones are listed separately, so they never sit in
-        /// the same tap target.
-        static var syncCases: [Direction] { [.both, .aniListToMAL, .malToAniList] }
-        static var overwriteCases: [Direction] { [.overwriteAniListFromMAL, .overwriteMALFromAniList] }
-        static var mirrorCases: [Direction] { [.mirrorAniListFromMAL, .mirrorMALFromAniList] }
-
-        /// Always reads *source → destination*, so the arrow head points at the account that
-        /// changes. "Overwrite AniList with MyAnimeList" was ambiguous in English about which of
-        /// the two was about to be overwritten; an arrow isn't.
-        var title: String {
-            switch self {
-            case .both:
-                return "AniList ⇄ MyAnimeList"
-            case .aniListToMAL, .overwriteMALFromAniList, .mirrorMALFromAniList:
-                return "AniList → MyAnimeList"
-            case .malToAniList, .overwriteAniListFromMAL, .mirrorAniListFromMAL:
-                return "MyAnimeList → AniList"
-            }
-        }
-
-        /// Names the account that changes, so the arrow never has to be read twice.
-        var subtitle: String {
-            switch kind {
-            case .merge:       return "Merges both, keeping whichever is further along"
-            case .copyForward: return "Adds to and advances \(targetName)"
-            case .overwrite:   return "Overwrites \(targetName)"
-            case .mirror:      return "Overwrites \(targetName) and deletes its extras"
-            }
-        }
-
-        var confirmationTitle: String {
-            switch kind {
-            case .merge:       return "Sync Both Ways"
-            case .copyForward: return "Copy to \(targetName)"
-            case .overwrite:   return "Overwrite \(targetName)?"
-            case .mirror:      return "Erase and Replace \(targetName)?"
-            }
-        }
-
-        var confirmButtonTitle: String {
-            switch kind {
-            case .merge:       return "Sync"
-            case .copyForward: return "Copy"
-            case .overwrite:   return "Overwrite \(targetName)"
-            case .mirror:      return "Erase and Replace"
-            }
-        }
-
-        var confirmationMessage: String {
-            switch kind {
-            case .merge:
-                return "Brings both accounts level with each other. For every title, whichever "
-                     + "account is further along wins — nothing is ever moved backwards."
-            case .copyForward:
-                return "Adds anything missing from \(targetName) and moves its progress forward "
-                     + "to match \(sourceName). Titles already further along on \(targetName) "
-                     + "are left untouched."
-            case .overwrite:
-                return "Overwrites \(targetName) with \(sourceName) — progress, status, score and "
-                     + "rewatch count — including where \(targetName) is further along. Titles "
-                     + "only \(targetName) has are left alone. This can't be undone."
-            case .mirror:
-                return "Makes \(targetName) an exact copy of \(sourceName), overwriting it and "
-                     + "deleting entries \(sourceName) doesn't have. Entries whose match can't be "
-                     + "confirmed are kept. This can't be undone."
-            }
-        }
-    }
 
     /// What happened to one title on one side.
     fileprivate enum Outcome { case upToDate, keptAhead, leftDiffering, created, advanced, deleted, failed }
@@ -150,18 +34,20 @@ final class LibrarySyncService: ObservableObject {
 
     private init() {}
 
-    func sync(_ direction: Direction) async {
+    func sync(_ run: SyncRun) async {
         guard !isRunning else { return }
         isRunning = true
         statusText = "Reading libraries…"
         defer { isRunning = false; statusText = "" }
 
-        guard let (anilistEntries, malEntries) = await readLibraries() else { return }
+        guard let entriesBySide = await readLibraries() else { return }
+        let anilistEntries = entriesBySide[.anilist] ?? []
+        let malEntries = entriesBySide[.mal] ?? []
 
         statusText = "Matching titles…"
         // The reverse lookups only earn their keep when AniList entries may be written, or when a
         // mirror has to prove a MyAnimeList entry really is absent before deleting it.
-        let needsReverseIds = direction.writesToAniList || direction.kind == .mirror
+        let needsReverseIds = run.writes(to: .anilist) || run.kind == .mirror
         let pairing = LibrarySyncPlanner.pair(
             anilist: anilistEntries,
             mal: malEntries,
@@ -169,100 +55,104 @@ final class LibrarySyncService: ObservableObject {
             anilistIdForMALId: needsReverseIds ? await anilistIds(for: malEntries) : [:]
         )
 
-        var anilist = LibrarySyncSummary()
-        var mal = LibrarySyncSummary()
+        var summaries: [LibrarySide: LibrarySyncSummary] = [:]
 
-        switch direction.kind {
+        switch run.kind {
         case .merge, .copyForward:
-            (anilist, mal) = await runSync(direction, pairing)
+            summaries = await runSync(run, pairing)
         case .overwrite, .mirror:
+            // A destructive run names both ends explicitly; there is no "the other side" to infer.
+            guard let target = run.target, let source = run.source else { return }
             let plan = LibrarySyncPlanner.overwritePlan(
                 from: pairing,
-                writing: direction.target ?? .mal,
-                reading: direction.source ?? .anilist,
-                sourceMediaIds: direction.target == .mal
-                    ? Set(anilistEntries.map(\.media.id)) : Set(malEntries.map(\.media.id)),
-                deletingExtras: direction.kind == .mirror)
-            let summary = await execute(plan)
-            if direction.target == .anilist { anilist = summary } else { mal = summary }
+                writing: target,
+                reading: source,
+                sourceMediaIds: Set((entriesBySide[source] ?? []).map(\.media.id)),
+                deletingExtras: run.kind == .mirror)
+            summaries[target] = await execute(plan)
         }
 
-        report(direction, anilist: anilist, mal: mal)
+        report(run, summaries: summaries)
     }
 
     /// Works out everything an overwrite or mirror would do **without writing anything**, so it can
     /// be shown to somebody first. These runs can't be undone; this is the last point at which a
     /// mistake is still free.
-    func preview(_ direction: Direction) async -> LibraryOverwritePlan? {
-        guard !isRunning, direction.isDestructive else { return nil }
+    func preview(_ run: SyncRun) async -> LibraryOverwritePlan? {
+        guard !isRunning, run.isDestructive else { return nil }
+        guard let target = run.target, let source = run.source else { return nil }
         isRunning = true
         statusText = "Checking…"
         defer { isRunning = false; statusText = "" }
 
-        guard let (anilistEntries, malEntries) = await readLibraries() else { return nil }
+        guard let entriesBySide = await readLibraries() else { return nil }
+        let anilistEntries = entriesBySide[.anilist] ?? []
+        let malEntries = entriesBySide[.mal] ?? []
         let pairing = LibrarySyncPlanner.pair(
             anilist: anilistEntries,
             mal: malEntries,
             malIdForAniListId: await malIds(for: anilistEntries),
-            anilistIdForMALId: (direction.target == .anilist || direction.kind == .mirror)
+            anilistIdForMALId: (target == .anilist || run.kind == .mirror)
                 ? await anilistIds(for: malEntries) : [:]
         )
         return LibrarySyncPlanner.overwritePlan(
             from: pairing,
-            writing: direction.target ?? .mal,
-            reading: direction.source ?? .anilist,
-            sourceMediaIds: direction.target == .mal
-                ? Set(anilistEntries.map(\.media.id)) : Set(malEntries.map(\.media.id)),
-            deletingExtras: direction.kind == .mirror)
+            writing: target,
+            reading: source,
+            sourceMediaIds: Set((entriesBySide[source] ?? []).map(\.media.id)),
+            deletingExtras: run.kind == .mirror)
     }
 
     /// Carries out exactly the plan that was shown — not a freshly recomputed one, so what gets
     /// written is what was agreed to.
-    func apply(_ plan: LibraryOverwritePlan, for direction: Direction) async {
-        guard !isRunning else { return }
+    func apply(_ plan: LibraryOverwritePlan, for run: SyncRun) async {
+        guard !isRunning, let target = run.target else { return }
         isRunning = true
         defer { isRunning = false; statusText = "" }
 
         let summary = await execute(plan)
-        report(direction,
-               anilist: direction.target == .anilist ? summary : LibrarySyncSummary(),
-               mal: direction.target == .anilist ? LibrarySyncSummary() : summary)
+        report(run, summaries: [target: summary])
     }
 
     // MARK: - Forward-only runs
 
     private func runSync(
-        _ direction: Direction, _ pairing: LibraryPairing
-    ) async -> (anilist: LibrarySyncSummary, mal: LibrarySyncSummary) {
+        _ run: SyncRun, _ pairing: LibraryPairing
+    ) async -> [LibrarySide: LibrarySyncSummary] {
         var anilist = LibrarySyncSummary()
         var mal = LibrarySyncSummary()
-        if direction.writesToMAL { mal.unmatched = pairing.unmatched(on: .anilist) }
-        if direction.writesToAniList { anilist.unmatched = pairing.unmatched(on: .mal) }
+        if run.writes(to: .mal) { mal.unmatched = pairing.unmatched(on: .anilist) }
+        if run.writes(to: .anilist) { anilist.unmatched = pairing.unmatched(on: .mal) }
 
         // A pair with nothing on the side being read from has nothing to contribute.
         let workable = pairing.pairs.filter { pair in
-            (direction.writesToMAL && pair.entry(on: .anilist) != nil)
-                || (direction.writesToAniList && pair.entry(on: .mal) != nil)
+            (run.writes(to: .mal) && pair.entry(on: .anilist) != nil)
+                || (run.writes(to: .anilist) && pair.entry(on: .mal) != nil)
         }
 
         for (index, pair) in workable.enumerated() {
             statusText = "Syncing \(index + 1) of \(workable.count)"
 
-            if direction.writesToMAL, let source = pair.entry(on: .anilist), let malId = pair.id(on: .mal) {
+            if run.writes(to: .mal), let source = pair.entry(on: .anilist), let malId = pair.id(on: .mal) {
                 mal.record(await apply(
                     LibrarySyncPlanner.decide(source: source, target: pair.entry(on: .mal)),
                     to: .mal, id: malId,
                     title: source.media.title.displayTitle, hadEntry: pair.entry(on: .mal) != nil))
             }
 
-            if direction.writesToAniList, let source = pair.entry(on: .mal), let anilistId = pair.id(on: .anilist) {
+            if run.writes(to: .anilist), let source = pair.entry(on: .mal), let anilistId = pair.id(on: .anilist) {
                 anilist.record(await apply(
                     LibrarySyncPlanner.decide(source: source, target: pair.entry(on: .anilist)),
                     to: .anilist, id: anilistId,
                     title: source.media.title.displayTitle, hadEntry: pair.entry(on: .anilist) != nil))
             }
         }
-        return (anilist, mal)
+
+        // Only the sides this run actually wrote to belong in the report.
+        var summaries: [LibrarySide: LibrarySyncSummary] = [:]
+        if run.writes(to: .anilist) { summaries[.anilist] = anilist }
+        if run.writes(to: .mal) { summaries[.mal] = mal }
+        return summaries
     }
 
     private func apply(
@@ -367,24 +257,27 @@ final class LibrarySyncService: ObservableObject {
 
     // MARK: - Reading and reporting
 
-    private func readLibraries() async -> ([LibraryEntry], [LibraryEntry])? {
-        // Read each side under its own catch. Collapsing both into one message was what made a
+    private func readLibraries() async -> [LibrarySide: [LibraryEntry]]? {
+        // Read each side under its own catch. Collapsing them into one message was what made a
         // failure impossible to act on — it named neither the service nor the reason.
-        let anilist: [LibraryEntry]
-        let mal: [LibraryEntry]
-        do {
-            anilist = try await AniListProvider.shared.fetchLibrary()
-        } catch {
-            reportReadFailure(side: .anilist, error: error)
-            return nil
+        var result: [LibrarySide: [LibraryEntry]] = [:]
+        for side in LibrarySide.allCases {
+            do {
+                result[side] = try await provider(for: side).fetchLibrary()
+            } catch {
+                reportReadFailure(side: side, error: error)
+                return nil
+            }
         }
-        do {
-            mal = try await MALProvider.shared.fetchLibrary()
-        } catch {
-            reportReadFailure(side: .mal, error: error)
-            return nil
+        return result
+    }
+
+    /// The provider that serves one side's library.
+    private func provider(for side: LibrarySide) -> any MediaProvider {
+        switch side {
+        case .anilist: return AniListProvider.shared
+        case .mal:     return MALProvider.shared
         }
-        return (anilist, mal)
     }
 
     private func reportReadFailure(side: LibrarySide, error: Error) {
@@ -419,17 +312,17 @@ final class LibrarySyncService: ObservableObject {
         }
     }
 
-    private func report(_ direction: Direction, anilist: LibrarySyncSummary, mal: LibrarySyncSummary) {
-        let message: String
-        switch direction.target {
-        case .none:          message = "AniList: \(anilist.sentence) · MyAnimeList: \(mal.sentence)"
-        case .some(.anilist): message = "AniList: \(anilist.sentence)"
-        case .some(.mal):     message = "MyAnimeList: \(mal.sentence)"
-        }
+    private func report(_ run: SyncRun, summaries: [LibrarySide: LibrarySyncSummary]) {
+        // Name only the sides this run actually wrote to. A side that was never touched has
+        // nothing to report, and listing it as "nothing changed" reads as a failure.
+        let written = LibrarySide.allCases.filter { summaries[$0] != nil }
+        let message = written
+            .map { "\($0.name): \(summaries[$0]!.sentence)" }
+            .joined(separator: " · ")
 
-        let combined = anilist.adding(mal)
+        let combined = written.reduce(LibrarySyncSummary()) { $0.adding(summaries[$1]!) }
         lastSummary = combined
-        Logger.shared.log("[LibrarySync] \(direction.title): \(message)", type: "Provider")
+        Logger.shared.log("[LibrarySync] \(run.title): \(message)", type: "Provider")
         #if os(iOS)
         ToastManager.shared.show(
             message: message,
@@ -492,5 +385,126 @@ private extension LibrarySyncSummary {
         total.unmatched += other.unmatched
         total.failed += other.failed
         return total
+    }
+}
+
+/// One library-sync run: who is read, who is written, and how.
+///
+/// Replaces the old `Direction` enum, which hand-wrote every AniList↔MyAnimeList permutation.
+/// Two services needed seven cases; three would need nineteen. Naming both ends as values
+/// instead means the run list is generated from whoever is actually signed in.
+struct SyncRun: Identifiable, Equatable {
+
+    enum Kind: String {
+        /// Merge every side at once: per title, whichever account is further along wins.
+        case merge
+        /// Add to and advance one target, never moving it backwards.
+        case copyForward
+        /// Overwrite the target with the source, extras left in place.
+        case overwrite
+        /// Overwrite *and* delete, leaving the target an exact copy.
+        case mirror
+    }
+
+    /// The three groups the Settings screen shows, so the safe runs and the destructive ones
+    /// never sit in the same tap target.
+    enum Section: CaseIterable { case sync, overwrite, mirror }
+
+    /// nil on both ends means the all-ways merge, which reads and writes every side.
+    let source: LibrarySide?
+    let target: LibrarySide?
+    let kind: Kind
+
+    var id: String { "\(kind.rawValue)|\(source?.rawValue ?? "all")|\(target?.rawValue ?? "all")" }
+
+    var sourceName: String { source?.name ?? "" }
+    var targetName: String { target?.name ?? "" }
+
+    /// Whether this run can destroy history the app cannot get back.
+    var isDestructive: Bool { kind == .overwrite || kind == .mirror }
+
+    /// The all-ways merge writes everywhere; every other run writes only to its target.
+    func writes(to side: LibrarySide) -> Bool { target == nil || target == side }
+
+    /// Every run the given section offers for these signed-in sides.
+    ///
+    /// Ordered by target in `LibrarySide.allCases` order, uniformly across all three sections.
+    /// The old fixed lists ordered the sync section by source and the destructive sections by
+    /// target; this makes them consistent.
+    static func runs(in section: Section, among sides: [LibrarySide]) -> [SyncRun] {
+        guard sides.count >= 2 else { return [] }
+
+        let ordered = LibrarySide.allCases.filter(sides.contains)
+        let pairs: [(source: LibrarySide, target: LibrarySide)] = ordered.flatMap { target in
+            ordered.filter { $0 != target }.map { (source: $0, target: target) }
+        }
+
+        switch section {
+        case .sync:
+            return [SyncRun(source: nil, target: nil, kind: .merge)]
+                + pairs.map { SyncRun(source: $0.source, target: $0.target, kind: .copyForward) }
+        case .overwrite:
+            return pairs.map { SyncRun(source: $0.source, target: $0.target, kind: .overwrite) }
+        case .mirror:
+            return pairs.map { SyncRun(source: $0.source, target: $0.target, kind: .mirror) }
+        }
+    }
+
+    /// Always reads *source → target*, so the arrow head points at the account that changes.
+    /// "Overwrite AniList with MyAnimeList" was ambiguous in English about which of the two was
+    /// about to be overwritten; an arrow isn't.
+    var title: String {
+        guard let source, let target else {
+            return LibrarySide.allCases.map(\.name).joined(separator: " ⇄ ")
+        }
+        return "\(source.name) → \(target.name)"
+    }
+
+    /// Names the account that changes, so the arrow never has to be read twice.
+    var subtitle: String {
+        switch kind {
+        case .merge:       return "Merges all, keeping whichever is further along"
+        case .copyForward: return "Adds to and advances \(targetName)"
+        case .overwrite:   return "Overwrites \(targetName)"
+        case .mirror:      return "Overwrites \(targetName) and deletes its extras"
+        }
+    }
+
+    var confirmationTitle: String {
+        switch kind {
+        case .merge:       return "Sync All Ways"
+        case .copyForward: return "Copy to \(targetName)"
+        case .overwrite:   return "Overwrite \(targetName)?"
+        case .mirror:      return "Erase and Replace \(targetName)?"
+        }
+    }
+
+    var confirmButtonTitle: String {
+        switch kind {
+        case .merge:       return "Sync"
+        case .copyForward: return "Copy"
+        case .overwrite:   return "Overwrite \(targetName)"
+        case .mirror:      return "Erase and Replace"
+        }
+    }
+
+    var confirmationMessage: String {
+        switch kind {
+        case .merge:
+            return "Brings every signed-in account level with the others. For every title, "
+                 + "whichever account is further along wins — nothing is ever moved backwards."
+        case .copyForward:
+            return "Adds anything missing from \(targetName) and moves its progress forward "
+                 + "to match \(sourceName). Titles already further along on \(targetName) "
+                 + "are left untouched."
+        case .overwrite:
+            return "Overwrites \(targetName) with \(sourceName) — progress, status, score and "
+                 + "rewatch count — including where \(targetName) is further along. Titles "
+                 + "only \(targetName) has are left alone. This can't be undone."
+        case .mirror:
+            return "Makes \(targetName) an exact copy of \(sourceName), overwriting it and "
+                 + "deleting entries \(sourceName) doesn't have. Entries whose match can't be "
+                 + "confirmed are kept. This can't be undone."
+        }
     }
 }

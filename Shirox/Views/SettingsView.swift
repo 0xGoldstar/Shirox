@@ -17,8 +17,8 @@ struct SettingsView: View {
     @AppStorage("speedBoostTolerance") private var speedBoostTolerance: Int = 10
     @AppStorage("preferredQuality") private var preferredQuality: String = "auto"
     @StateObject private var librarySync = LibrarySyncService.shared
-    @State private var pendingSyncDirection: LibrarySyncService.Direction?
-    @State private var previewDirection: LibrarySyncService.Direction?
+    @State private var pendingSyncRun: SyncRun?
+    @State private var previewRun: SyncRun?
     @State private var overwritePlan: LibraryOverwritePlan?
     @AppStorage("autoNextEpisode") private var autoNextEpisode = true
     @AppStorage("autoSkipSegments") private var autoSkipSegments = true
@@ -39,6 +39,15 @@ struct SettingsView: View {
     @State private var showClearLocalLibrary = false
     @ObservedObject private var aniListAuth = AniListAuthManager.shared
     @ObservedObject private var malAuth = MALAuthManager.shared
+
+    /// The tracking services signed in right now, in `LibrarySide.allCases` order. The sync
+    /// sections are generated from this rather than from a fixed list of run permutations.
+    private var signedInSides: [LibrarySide] {
+        var sides: [LibrarySide] = []
+        if aniListAuth.isLoggedIn { sides.append(.anilist) }
+        if malAuth.isLoggedIn { sides.append(.mal) }
+        return sides
+    }
     @ObservedObject private var providerManager = ProviderManager.shared
     @EnvironmentObject private var moduleManager: ModuleManager
     @State private var showResetCWConfirmation = false
@@ -214,10 +223,10 @@ struct SettingsView: View {
                     }
                 }
 
-                if aniListAuth.isLoggedIn && malAuth.isLoggedIn {
+                if signedInSides.count >= 2 {
                     Section("Sync Library") {
-                        ForEach(LibrarySyncService.Direction.syncCases) { direction in
-                            syncRow(direction)
+                        ForEach(SyncRun.runs(in: .sync, among: signedInSides)) { run in
+                            syncRow(run)
                         }
                         Text("Brings your two accounts into line — a one-time backfill for everything you tracked before signing in here. Syncing both ways reconciles them in a single pass; the one-way copies only ever write to the destination. Either way progress is only ever moved forward, so anything further along is left as it is.")
                             .font(.caption)
@@ -225,8 +234,8 @@ struct SettingsView: View {
                     }
 
                     Section("Overwrite Library") {
-                        ForEach(LibrarySyncService.Direction.overwriteCases) { direction in
-                            syncRow(direction)
+                        ForEach(SyncRun.runs(in: .overwrite, among: signedInSides)) { run in
+                            syncRow(run)
                         }
                         Text("Use when one account is simply the one you want to keep. Overwrites the other with it — progress, status, score and rewatch count — even where that means going backwards. Titles only the overwritten account has are left in place. This can't be undone.")
                             .font(.caption)
@@ -234,8 +243,8 @@ struct SettingsView: View {
                     }
 
                     Section("Mirror Library") {
-                        ForEach(LibrarySyncService.Direction.mirrorCases) { direction in
-                            syncRow(direction)
+                        ForEach(SyncRun.runs(in: .mirror, among: signedInSides)) { run in
+                            syncRow(run)
                         }
                         Text("Everything Overwrite does, and the overwritten account also loses any entry the other doesn't have, ending up an exact copy. Entries whose match can't be confirmed are kept rather than deleted. This can't be undone.")
                             .font(.caption)
@@ -552,33 +561,33 @@ struct SettingsView: View {
                 Text("This will clear all 'Watched' checkmarks from episode lists.")
             }
             .alert(
-                pendingSyncDirection?.title ?? "Sync Library",
+                pendingSyncRun?.title ?? "Sync Library",
                 isPresented: Binding(
-                    get: { pendingSyncDirection != nil },
-                    set: { if !$0 { pendingSyncDirection = nil } }
+                    get: { pendingSyncRun != nil },
+                    set: { if !$0 { pendingSyncRun = nil } }
                 ),
-                presenting: pendingSyncDirection
-            ) { direction in
-                Button(direction.confirmButtonTitle, role: direction.isDestructive ? .destructive : nil) {
-                    pendingSyncDirection = nil
-                    Task { await librarySync.sync(direction) }
+                presenting: pendingSyncRun
+            ) { run in
+                Button(run.confirmButtonTitle, role: run.isDestructive ? .destructive : nil) {
+                    pendingSyncRun = nil
+                    Task { await librarySync.sync(run) }
                 }
-                Button("Cancel", role: .cancel) { pendingSyncDirection = nil }
-            } message: { direction in
-                Text(direction.confirmationMessage)
+                Button("Cancel", role: .cancel) { pendingSyncRun = nil }
+            } message: { run in
+                Text(run.confirmationMessage)
             }
             .sheet(isPresented: Binding(
-                get: { overwritePlan != nil && previewDirection != nil },
-                set: { if !$0 { overwritePlan = nil; previewDirection = nil } }
+                get: { overwritePlan != nil && previewRun != nil },
+                set: { if !$0 { overwritePlan = nil; previewRun = nil } }
             )) {
-                if let plan = overwritePlan, let direction = previewDirection {
-                    OverwritePreviewSheet(direction: direction, plan: plan) {
+                if let plan = overwritePlan, let run = previewRun {
+                    OverwritePreviewSheet(run: run, plan: plan) {
                         overwritePlan = nil
-                        previewDirection = nil
-                        Task { await librarySync.apply(plan, for: direction) }
+                        previewRun = nil
+                        Task { await librarySync.apply(plan, for: run) }
                     } onCancel: {
                         overwritePlan = nil
-                        previewDirection = nil
+                        previewRun = nil
                     }
                 }
             }
@@ -594,22 +603,22 @@ struct SettingsView: View {
     /// One row in the Sync / Overwrite / Mirror sections. Safe runs get a confirmation dialog;
     /// destructive ones get a full preview of what they would change.
     @ViewBuilder
-    private func syncRow(_ direction: LibrarySyncService.Direction) -> some View {
+    private func syncRow(_ run: SyncRun) -> some View {
         Button {
-            if direction.isDestructive {
+            if run.isDestructive {
                 // Destructive runs are never launched straight from a tap — they go through a
                 // preview of exactly what they would change.
-                previewDirection = direction
-                Task { overwritePlan = await librarySync.preview(direction) }
+                previewRun = run
+                Task { overwritePlan = await librarySync.preview(run) }
             } else {
-                pendingSyncDirection = direction
+                pendingSyncRun = run
             }
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(direction.title)
-                        .foregroundStyle(direction.isDestructive ? Color.red : Color.accentColor)
-                    Text(direction.subtitle)
+                    Text(run.title)
+                        .foregroundStyle(run.isDestructive ? Color.red : Color.accentColor)
+                    Text(run.subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1260,7 +1269,7 @@ private struct ProvidersSettingsSection: View {
 /// undone, so the deletions are listed by name rather than just counted — a number is easy to
 /// wave through, a list of titles you recognise is not.
 private struct OverwritePreviewSheet: View {
-    let direction: LibrarySyncService.Direction
+    let run: SyncRun
     let plan: LibraryOverwritePlan
     let onConfirm: () -> Void
     let onCancel: () -> Void
@@ -1272,22 +1281,22 @@ private struct OverwritePreviewSheet: View {
         NavigationView {
             List {
                 Section {
-                    Text(direction.title)
+                    Text(run.title)
                         .font(.headline)
-                    Text(direction.subtitle)
+                    Text(run.subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Section("What this will do") {
                     if plan.isEmpty {
-                        Text("Nothing — \(direction.targetName) already matches.")
+                        Text("Nothing — \(run.targetName) already matches.")
                             .foregroundStyle(.secondary)
                     }
-                    if additions > 0 { row("Add to \(direction.targetName)", additions) }
-                    if overwrites > 0 { row("Overwrite on \(direction.targetName)", overwrites) }
+                    if additions > 0 { row("Add to \(run.targetName)", additions) }
+                    if overwrites > 0 { row("Overwrite on \(run.targetName)", overwrites) }
                     if !plan.deletions.isEmpty {
-                        row("Delete from \(direction.targetName)", plan.deletions.count, tint: .red)
+                        row("Delete from \(run.targetName)", plan.deletions.count, tint: .red)
                     }
                     if plan.unchanged > 0 { row("Leave unchanged", plan.unchanged, tint: .secondary) }
                 }
@@ -1304,12 +1313,12 @@ private struct OverwritePreviewSheet: View {
                 if plan.keptUnverified > 0 || !plan.unmatched.isEmpty {
                     Section("Left alone") {
                         if plan.keptUnverified > 0 {
-                            Text("\(plan.keptUnverified) on \(direction.targetName) couldn't be matched against \(direction.sourceName), so they're kept rather than deleted.")
+                            Text("\(plan.keptUnverified) on \(run.targetName) couldn't be matched against \(run.sourceName), so they're kept rather than deleted.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         if !plan.unmatched.isEmpty {
-                            Text("\(plan.unmatched.count) on \(direction.sourceName) have no \(direction.targetName) entry to write to.")
+                            Text("\(plan.unmatched.count) on \(run.sourceName) have no \(run.targetName) entry to write to.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -1317,13 +1326,13 @@ private struct OverwritePreviewSheet: View {
                 }
 
                 Section {
-                    Button(direction.confirmButtonTitle, role: .destructive, action: onConfirm)
+                    Button(run.confirmButtonTitle, role: .destructive, action: onConfirm)
                         .disabled(plan.isEmpty)
                 } footer: {
                     Text("This can't be undone.")
                 }
             }
-            .navigationTitle(direction.confirmationTitle)
+            .navigationTitle(run.confirmationTitle)
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
