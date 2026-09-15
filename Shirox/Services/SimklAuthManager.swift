@@ -108,6 +108,9 @@ final class SimklAuthManager: NSObject, ObservableObject {
         var request = URLRequest(url: components.url!)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Simkl requires a descriptive User-Agent on every request, alongside the query
+        // parameters above. Their example is "PlexMediaServer/1.43.1.10540".
+        request.setValue("Shirox/\(Self.appVersion)", forHTTPHeaderField: "User-Agent")
         if let token = keychainRead(key: accessTokenKey) {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }

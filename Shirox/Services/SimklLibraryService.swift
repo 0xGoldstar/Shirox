@@ -114,42 +114,88 @@ final class SimklLibraryService {
         return (decoded.anime ?? []).compactMap(entry(from:))
     }
 
-    /// The user's whole anime library.
+    /// The user's anime library, following Simkl's two-phase sync policy.
     ///
-    /// `extended=ids_only` is what carries the `mal` and `anilist` ids; `watched_episodes_count`
-    /// is already part of the default item-level response, so `full` — which Simkl warns is a
-    /// large payload — is never requested.
+    /// Their rules are explicit, and the penalty is not a throttle: *"Ensure you always use
+    /// `date_from` to avoid overloading the API server. If you don't follow these rules, your
+    /// `client_id` will be suspended."* One `client_id` serves every user of this app.
     ///
-    /// When `/sync/activities` reports nothing has moved, the **cached** library is returned
-    /// rather than a fresh request. It must never return an empty list in that case: to a sync
-    /// run "empty" means Simkl holds nothing, which would make a merge write the user's entire
-    /// library across. With no cache yet, the gate is ignored and a real fetch happens.
+    /// - **Phase 1** — no saved timestamp, or no cache to merge into: one full read, no
+    ///   `date_from`. Anime only, never in parallel with other types.
+    /// - **Phase 2** — everything after: `/sync/activities` first, and if it has moved, a
+    ///   `date_from` delta merged into the cached library.
+    ///
+    /// The cache is what makes Phase 2 safe. A delta is *not* a library: returning one to a sync
+    /// run would look like the user had only the handful of titles that changed, and a mirror run
+    /// would delete the rest.
     func fetchLibrary() async throws -> [LibraryEntry] {
         guard auth.isLoggedIn else { throw ProviderError.unauthenticated }
 
-        if let cached, (try? await isUnchanged()) == true { return cached }
+        let savedTimestamp = UserDefaults.standard.string(forKey: lastActivityKey)
 
-        let data = try await get("/sync/all-items/anime/all",
-                                 query: [URLQueryItem(name: "extended", value: "ids_only")])
-        let entries = try Self.decodeLibrary(from: data)
-        cached = entries
-        return entries
+        // Phase 1: nothing to build on, so take the full library once.
+        guard let cached, let savedTimestamp else {
+            let entries = try await fullRead()
+            self.cached = entries
+            UserDefaults.standard.set(try await currentActivityStamp(), forKey: lastActivityKey)
+            return entries
+        }
+
+        // Phase 2: ask whether anything moved before asking for anything else.
+        let stamp = try await currentActivityStamp()
+        guard let stamp, stamp != savedTimestamp else { return cached }
+
+        let delta = try await deltaRead(since: savedTimestamp)
+        let merged = Self.merge(delta, into: cached)
+        self.cached = merged
+        UserDefaults.standard.set(stamp, forKey: lastActivityKey)
+        return merged
     }
 
-    /// Last library read this session. Backs the `/sync/activities` gate — see `fetchLibrary`.
+    /// Last library read. Backs Phase 2 — see `fetchLibrary`.
     private var cached: [LibraryEntry]?
 
-    /// Drops the cache so the next read goes to the network regardless of activities.
-    func invalidateCache() { cached = nil }
+    /// Drops the cache and the saved timestamp, forcing the next read back to Phase 1.
+    func invalidateCache() {
+        cached = nil
+        UserDefaults.standard.removeObject(forKey: lastActivityKey)
+    }
 
-    /// Simkl's own guidance: call `/sync/activities` first and only read when it has moved.
-    private func isUnchanged() async throws -> Bool {
+    private func fullRead() async throws -> [LibraryEntry] {
+        let data = try await get("/sync/all-items/anime/all",
+                                 query: [URLQueryItem(name: "extended", value: "ids_only")])
+        return try Self.decodeLibrary(from: data)
+    }
+
+    /// Only what changed, per Simkl's Phase 2 rule. The timestamp is passed back exactly as it
+    /// was returned, which their guide calls out specifically.
+    private func deltaRead(since timestamp: String) async throws -> [LibraryEntry] {
+        let data = try await get("/sync/all-items/", query: [
+            URLQueryItem(name: "date_from", value: timestamp),
+            URLQueryItem(name: "extended", value: "ids_only"),
+        ])
+        return try Self.decodeLibrary(from: data)
+    }
+
+    /// The `all` timestamp from `/sync/activities`, or nil when it cannot be read.
+    private func currentActivityStamp() async throws -> String? {
         let data = try await get("/sync/activities")
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let all = json["all"] as? String else { return false }
-        let previous = UserDefaults.standard.string(forKey: lastActivityKey)
-        UserDefaults.standard.set(all, forKey: lastActivityKey)
-        return previous == all
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        // Simkl nests the anime timestamps; `all` is the cheap top-level "anything moved" check.
+        return json["all"] as? String
+    }
+
+    /// Applies a delta over a cached library: changed titles replace their previous entry, new
+    /// ones are appended, and everything the delta did not mention is left exactly as it was.
+    nonisolated static func merge(_ delta: [LibraryEntry], into cached: [LibraryEntry]) -> [LibraryEntry] {
+        guard !delta.isEmpty else { return cached }
+        var byID = Dictionary(cached.map { ($0.media.id, $0) }, uniquingKeysWith: { _, latest in latest })
+        var order = cached.map(\.media.id)
+        for entry in delta {
+            if byID[entry.media.id] == nil { order.append(entry.media.id) }
+            byID[entry.media.id] = entry
+        }
+        return order.compactMap { byID[$0] }
     }
 
     nonisolated static func entry(from item: AllItemsResponse.Item) -> LibraryEntry? {

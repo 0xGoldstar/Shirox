@@ -65,6 +65,48 @@ final class SimklDecodingTests: XCTestCase {
         XCTAssertTrue(try entries(from: #"{}"#).isEmpty)
     }
 
+    // MARK: - Phase 2 delta merging
+
+    private func entry(id: Int, progress: Int) -> LibraryEntry {
+        LibraryEntry(
+            id: id,
+            media: Media(
+                id: id, idMal: id, provider: .simkl,
+                title: MediaTitle(romaji: "Title \(id)", english: "Title \(id)", native: nil),
+                coverImage: MediaCoverImage(large: nil, extraLarge: nil),
+                bannerImage: nil, description: nil, episodes: nil, status: nil,
+                averageScore: nil, genres: nil, season: nil, seasonYear: nil,
+                nextAiringEpisode: nil, relations: nil, type: nil, format: nil
+            ),
+            status: .current, progress: progress, score: 0, timesRewatched: nil)
+    }
+
+    /// THE ONE THAT MATTERS: a delta is not a library. Simkl's Phase 2 returns only what changed,
+    /// so handing that straight to a sync run would look like the user owns three titles — and a
+    /// mirror run would delete everything else.
+    func testDeltaIsMergedOverTheCachedLibraryNotSubstitutedForIt() {
+        let cached = [entry(id: 1, progress: 5), entry(id: 2, progress: 8), entry(id: 3, progress: 1)]
+        let delta = [entry(id: 2, progress: 12)]
+
+        let merged = SimklLibraryService.merge(delta, into: cached)
+
+        XCTAssertEqual(merged.count, 3, "untouched titles must survive the delta")
+        XCTAssertEqual(merged.first { $0.media.id == 2 }?.progress, 12)
+        XCTAssertEqual(merged.first { $0.media.id == 1 }?.progress, 5)
+    }
+
+    func testDeltaCanAddTitlesTheCacheHadNeverSeen() {
+        let merged = SimklLibraryService.merge([entry(id: 9, progress: 1)], into: [entry(id: 1, progress: 5)])
+
+        XCTAssertEqual(merged.count, 2)
+        XCTAssertEqual(merged.map(\.media.id), [1, 9], "existing order is kept, new titles append")
+    }
+
+    func testEmptyDeltaLeavesTheLibraryUntouched() {
+        let cached = [entry(id: 1, progress: 5), entry(id: 2, progress: 8)]
+        XCTAssertEqual(SimklLibraryService.merge([], into: cached).map(\.progress), [5, 8])
+    }
+
     /// Every status Simkl can send maps back; anything unknown falls back to the numbers.
     func testEveryStatusMapsBack() {
         XCTAssertEqual(SimklLibraryService.status(from: "plantowatch", progress: 0, total: 12), .planning)
