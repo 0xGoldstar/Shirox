@@ -53,23 +53,9 @@ final class LibrarySyncService: ObservableObject {
         let pairing = LibrarySyncPlanner.pair(
             entries: entriesBySide,
             ids: { side, entry in
-                switch side {
-                case .anilist:
-                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
-                    if let mal = malForAniList[entry.media.id] { ids[.mal] = mal }
-                    return ids
-                case .mal:
-                    var ids: [LibrarySide: Int] = [.mal: entry.media.id]
-                    if let anilist = anilistForMAL[entry.media.id] { ids[.anilist] = anilist }
-                    return ids
-                case .simkl:
-                    // Simkl entries are keyed by the MyAnimeList id where they have one, so they
-                    // land on the same canonical key as the other two sides.
-                    var ids: [LibrarySide: Int] = [.simkl: entry.media.id]
-                    if let mal = entry.media.idMal { ids[.mal] = mal }
-                    else { ids[.anilist] = entry.media.id }
-                    return ids
-                }
+                Self.sideIDs(for: side, entry: entry,
+                             malForAniList: malForAniList,
+                             anilistForMAL: anilistForMAL)
             })
 
         var summaries: [LibrarySide: LibrarySyncSummary] = [:]
@@ -111,23 +97,9 @@ final class LibrarySyncService: ObservableObject {
         let pairing = LibrarySyncPlanner.pair(
             entries: entriesBySide,
             ids: { side, entry in
-                switch side {
-                case .anilist:
-                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
-                    if let mal = malForAniList[entry.media.id] { ids[.mal] = mal }
-                    return ids
-                case .mal:
-                    var ids: [LibrarySide: Int] = [.mal: entry.media.id]
-                    if let anilist = anilistForMAL[entry.media.id] { ids[.anilist] = anilist }
-                    return ids
-                case .simkl:
-                    // Simkl entries are keyed by the MyAnimeList id where they have one, so they
-                    // land on the same canonical key as the other two sides.
-                    var ids: [LibrarySide: Int] = [.simkl: entry.media.id]
-                    if let mal = entry.media.idMal { ids[.mal] = mal }
-                    else { ids[.anilist] = entry.media.id }
-                    return ids
-                }
+                Self.sideIDs(for: side, entry: entry,
+                             malForAniList: malForAniList,
+                             anilistForMAL: anilistForMAL)
             })
         return LibrarySyncPlanner.overwritePlan(
             from: pairing,
@@ -193,7 +165,8 @@ final class LibrarySyncService: ObservableObject {
                 summaries[side]?.record(await apply(
                     LibrarySyncPlanner.decide(source: winner.entry, target: existing),
                     to: side, id: id,
-                    title: winner.entry.media.title.displayTitle, hadEntry: existing != nil))
+                    title: winner.entry.media.title.displayTitle, hadEntry: existing != nil,
+                    previousProgress: existing?.progress))
             }
         }
 
@@ -202,7 +175,7 @@ final class LibrarySyncService: ObservableObject {
 
     private func apply(
         _ decision: LibrarySyncDecision, to side: LibrarySide,
-        id: Int, title: String, hadEntry: Bool
+        id: Int, title: String, hadEntry: Bool, previousProgress: Int? = nil
     ) async -> Outcome {
         switch decision {
         case .skipUpToDate:
@@ -224,7 +197,8 @@ final class LibrarySyncService: ObservableObject {
              .advance(let status, let progress, let score, let timesRewatched):
             return await performWrite(
                 to: side, id: id, title: title, hadEntry: hadEntry,
-                status: status, progress: progress, score: score, timesRewatched: timesRewatched)
+                status: status, progress: progress, score: score, timesRewatched: timesRewatched,
+                previousProgress: previousProgress)
         }
     }
 
@@ -282,7 +256,8 @@ final class LibrarySyncService: ObservableObject {
     /// parameter — without it rewatch counts could never be brought level.
     private func performWrite(
         to side: LibrarySide, id: Int, title: String, hadEntry: Bool,
-        status: MediaListStatus, progress: Int, score: Double, timesRewatched: Int?
+        status: MediaListStatus, progress: Int, score: Double, timesRewatched: Int?,
+        previousProgress: Int? = nil
     ) async -> Outcome {
         do {
             switch side {
@@ -300,7 +275,7 @@ final class LibrarySyncService: ObservableObject {
                 // suspended. `flush()` sends them after the run.
                 SimklLibraryService.shared.rawUpdateEntry(
                     malId: id, anilistId: nil, status: status,
-                    progress: progress, previousProgress: nil,
+                    progress: progress, previousProgress: previousProgress,
                     score: score, format: .point10)
             }
             try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
@@ -341,6 +316,44 @@ final class LibrarySyncService: ObservableObject {
             }
         }
         return result
+    }
+
+    /// A title's id on every side that can address it, as resolved from the id maps.
+    ///
+    /// **Every side must contribute a Simkl id, not just Simkl itself.** `runSync` skips a
+    /// target it has no id for, so when only Simkl entries carried one, a title AniList had and
+    /// Simkl did not could never be created there — it was silently skipped and then reported
+    /// as "not found". Simkl is addressed by MyAnimeList id, so that is what fills the slot.
+    nonisolated static func sideIDs(for side: LibrarySide,
+                                    entry: LibraryEntry,
+                                    malForAniList: [Int: Int],
+                                    anilistForMAL: [Int: Int]) -> [LibrarySide: Int] {
+        switch side {
+        case .anilist:
+            var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+            if let mal = malForAniList[entry.media.id] ?? entry.media.idMal {
+                ids[.mal] = mal
+                ids[.simkl] = mal
+            }
+            return ids
+
+        case .mal:
+            var ids: [LibrarySide: Int] = [.mal: entry.media.id, .simkl: entry.media.id]
+            if let anilist = anilistForMAL[entry.media.id] { ids[.anilist] = anilist }
+            return ids
+
+        case .simkl:
+            // Simkl entries are keyed by their MyAnimeList id where they have one, so they land
+            // on the same canonical key — and on the same `.simkl` value — as the other sides.
+            var ids: [LibrarySide: Int] = [:]
+            if let mal = entry.media.idMal {
+                ids[.mal] = mal
+                ids[.simkl] = mal
+            } else {
+                ids[.anilist] = entry.media.id
+            }
+            return ids
+        }
     }
 
     /// One side's library.
