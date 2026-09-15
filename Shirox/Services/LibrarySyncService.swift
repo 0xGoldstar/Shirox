@@ -139,39 +139,50 @@ final class LibrarySyncService: ObservableObject {
     private func runSync(
         _ run: SyncRun, _ pairing: LibraryPairing
     ) async -> [LibrarySide: LibrarySyncSummary] {
-        var anilist = LibrarySyncSummary()
-        var mal = LibrarySyncSummary()
-        if run.writes(to: .mal) { mal.unmatched = pairing.unmatched(writingTo: .mal) }
-        if run.writes(to: .anilist) { anilist.unmatched = pairing.unmatched(writingTo: .anilist) }
+        let targets = LibrarySide.allCases.filter { run.writes(to: $0) }
+        // Everything for the all-ways merge; just the named source otherwise.
+        let sources = run.source.map { [$0] } ?? LibrarySide.allCases
 
-        // A pair with nothing on the side being read from has nothing to contribute.
+        var summaries: [LibrarySide: LibrarySyncSummary] = [:]
+        for side in targets {
+            var summary = LibrarySyncSummary()
+            summary.unmatched = pairing.unmatched(writingTo: side)
+            summaries[side] = summary
+        }
+
+        // A pair with nothing on any side being read from has nothing to contribute.
         let workable = pairing.pairs.filter { pair in
-            (run.writes(to: .mal) && pair.entry(on: .anilist) != nil)
-                || (run.writes(to: .anilist) && pair.entry(on: .mal) != nil)
+            sources.contains { pair.entry(on: $0) != nil }
         }
 
         for (index, pair) in workable.enumerated() {
             statusText = "Syncing \(index + 1) of \(workable.count)"
 
-            if run.writes(to: .mal), let source = pair.entry(on: .anilist), let malId = pair.id(on: .mal) {
-                mal.record(await apply(
-                    LibrarySyncPlanner.decide(source: source, target: pair.entry(on: .mal)),
-                    to: .mal, id: malId,
-                    title: source.media.title.displayTitle, hadEntry: pair.entry(on: .mal) != nil))
+            // The one entry every other side should be brought up to, and which side it came
+            // from. Ties keep the earlier side, matching `LibrarySyncPlanner.winner(among:)`.
+            var best: (side: LibrarySide, entry: LibraryEntry)?
+            for side in sources {
+                guard let candidate = pair.entry(on: side) else { continue }
+                if best == nil
+                    || LibrarySyncPlanner.viewing(candidate) > LibrarySyncPlanner.viewing(best!.entry) {
+                    best = (side, candidate)
+                }
             }
+            guard let winner = best else { continue }
 
-            if run.writes(to: .anilist), let source = pair.entry(on: .mal), let anilistId = pair.id(on: .anilist) {
-                anilist.record(await apply(
-                    LibrarySyncPlanner.decide(source: source, target: pair.entry(on: .anilist)),
-                    to: .anilist, id: anilistId,
-                    title: source.media.title.displayTitle, hadEntry: pair.entry(on: .anilist) != nil))
+            for side in targets {
+                // Never write a side's own entry back to itself.
+                guard side != winner.side else { continue }
+                guard let id = pair.id(on: side) else { continue }
+                let existing = pair.entry(on: side)
+
+                summaries[side]?.record(await apply(
+                    LibrarySyncPlanner.decide(source: winner.entry, target: existing),
+                    to: side, id: id,
+                    title: winner.entry.media.title.displayTitle, hadEntry: existing != nil))
             }
         }
 
-        // Only the sides this run actually wrote to belong in the report.
-        var summaries: [LibrarySide: LibrarySyncSummary] = [:]
-        if run.writes(to: .anilist) { summaries[.anilist] = anilist }
-        if run.writes(to: .mal) { summaries[.mal] = mal }
         return summaries
     }
 

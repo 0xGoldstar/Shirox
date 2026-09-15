@@ -212,6 +212,21 @@ enum LibrarySyncPlanner {
         return !(watching.contains(a) && watching.contains(b))
     }
 
+    /// The single entry every other side should be brought up to.
+    ///
+    /// Folds across the sides rather than running pairwise passes: with more than two sides a
+    /// chain of pairwise updates has no order-independent answer. The winner is by construction
+    /// behind nobody, so writing it everywhere preserves the forward-only guarantee and a second
+    /// run changes nothing.
+    ///
+    /// Ties keep the earlier entry, so the result does not depend on iteration order.
+    static func winner(among entries: [LibraryEntry]) -> LibraryEntry? {
+        entries.reduce(nil) { best, candidate in
+            guard let best else { return candidate }
+            return viewing(candidate) > viewing(best) ? candidate : best
+        }
+    }
+
     /// The decision for one title. `target` is nil when the other service has never seen it.
     static func decide(source: LibraryEntry, target: LibraryEntry?) -> LibrarySyncDecision {
         guard let target else {
