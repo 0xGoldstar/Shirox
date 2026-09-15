@@ -29,24 +29,43 @@ final class SimklBatchingTests: XCTestCase {
         SimklWrite(ids: ["mal": id], status: .watching, rating: nil, episodes: [1])
     }
 
-    func test120WritesBecomeThreeRequestsNotOneHundredAndTwenty() async {
+    /// 120 writes become 5 requests, not 120. Batches hold 25 *writes*, and a write carrying
+    /// both episodes and a status expands to two body entries — so a full batch is 50 items,
+    /// which is the size Simkl recommends.
+    func test120WritesBecomeFiveRequestsNotOneHundredAndTwenty() async {
         let recorder = Recorder()
         let queue = makeQueue(recorder)
         for i in 1...120 { queue.enqueue(write(i)) }
         await queue.flush()
 
-        XCTAssertEqual(recorder.bodies.count, 3)
-        XCTAssertEqual(recorder.itemCounts(), [50, 50, 20])
+        XCTAssertEqual(recorder.bodies.count, 5)
+        XCTAssertEqual(recorder.itemCounts(), [50, 50, 50, 50, 40])
     }
 
+    /// The ceiling that protects the shared client_id: no request may exceed 50 entries,
+    /// however the writes inside it expand.
     func testNoRequestEverCarriesMoreThanFiftyItems() async {
         let recorder = Recorder()
         let queue = makeQueue(recorder)
         for i in 1...503 { queue.enqueue(write(i)) }
         await queue.flush()
 
-        XCTAssertTrue(recorder.itemCounts().allSatisfy { $0 <= 50 })
-        XCTAssertEqual(recorder.itemCounts().reduce(0, +), 503)
+        XCTAssertTrue(recorder.itemCounts().allSatisfy { $0 <= 50 },
+                      "got \(recorder.itemCounts().max() ?? 0) in one request")
+        // Every write here carries episodes, so each expands to an episode entry and a state one.
+        XCTAssertEqual(recorder.itemCounts().reduce(0, +), 503 * 2)
+    }
+
+    /// A status-only write does not expand, so those batches stay at 25 entries.
+    func testStatusOnlyWritesDoNotExpand() async {
+        let recorder = Recorder()
+        let queue = makeQueue(recorder)
+        for i in 1...25 {
+            queue.enqueue(SimklWrite(ids: ["mal": i], status: .plantowatch, rating: nil, episodes: nil))
+        }
+        await queue.flush()
+
+        XCTAssertEqual(recorder.itemCounts(), [25])
     }
 
     /// One POST per second is the documented ceiling, so the queue waits *between* batches —
@@ -57,7 +76,7 @@ final class SimklBatchingTests: XCTestCase {
         for i in 1...120 { queue.enqueue(write(i)) }
         await queue.flush()
 
-        XCTAssertEqual(recorder.sleeps.count, 2, "3 batches need 2 gaps, not 3")
+        XCTAssertEqual(recorder.sleeps.count, 4, "5 batches need 4 gaps, not 5")
         XCTAssertTrue(recorder.sleeps.allSatisfy { $0 >= 1.0 })
     }
 

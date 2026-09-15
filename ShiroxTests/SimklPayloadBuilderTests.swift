@@ -81,8 +81,7 @@ final class SimklPayloadBuilderTests: XCTestCase {
     func testPartialRemovalNamesItsEpisodes() {
         let body = SimklPayloadBuilder.removalBody(ids: ["mal": 38000], episodes: [6, 7, 8])
         let shows = body["shows"] as? [[String: Any]]
-        XCTAssertNotNil(shows?.first?["episodes"], "naming episodes is what keeps this partial")
-        XCTAssertNil(shows?.first?["seasons"])
+        XCTAssertNotNil(shows?.first?["seasons"], "naming episodes is what keeps this partial")
     }
 
     /// With no episodes, Simkl removes the title from the user's library entirely — history and
@@ -98,7 +97,7 @@ final class SimklPayloadBuilderTests: XCTestCase {
     func testEmptyEpisodeListIsNotAWholeEntryDelete() {
         let body = SimklPayloadBuilder.removalBody(ids: ["mal": 38000], episodes: [])
         let shows = body["shows"] as? [[String: Any]]
-        XCTAssertNotNil(shows?.first?["episodes"],
+        XCTAssertNotNil(shows?.first?["seasons"],
                         "an empty list must stay the partial form, not become a library delete")
     }
 
@@ -106,7 +105,7 @@ final class SimklPayloadBuilderTests: XCTestCase {
 
     func testBatchesAreNeverLargerThanFifty() {
         let batches = SimklPayloadBuilder.batches(Array(1...120))
-        XCTAssertEqual(batches.map(\.count), [50, 50, 20])
+        XCTAssertEqual(batches.map(\.count), [25, 25, 25, 25, 20])
     }
 
     func testBatchingPreservesEveryItemAndTheirOrder() {
@@ -142,19 +141,28 @@ final class SimklPayloadBuilderTests: XCTestCase {
         XCTAssertEqual(ids?["anilist"], 101922)
     }
 
-    /// Episodes go in the top-level shorthand, which Simkl auto-wraps to season 1 under AniDB
-    /// sequential numbering. The explicit `seasons: [{number: 1}]` form is TVDB-shaped: live
-    /// writes using it were accepted and stored nothing, reporting `added.episodes: 0`.
-    func testEpisodesUseTheTopLevelShorthandNotASeasonsBlock() {
+    /// THE ONE THAT MATTERS: Simkl drops episode data from an item that also carries a status.
+    /// The app sent ids + rating + 12 episodes + status and Simkl echoed the request back with
+    /// no episodes at all, storing none of them while the status landed. So a write carrying
+    /// both becomes two entries for the same title.
+    func testStatusAndEpisodesAreSentAsSeparateEntries() {
         let body = SimklPayloadBuilder.historyBody(items: [
             SimklWrite(ids: ["mal": 38000], status: .completed, rating: 9, episodes: [1, 2, 3])
         ])
-        let show = (body["shows"] as? [[String: Any]])?.first
+        let shows = body["shows"] as? [[String: Any]]
 
-        XCTAssertNil(show?["seasons"], "the seasons form is TVDB-shaped and silently stores nothing")
-        let episodes = show?["episodes"] as? [[String: Int]]
-        XCTAssertEqual(episodes?.count, 3)
-        XCTAssertEqual(episodes?.map { $0["number"]! }, [1, 2, 3])
+        XCTAssertEqual(shows?.count, 2, "one entry for the episodes, one for the status")
+
+        let episodeEntry = shows?.first { $0["seasons"] != nil }
+        XCTAssertNotNil(episodeEntry)
+        XCTAssertNil(episodeEntry?["status"], "a status on this entry makes Simkl ignore the episodes")
+        let season = (episodeEntry?["seasons"] as? [[String: Any]])?.first
+        XCTAssertEqual((season?["episodes"] as? [[String: Int]])?.map { $0["number"]! }, [1, 2, 3])
+
+        let stateEntry = shows?.first { $0["status"] != nil }
+        XCTAssertEqual(stateEntry?["status"] as? String, "completed")
+        XCTAssertEqual(stateEntry?["rating"] as? Int, 9)
+        XCTAssertNil(stateEntry?["seasons"])
     }
 
     /// A status-only write carries no episode key at all.
@@ -167,6 +175,7 @@ final class SimklPayloadBuilderTests: XCTestCase {
         XCTAssertNil(show?["episodes"])
         XCTAssertNil(show?["seasons"])
         XCTAssertEqual(show?["status"] as? String, "plantowatch")
+        XCTAssertEqual((body["shows"] as? [[String: Any]])?.count, 1, "no episodes, so one entry")
     }
 
     /// TVDB-style per-season numbering is exactly what this design avoids.

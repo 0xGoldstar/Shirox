@@ -75,22 +75,39 @@ enum SimklPayloadBuilder {
 
     // MARK: - Bodies
 
+    /// Builds a `/sync/history` body.
+    ///
+    /// A write that carries **both** a status and episodes is emitted as **two entries** for the
+    /// same title, because Simkl ignores the episode data on an item that also carries a status.
+    /// That was not a guess: the app sent
+    ///
+    ///     {"ids":{"mal":55888},"rating":10,"episodes":[…12 of them…],"status":"completed"}
+    ///
+    /// and Simkl echoed the request back without the episodes at all, reporting
+    /// `added.episodes: 0` while the status and rating landed. Simkl's own documented example
+    /// for marking anime episodes carries `seasons` and no `status`.
+    ///
+    /// Episodes use `seasons: [{number: 1, …}]`, which is the documented shape for anime too —
+    /// the top-level shorthand is not anime-specific and was a wrong turn.
     static func historyBody(items: [SimklWrite]) -> [String: Any] {
-        // Anime goes under `shows[]`. Simkl accepts `anime[]` too, but its own docs specify shows.
-        ["shows": items.map { item -> [String: Any] in
-            var show: [String: Any] = ["ids": item.ids, "status": item.status.rawValue]
-            if let rating = item.rating { show["rating"] = rating }
+        // Anime goes under `shows[]`. Simkl's docs are explicit: it resolves to the anime
+        // catalog from the ids, and `anime[]` exists only for backwards compatibility.
+        var shows: [[String: Any]] = []
+
+        for item in items {
             if let episodes = item.episodes, !episodes.isEmpty {
-                // The top-level `episodes` shorthand, not `seasons: [{number: 1, …}]`.
-                //
-                // Both are documented, and the explicit form is a TVDB-style "season 1" — which
-                // anime on Simkl is not, because it numbers by AniDB sequential. Writes using
-                // `seasons` were accepted and stored nothing: the response reported
-                // `added.episodes: 0` while the status change landed fine.
-                show["episodes"] = episodes.map { ["number": $0] }
+                shows.append([
+                    "ids": item.ids,
+                    "seasons": [["number": 1, "episodes": episodes.map { ["number": $0] }]],
+                ])
             }
-            return show
-        }]
+
+            var state: [String: Any] = ["ids": item.ids, "status": item.status.rawValue]
+            if let rating = item.rating { state["rating"] = rating }
+            shows.append(state)
+        }
+
+        return ["shows": shows]
     }
 
     /// `/sync/history/remove` does two very different things depending on one field.
@@ -104,9 +121,8 @@ enum SimklPayloadBuilder {
     static func removalBody(ids: [String: Int], episodes: [Int]?) -> [String: Any] {
         var show: [String: Any] = ["ids": ids]
         if let episodes {
-            // Same shorthand as `historyBody`, for the same reason: anime is numbered AniDB
-            // sequential, not as TVDB season 1.
-            show["episodes"] = episodes.map { ["number": $0] }
+            // `seasons` is the documented shape for anime episodes, same as `historyBody`.
+            show["seasons"] = [["number": 1, "episodes": episodes.map { ["number": $0] }]]
         }
         return ["shows": [show]]
     }
@@ -116,7 +132,9 @@ enum SimklPayloadBuilder {
     /// Simkl's guidance is explicit: "Send 50 items in one call rather than 50 calls." Sustained
     /// write-hammering suspends the `client_id` with no warning and no appeal, and a single one
     /// serves every user of this app.
-    static func batches<T>(_ items: [T], size: Int = 50) -> [[T]] {
+    /// Default 25, not 50: a write carrying both episodes and a status expands to two entries
+    /// in the body, so 25 writes is what keeps a request at Simkl's suggested 50 items.
+    static func batches<T>(_ items: [T], size: Int = 25) -> [[T]] {
         guard !items.isEmpty, size > 0 else { return [] }
         return stride(from: 0, to: items.count, by: size).map {
             Array(items[$0 ..< min($0 + size, items.count)])
