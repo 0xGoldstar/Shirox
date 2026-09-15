@@ -24,7 +24,8 @@ final class SimklLibraryService {
     private let lastActivityKey = "simkl_last_activity"
 
     private lazy var queue = SimklWriteQueue { [weak self] body in
-        try await self?.post("/sync/history", body: body)
+        guard let self else { return Data() }
+        return try await self.post("/sync/history", body: body)
     }
 
     private init() {}

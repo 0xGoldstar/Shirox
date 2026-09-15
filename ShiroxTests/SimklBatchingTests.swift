@@ -21,7 +21,7 @@ final class SimklBatchingTests: XCTestCase {
     private func makeQueue(_ recorder: Recorder, minInterval: TimeInterval = 1.0) -> SimklWriteQueue {
         SimklWriteQueue(
             minInterval: minInterval,
-            send: { body in recorder.bodies.append(body) },
+            send: { body in recorder.bodies.append(body); return Data("{}".utf8) },
             sleep: { seconds in recorder.sleeps.append(seconds) })
     }
 
@@ -92,12 +92,46 @@ final class SimklBatchingTests: XCTestCase {
         XCTAssertEqual(recorder.bodies.count, 1)
     }
 
+    /// A 2xx does not mean stored. Titles whose ids Simkl cannot resolve come back under
+    /// not_found, and nothing is written for them — which is how "9 added" repeated on every
+    /// single run without anything ever being created.
+    func testNotFoundTitlesAreCountedNotAssumedStored() async {
+        let recorder = Recorder()
+        let queue = SimklWriteQueue(
+            minInterval: 1.0,
+            send: { _ in
+                Data(#"{"added":{"shows":1,"episodes":12},"not_found":{"shows":[{"ids":{"mal":1}},{"ids":{"mal":2}}]}}"#.utf8)
+            },
+            sleep: { recorder.sleeps.append($0) })
+        for i in 1...3 { queue.enqueue(write(i)) }
+        await queue.flush()
+
+        XCTAssertEqual(queue.notFoundCount, 2)
+        XCTAssertEqual(queue.acceptedShows, 1)
+        XCTAssertEqual(queue.acceptedEpisodes, 12)
+    }
+
+    /// A response Simkl shapes differently must not crash the drain or invent successes.
+    func testAnUnreadableResponseTalliesNothing() async {
+        let recorder = Recorder()
+        let queue = SimklWriteQueue(
+            minInterval: 1.0,
+            send: { _ in Data("not json".utf8) },
+            sleep: { recorder.sleeps.append($0) })
+        queue.enqueue(write(1))
+        await queue.flush()
+
+        XCTAssertEqual(queue.notFoundCount, 0)
+        XCTAssertEqual(queue.acceptedShows, 0)
+        XCTAssertEqual(queue.pendingCount, 0, "an unreadable body is still a delivered request")
+    }
+
     /// A failing send must not silently lose the writes it was carrying.
     func testWritesSurviveAFailedSend() async {
         let recorder = Recorder()
         let queue = SimklWriteQueue(
             minInterval: 1.0,
-            send: { _ in throw ProviderError.serverError(500) },
+            send: { _ -> Data in throw ProviderError.serverError(500) },
             sleep: { recorder.sleeps.append($0) })
         for i in 1...10 { queue.enqueue(write(i)) }
         await queue.flush()
