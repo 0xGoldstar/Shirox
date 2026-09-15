@@ -290,6 +290,9 @@ final class SimklLibraryService {
         return queue.pendingCount
     }
 
+    /// Titles Simkl answered `not_found` for in the last flush — nothing was stored for them.
+    var lastNotFoundCount: Int { queue.notFoundCount }
+
     /// Un-marks specific episodes. The title stays in the user's library.
     func rawUnmarkEpisodes(ids: [String: Int], episodes: [Int]) async throws {
         guard !episodes.isEmpty else { return }

@@ -72,7 +72,7 @@ final class LibrarySyncService: ObservableObject {
                 reading: source,
                 sourceMediaIds: Set((entriesBySide[source] ?? []).map(\.media.id)),
                 deletingExtras: run.kind == .mirror)
-            summaries[target] = await execute(plan)
+            summaries[target] = await execute(plan, sourceFormat: Self.scoreFormat(for: source))
         }
 
         // Simkl writes are queued rather than sent one at a time, so that batching and the
@@ -134,7 +134,10 @@ final class LibrarySyncService: ObservableObject {
         isRunning = true
         defer { isRunning = false; statusText = "" }
 
-        var summaries: [LibrarySide: LibrarySyncSummary] = [target: await execute(plan)]
+        let sourceFormat = Self.scoreFormat(for: run.source ?? .anilist)
+        var summaries: [LibrarySide: LibrarySyncSummary] = [
+            target: await execute(plan, sourceFormat: sourceFormat)
+        ]
         await flushSimkl(for: run, into: &summaries)
         report(run, summaries: summaries)
     }
@@ -148,6 +151,17 @@ final class LibrarySyncService: ObservableObject {
         guard run.writes(to: .simkl), summaries[.simkl] != nil else { return }
         let undelivered = await SimklLibraryService.shared.flush()
         if undelivered > 0 { Self.chargeUndelivered(undelivered, to: &summaries[.simkl]!) }
+
+        // Simkl's own not_found is authoritative: a title it could not resolve was never stored,
+        // however cleanly the request succeeded. The run's own unmatched list only knows about
+        // titles with no id at all, so it under-reports.
+        let rejected = SimklLibraryService.shared.lastNotFoundCount
+        if rejected > 0 {
+            Self.chargeUndelivered(rejected, to: &summaries[.simkl]!)
+            summaries[.simkl]!.failed -= rejected
+            summaries[.simkl]!.unmatched.append(
+                contentsOf: (0..<rejected).map { _ in "(not on Simkl)" })
+        }
         // The library on Simkl has moved, so the cached copy is stale.
         SimklLibraryService.shared.invalidateCache()
     }
@@ -239,7 +253,11 @@ final class LibrarySyncService: ObservableObject {
     // MARK: - Overwrite and mirror runs
 
     /// Runs a plan: overwrites first, then removals.
-    private func execute(_ plan: LibraryOverwritePlan) async -> LibrarySyncSummary {
+    /// - Parameter sourceFormat: the scale the source side's scores are in. `LibraryEntry.score`
+    ///   is a display-scale value, so without this an AniList POINT_100 score of 85 is read as
+    ///   85-on-ten, clamped, and written to every title as a 10.
+    private func execute(_ plan: LibraryOverwritePlan,
+                         sourceFormat: ScoreFormat = .point10) async -> LibrarySyncSummary {
         var summary = LibrarySyncSummary()
         summary.unmatched = plan.unmatched
         summary.upToDate = plan.unchanged
@@ -251,7 +269,8 @@ final class LibrarySyncService: ObservableObject {
             summary.record(await performWrite(
                 to: write.side, id: write.id, title: write.title, hadEntry: !write.isNew,
                 status: write.status, progress: write.progress,
-                score: write.score, timesRewatched: write.timesRewatched))
+                score: write.score, timesRewatched: write.timesRewatched,
+                sourceFormat: sourceFormat))
         }
 
         for (index, deletion) in plan.deletions.enumerated() {
