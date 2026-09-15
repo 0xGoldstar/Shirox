@@ -21,12 +21,13 @@ enum LibrarySyncDecision: Equatable {
 /// iterated in a stable order. The name used to be a ternary — `self == .anilist ? … : …` —
 /// which silently labelled any future third side "MyAnimeList".
 enum LibrarySide: String, CaseIterable {
-    case anilist, mal
+    case anilist, mal, simkl
 
     var name: String {
         switch self {
         case .anilist: return "AniList"
         case .mal:     return "MyAnimeList"
+        case .simkl:   return "Simkl"
         }
     }
 }
@@ -388,12 +389,15 @@ enum LibrarySyncPlanner {
         return plan
     }
 
-    /// The id `side` deletes by. AniList needs the *list entry's* own id; MyAnimeList deletes by
-    /// media id. Resolved in one place so a caller cannot pass the wrong one.
+    /// The id `side` deletes by. AniList needs the *list entry's* own id; MyAnimeList and Simkl
+    /// delete by media id. Resolved in one place so a caller cannot pass the wrong one.
     static func deletionId(for side: LibrarySide, pair: LibraryPair, entry: LibraryEntry) -> Int? {
         switch side {
         case .anilist: return entry.id
         case .mal:     return pair.id(on: .mal)
+        // Simkl identifies a title by the ids it was given; the MyAnimeList id is the one this
+        // app always has for it. See the Simkl spec §4 — removal is by ids, not by an entry id.
+        case .simkl:   return pair.id(on: .mal) ?? pair.id(on: .anilist)
         }
     }
 

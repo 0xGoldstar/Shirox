@@ -26,6 +26,11 @@ struct LibraryWriteSink: PendingWriteSink {
             } else {
                 try await MALLibraryService.shared.rawDeleteEntry(malId: w.mediaId ?? 0)
             }
+        case (.simkl, _):
+            // Wired in the Simkl client plan, where it also has to batch: Simkl allows 1 POST/sec
+            // and replaying a backlog one write at a time would breach that. Throwing keeps the
+            // write queued for a later drain rather than silently dropping it.
+            throw ProviderError.unsupported
         case (.local, _):
             break   // local source is never queued
         }

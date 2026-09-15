@@ -22,7 +22,44 @@ final class LibraryPairingTests: XCTestCase {
             status: .current, progress: progress, score: 0, timesRewatched: nil)
     }
 
-    // NOTE: the two Simkl cases below are restored in Task 3, once `.simkl` exists.
+    /// Three sides, one title: all three collapse into a single pair keyed on the MyAnimeList id.
+    func testThreeSidesSharingAMALIdBecomeOnePair() {
+        let pairing = LibrarySyncPlanner.pair(
+            entries: [
+                .anilist: [entry(id: 100, progress: 5)],
+                .mal:     [entry(id: 900, progress: 3)],
+                .simkl:   [entry(id: 900, progress: 7)],
+            ],
+            ids: { _, _ in [.anilist: 100, .mal: 900] })
+
+        XCTAssertEqual(pairing.pairs.count, 1)
+        let pair = pairing.pairs[0]
+        XCTAssertEqual(pair.entry(on: .anilist)?.progress, 5)
+        XCTAssertEqual(pair.entry(on: .mal)?.progress, 3)
+        XCTAssertEqual(pair.entry(on: .simkl)?.progress, 7)
+        XCTAssertTrue(pairing.unmatched.isEmpty)
+    }
+
+    /// A title with no MyAnimeList id still pairs, on its AniList id. Under the old two-side
+    /// join it vanished entirely, which a third side cannot afford.
+    func testTitleWithNoMALIdStillPairsOnItsAniListId() {
+        let pairing = LibrarySyncPlanner.pair(
+            entries: [
+                .anilist: [entry(id: 100, progress: 5)],
+                .simkl:   [entry(id: 555, progress: 9)],
+            ],
+            ids: { _, _ in [.anilist: 100] })
+
+        XCTAssertEqual(pairing.pairs.count, 1)
+        XCTAssertEqual(pairing.pairs[0].entry(on: .anilist)?.progress, 5)
+        XCTAssertEqual(pairing.pairs[0].entry(on: .simkl)?.progress, 9)
+    }
+
+    /// Simkl is a tracking side but never a browsing source, so it must stay out of the list
+    /// that drives provider selection and the discovery fallback chain.
+    func testSimklIsNotOfferedAsABrowsingProvider() {
+        XCTAssertFalse(ProviderType.userProviders.contains(.simkl))
+    }
 
     /// A title nothing can identify is reported rather than silently dropped.
     func testTitleWithNoIdsAtAllIsReportedUnmatched() {

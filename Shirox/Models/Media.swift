@@ -3,6 +3,9 @@ import Foundation
 enum ProviderType: String, Codable, CaseIterable, Hashable {
     case anilist = "anilist"
     case mal = "mal"
+    /// Write-side tracker: syncs libraries, serves no discovery, profile or social
+    /// content. Deliberately absent from `userProviders` — it is not a browsing source.
+    case simkl = "simkl"
     case local = "local"   // on-device-only title (module-scraped or imported file); never sign-in-able
 
     /// Providers a user can sign into. Use this for login / provider-selection UIs;
@@ -13,6 +16,7 @@ enum ProviderType: String, Codable, CaseIterable, Hashable {
         switch self {
         case .anilist: return "AniList"
         case .mal: return "MyAnimeList"
+        case .simkl: return "Simkl"
         case .local: return "Local"
         }
     }
@@ -21,6 +25,7 @@ enum ProviderType: String, Codable, CaseIterable, Hashable {
         switch self {
         case .anilist: return "https://anilist.co/img/icons/apple-touch-icon.png"
         case .mal: return "https://cdn.myanimelist.net/img/sp/icon/apple-touch-icon-256.png"
+        case .simkl: return "https://simkl.in/img_favicon/apple-touch-icon.png"
         case .local: return ""   // no remote icon
         }
     }

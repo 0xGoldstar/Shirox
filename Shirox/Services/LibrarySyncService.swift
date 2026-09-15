@@ -62,6 +62,10 @@ final class LibrarySyncService: ObservableObject {
                     var ids: [LibrarySide: Int] = [.mal: entry.media.id]
                     if let anilist = anilistForMAL[entry.media.id] { ids[.anilist] = anilist }
                     return ids
+                case .simkl:
+                    // Wired in the Simkl client plan. `signedInSides` never yields .simkl until
+                    // then, so no Simkl entries reach this resolver.
+                    return [:]
                 }
             })
 
@@ -113,6 +117,10 @@ final class LibrarySyncService: ObservableObject {
                     var ids: [LibrarySide: Int] = [.mal: entry.media.id]
                     if let anilist = anilistForMAL[entry.media.id] { ids[.anilist] = anilist }
                     return ids
+                case .simkl:
+                    // Wired in the Simkl client plan. `signedInSides` never yields .simkl until
+                    // then, so no Simkl entries reach this resolver.
+                    return [:]
                 }
             })
         return LibrarySyncPlanner.overwritePlan(
@@ -246,6 +254,11 @@ final class LibrarySyncService: ObservableObject {
                 try await AniListLibraryService.shared.deleteEntry(entryId: deletion.id)
             case .mal:
                 try await MALLibraryService.shared.deleteEntry(malId: deletion.id)
+            case .simkl:
+                // Inside a sync run a crash is worse than a reported failure: the run should
+                // finish and say what it could not do.
+                Logger.shared.log("[LibrarySync] Simkl delete not wired yet", type: "Error")
+                return .failed
             }
             try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
             return .deleted
@@ -276,6 +289,10 @@ final class LibrarySyncService: ObservableObject {
                 try await MALLibraryService.shared.updateEntry(
                     malId: id, status: status, progress: progress,
                     score: score, numTimesRewatched: timesRewatched)
+            case .simkl:
+                // As in `remove`: report the failure, do not take the run down with it.
+                Logger.shared.log("[LibrarySync] Simkl write not wired yet", type: "Error")
+                return .failed
             }
             try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
             return hadEntry ? .advanced : .created
@@ -288,11 +305,27 @@ final class LibrarySyncService: ObservableObject {
 
     // MARK: - Reading and reporting
 
+    /// The tracking services signed in right now, in `LibrarySide.allCases` order.
+    ///
+    /// Reads iterate this rather than `allCases`: a side nobody signed into has no library to
+    /// fetch, and asking for one fails the whole run.
+    var signedInSides: [LibrarySide] {
+        LibrarySide.allCases.filter { side in
+            switch side {
+            case .anilist: return AniListAuthManager.shared.isLoggedIn
+            case .mal:     return MALAuthManager.shared.isLoggedIn
+            // No Simkl auth manager yet, so Simkl is never signed in. This is what keeps every
+            // other .simkl arm below unreachable rather than latent.
+            case .simkl:   return false
+            }
+        }
+    }
+
     private func readLibraries() async -> [LibrarySide: [LibraryEntry]]? {
         // Read each side under its own catch. Collapsing them into one message was what made a
         // failure impossible to act on — it named neither the service nor the reason.
         var result: [LibrarySide: [LibraryEntry]] = [:]
-        for side in LibrarySide.allCases {
+        for side in signedInSides {
             do {
                 result[side] = try await provider(for: side).fetchLibrary()
             } catch {
@@ -308,6 +341,10 @@ final class LibrarySyncService: ObservableObject {
         switch side {
         case .anilist: return AniListProvider.shared
         case .mal:     return MALProvider.shared
+        case .simkl:
+            // Unreachable: readLibraries iterates signedInSides, which never yields .simkl until
+            // the Simkl client lands. Fail loudly rather than inventing a provider.
+            preconditionFailure("Simkl provider not wired yet")
         }
     }
 
@@ -445,6 +482,12 @@ struct SyncRun: Identifiable, Equatable {
     let source: LibrarySide?
     let target: LibrarySide?
     let kind: Kind
+    /// The sides an all-ways merge actually spans — the signed-in ones, not every case that
+    /// exists. A targeted run leaves this nil because it already names both ends.
+    ///
+    /// Without it the merge title was built from `LibrarySide.allCases`, so somebody signed
+    /// into two services was shown a confirmation naming a third they had never connected.
+    var sides: [LibrarySide]? = nil
 
     var id: String { "\(kind.rawValue)|\(source?.rawValue ?? "all")|\(target?.rawValue ?? "all")" }
 
@@ -472,7 +515,7 @@ struct SyncRun: Identifiable, Equatable {
 
         switch section {
         case .sync:
-            return [SyncRun(source: nil, target: nil, kind: .merge)]
+            return [SyncRun(source: nil, target: nil, kind: .merge, sides: ordered)]
                 + pairs.map { SyncRun(source: $0.source, target: $0.target, kind: .copyForward) }
         case .overwrite:
             return pairs.map { SyncRun(source: $0.source, target: $0.target, kind: .overwrite) }
@@ -485,10 +528,9 @@ struct SyncRun: Identifiable, Equatable {
     /// "Overwrite AniList with MyAnimeList" was ambiguous in English about which of the two was
     /// about to be overwritten; an arrow isn't.
     var title: String {
-        guard let source, let target else {
-            return LibrarySide.allCases.map(\.name).joined(separator: " ⇄ ")
-        }
-        return "\(source.name) → \(target.name)"
+        if let source, let target { return "\(source.name) → \(target.name)" }
+        guard let sides, sides.count >= 2 else { return "Sync All Ways" }
+        return sides.map(\.name).joined(separator: " ⇄ ")
     }
 
     /// Names the account that changes, so the arrow never has to be read twice.
