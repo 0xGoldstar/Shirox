@@ -25,7 +25,7 @@ enum ProviderType: String, Codable, CaseIterable, Hashable {
         switch self {
         case .anilist: return "https://anilist.co/img/icons/apple-touch-icon.png"
         case .mal: return "https://cdn.myanimelist.net/img/sp/icon/apple-touch-icon-256.png"
-        case .simkl: return "https://simkl.in/img_favicon/apple-touch-icon.png"
+        case .simkl: return "https://simkl.com/apple-touch-icon.png"
         case .local: return ""   // no remote icon
         }
     }

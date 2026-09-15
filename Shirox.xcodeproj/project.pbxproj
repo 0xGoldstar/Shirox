@@ -23,6 +23,7 @@
 		0B2B7D8B04C1CDAD071B0BE0 /* BackupManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 162D9AEE30203055E38D2D89 /* BackupManagerTests.swift */; };
 		0C32E3FDE9111244720DF74A /* MangaProgressManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 689D5CE2FB0A5296DE99238E /* MangaProgressManagerTests.swift */; };
 		0C420821718959529F2289AA /* FreshInstallKeychainPurge.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF9A299B7B1F54AA1675478F /* FreshInstallKeychainPurge.swift */; };
+		0F0C546765233CB1009B3BE0 /* SimklDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3800962BA82FB8E9A66BFEE /* SimklDecodingTests.swift */; };
 		0F474E222FE9E7D600FAC2BA /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 0F474E212FE9E7D600FAC2BA /* Kingfisher */; };
 		0F474E242FE9E84200FAC2BA /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 0F474E232FE9E84200FAC2BA /* Kingfisher */; };
 		0F474E262FE9E84800FAC2BA /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 0F474E252FE9E84800FAC2BA /* Kingfisher */; };
@@ -1013,6 +1014,7 @@
 		DF9A299B7B1F54AA1675478F /* FreshInstallKeychainPurge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FreshInstallKeychainPurge.swift; sourceTree = "<group>"; };
 		E1C750867F19DF886AA2D7E8 /* adult_hosts.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; path = adult_hosts.txt; sourceTree = "<group>"; };
 		E291C27758B26EC8AB9B812B /* PendingWriteQueueTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PendingWriteQueueTests.swift; sourceTree = "<group>"; };
+		E3800962BA82FB8E9A66BFEE /* SimklDecodingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklDecodingTests.swift; sourceTree = "<group>"; };
 		E4055BF10088887224F97E64 /* CloudflareBypassClearanceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudflareBypassClearanceTests.swift; sourceTree = "<group>"; };
 		E548862288E04B9EA60BBCF3 /* LocalPlaybackCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPlaybackCoordinator.swift; sourceTree = "<group>"; };
 		E8D91E43B99205901655CDF0 /* Shirox.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Shirox.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1479,6 +1481,7 @@
 				A00057EFE3BA37F4C8D9AB09 /* SimklPayloadBuilderTests.swift */,
 				7F8DF1638344A52ED8F86BD4 /* SimklBatchingTests.swift */,
 				C818D0DBB893464E4124CFC5 /* SimklQueueTests.swift */,
+				E3800962BA82FB8E9A66BFEE /* SimklDecodingTests.swift */,
 			);
 			path = ShiroxTests;
 			sourceTree = SOURCE_ROOT;
@@ -1783,6 +1786,7 @@
 				05CAE013AB731685896B2FB5 /* SimklPayloadBuilderTests.swift in Sources */,
 				D735FE376DC1B979E2E382AA /* SimklBatchingTests.swift in Sources */,
 				066C7A1C6B365988BE83ED5F /* SimklQueueTests.swift in Sources */,
+				0F0C546765233CB1009B3BE0 /* SimklDecodingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

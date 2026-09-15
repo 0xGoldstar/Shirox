@@ -68,10 +68,34 @@ final class SimklLibraryService {
 
     // MARK: - Reading
 
-    private struct AllItemsResponse: Decodable {
+    /// An external id as Simkl actually sends it.
+    ///
+    /// Its docs describe these as integers, but a real response has them as **strings**
+    /// (`"mal": "52991"`) — the first live read failed decoding exactly that. Simkl is not
+    /// consistent about which form it uses, so accept both rather than betting on either.
+    struct FlexibleID: Decodable {
+        let value: Int?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let int = try? container.decode(Int.self) {
+                value = int
+            } else if let string = try? container.decode(String.self) {
+                value = Int(string)
+            } else {
+                value = nil
+            }
+        }
+    }
+
+    struct AllItemsResponse: Decodable {
         struct Item: Decodable {
             struct Show: Decodable {
-                struct IDs: Decodable { let simkl: Int?; let mal: Int?; let anilist: Int? }
+                struct IDs: Decodable {
+                    let simkl: FlexibleID?
+                    let mal: FlexibleID?
+                    let anilist: FlexibleID?
+                }
                 let title: String?
                 let ids: IDs?
             }
@@ -82,6 +106,12 @@ final class SimklLibraryService {
             let user_rating: Int?
         }
         let anime: [Item]?
+    }
+
+    /// Pure decoding seam, so the real response shape can be tested without a network.
+    nonisolated static func decodeLibrary(from data: Data) throws -> [LibraryEntry] {
+        let decoded = try JSONDecoder().decode(AllItemsResponse.self, from: data)
+        return (decoded.anime ?? []).compactMap(entry(from:))
     }
 
     /// The user's whole anime library.
@@ -101,8 +131,7 @@ final class SimklLibraryService {
 
         let data = try await get("/sync/all-items/anime/all",
                                  query: [URLQueryItem(name: "extended", value: "ids_only")])
-        let decoded = try JSONDecoder().decode(AllItemsResponse.self, from: data)
-        let entries = (decoded.anime ?? []).compactMap(entry(from:))
+        let entries = try Self.decodeLibrary(from: data)
         cached = entries
         return entries
     }
@@ -123,17 +152,17 @@ final class SimklLibraryService {
         return previous == all
     }
 
-    private func entry(from item: AllItemsResponse.Item) -> LibraryEntry? {
+    nonisolated static func entry(from item: AllItemsResponse.Item) -> LibraryEntry? {
         guard let show = item.show, let ids = show.ids else { return nil }
         // Keyed by the MyAnimeList id where there is one — the spine the pairing joins on.
-        guard let id = ids.mal ?? ids.anilist else { return nil }
+        guard let id = ids.mal?.value ?? ids.anilist?.value else { return nil }
 
         let progress = item.watched_episodes_count ?? 0
         let total = item.total_episodes_count
         let status = Self.status(from: item.status, progress: progress, total: total)
 
         let media = Media(
-            id: id, idMal: ids.mal, provider: .simkl,
+            id: id, idMal: ids.mal?.value, provider: .simkl,
             title: MediaTitle(romaji: show.title, english: show.title, native: nil),
             coverImage: MediaCoverImage(large: nil, extraLarge: nil),
             bannerImage: nil, description: nil, episodes: total, status: nil,
@@ -150,7 +179,7 @@ final class SimklLibraryService {
     /// rewatch is a separate Pro-only session, so a rewatching title reads back as `current`.
     /// `LibrarySyncPlanner.isConflict` already treats that pair as agreement, because
     /// MyAnimeList has the same limitation.
-    static func status(from raw: String?, progress: Int, total: Int?) -> MediaListStatus {
+    nonisolated static func status(from raw: String?, progress: Int, total: Int?) -> MediaListStatus {
         switch raw {
         case "plantowatch": return .planning
         case "completed":   return .completed
