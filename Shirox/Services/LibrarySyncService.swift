@@ -78,16 +78,7 @@ final class LibrarySyncService: ObservableObject {
         // Simkl writes are queued rather than sent one at a time, so that batching and the
         // 1 POST/sec limit are respected. Nothing has actually reached Simkl until this runs —
         // without it a run reported a tally of writes that never left the device.
-        if run.writes(to: .simkl) {
-            Logger.shared.log(
-                "[Simkl] run finished, flushing (summary present: \(summaries[.simkl] != nil))",
-                type: "Provider")
-        }
-        if run.writes(to: .simkl), summaries[.simkl] != nil {
-            let undelivered = await SimklLibraryService.shared.flush()
-            if undelivered > 0 { Self.chargeUndelivered(undelivered, to: &summaries[.simkl]!) }
-        }
-
+        await flushSimkl(for: run, into: &summaries)
         report(run, summaries: summaries)
     }
 
@@ -143,8 +134,22 @@ final class LibrarySyncService: ObservableObject {
         isRunning = true
         defer { isRunning = false; statusText = "" }
 
-        let summary = await execute(plan)
-        report(run, summaries: [target: summary])
+        var summaries: [LibrarySide: LibrarySyncSummary] = [target: await execute(plan)]
+        await flushSimkl(for: run, into: &summaries)
+        report(run, summaries: summaries)
+    }
+
+    /// Sends the Simkl writes a run queued, and corrects the tally for anything undelivered.
+    ///
+    /// Called from **both** run paths. `sync` handles merges and copy-forwards; overwrite and
+    /// mirror go through `preview` → `apply` instead, and when only `sync` flushed, every
+    /// overwrite run queued its writes and silently dropped them while reporting success.
+    private func flushSimkl(for run: SyncRun, into summaries: inout [LibrarySide: LibrarySyncSummary]) async {
+        guard run.writes(to: .simkl), summaries[.simkl] != nil else { return }
+        let undelivered = await SimklLibraryService.shared.flush()
+        if undelivered > 0 { Self.chargeUndelivered(undelivered, to: &summaries[.simkl]!) }
+        // The library on Simkl has moved, so the cached copy is stale.
+        SimklLibraryService.shared.invalidateCache()
     }
 
     // MARK: - Forward-only runs
@@ -453,7 +458,7 @@ final class LibrarySyncService: ObservableObject {
 
         let combined = written.reduce(LibrarySyncSummary()) { $0.adding(summaries[$1]!) }
         lastSummary = combined
-        Logger.shared.log("[LibrarySync] \(run.title): \(message)", type: "Provider")
+        Logger.shared.log("[LibrarySync] \(run.kind.rawValue) \(run.title): \(message)", type: "Provider")
         #if os(iOS)
         ToastManager.shared.show(
             message: message,

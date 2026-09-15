@@ -75,6 +75,30 @@ final class SyncRunTests: XCTestCase {
             "AniList ⇄ MyAnimeList ⇄ Simkl")
     }
 
+    /// A copy-forward and an overwrite between the same two sides share a title, so a log line
+    /// carrying only the title cannot say which ran. That ambiguity hid a bug where overwrite
+    /// runs queued their Simkl writes and never sent them: the logs were indistinguishable from
+    /// the copy-forward path, which did flush.
+    func testCopyForwardAndOverwriteShareATitleButNotAnIdentity() {
+        let copy = SyncRun(source: .anilist, target: .simkl, kind: .copyForward)
+        let overwrite = SyncRun(source: .anilist, target: .simkl, kind: .overwrite)
+
+        XCTAssertEqual(copy.title, overwrite.title, "the titles really are identical")
+        XCTAssertNotEqual(copy.id, overwrite.id, "so identity must come from the kind")
+        XCTAssertNotEqual(copy.kind.rawValue, overwrite.kind.rawValue)
+    }
+
+    /// Every run that writes to Simkl must be one the flush covers, whichever path it takes.
+    func testEveryKindThatWritesToSimklIsIdentifiable() {
+        for kind in [SyncRun.Kind.copyForward, .overwrite, .mirror] {
+            let run = SyncRun(source: .anilist, target: .simkl, kind: kind)
+            XCTAssertTrue(run.writes(to: .simkl))
+            XCTAssertFalse(run.kind.rawValue.isEmpty)
+        }
+        XCTAssertTrue(SyncRun(source: nil, target: nil, kind: .merge, sides: [.anilist, .simkl])
+            .writes(to: .simkl))
+    }
+
     /// Each run needs a stable identity of its own, or SwiftUI's ForEach reuses rows between
     /// two runs that differ only in direction.
     func testRunsHaveDistinctIdentities() {
