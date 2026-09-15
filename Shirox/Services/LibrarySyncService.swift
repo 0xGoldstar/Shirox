@@ -188,7 +188,8 @@ final class LibrarySyncService: ObservableObject {
                     LibrarySyncPlanner.decide(source: winner.entry, target: existing),
                     to: side, id: id,
                     title: winner.entry.media.title.displayTitle, hadEntry: existing != nil,
-                    previousProgress: existing?.progress))
+                    previousProgress: existing?.progress,
+                    sourceFormat: Self.scoreFormat(for: winner.side)))
             }
         }
 
@@ -197,7 +198,8 @@ final class LibrarySyncService: ObservableObject {
 
     private func apply(
         _ decision: LibrarySyncDecision, to side: LibrarySide,
-        id: Int, title: String, hadEntry: Bool, previousProgress: Int? = nil
+        id: Int, title: String, hadEntry: Bool, previousProgress: Int? = nil,
+        sourceFormat: ScoreFormat = .point10
     ) async -> Outcome {
         switch decision {
         case .skipUpToDate:
@@ -220,7 +222,7 @@ final class LibrarySyncService: ObservableObject {
             return await performWrite(
                 to: side, id: id, title: title, hadEntry: hadEntry,
                 status: status, progress: progress, score: score, timesRewatched: timesRewatched,
-                previousProgress: previousProgress)
+                previousProgress: previousProgress, sourceFormat: sourceFormat)
         }
     }
 
@@ -279,7 +281,7 @@ final class LibrarySyncService: ObservableObject {
     private func performWrite(
         to side: LibrarySide, id: Int, title: String, hadEntry: Bool,
         status: MediaListStatus, progress: Int, score: Double, timesRewatched: Int?,
-        previousProgress: Int? = nil
+        previousProgress: Int? = nil, sourceFormat: ScoreFormat = .point10
     ) async -> Outcome {
         do {
             switch side {
@@ -298,7 +300,7 @@ final class LibrarySyncService: ObservableObject {
                 SimklLibraryService.shared.rawUpdateEntry(
                     malId: id, anilistId: nil, status: status,
                     progress: progress, previousProgress: previousProgress,
-                    score: score, format: .point10)
+                    score: score, format: sourceFormat)
             }
             try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
             return hadEntry ? .advanced : .created
@@ -338,6 +340,19 @@ final class LibrarySyncService: ObservableObject {
             }
         }
         return result
+    }
+
+    /// The score scale an entry from `side` is expressed in.
+    ///
+    /// `LibraryEntry.score` is a display-scale value, not a canonical one, so writing it onward
+    /// without its format is wrong: an AniList user on POINT_100 has `score == 85`, and reading
+    /// that as a 1-10 rating turns every score into a 10.
+    @MainActor
+    static func scoreFormat(for side: LibrarySide) -> ScoreFormat {
+        switch side {
+        case .anilist:     return AniListAuthManager.shared.scoreFormat
+        case .mal, .simkl: return .point10
+        }
     }
 
     /// A title's id on every side that can address it, as resolved from the id maps.

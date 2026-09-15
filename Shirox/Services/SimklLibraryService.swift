@@ -163,8 +163,28 @@ final class SimklLibraryService {
 
     private func fullRead() async throws -> [LibraryEntry] {
         let data = try await get("/sync/all-items/anime/all",
-                                 query: [URLQueryItem(name: "extended", value: "ids_only")])
-        return try Self.decodeLibrary(from: data)
+                                 query: [URLQueryItem(name: "extended", value: Self.extendedMode)])
+        let entries = try Self.decodeLibrary(from: data)
+        logRead(entries, phase: "full")
+        return entries
+    }
+
+    /// `ids_only` looked like the lightweight choice and is a trap: it returns **only** ids,
+    /// stripping `status`, `watched_episodes_count` and `user_rating`. Every entry then read back
+    /// at progress 0, so a sync run decided every single title was behind and rewrote the whole
+    /// library on every run — forever.
+    ///
+    /// `full` is the documented superset. Simkl warns it is a large payload, which is what
+    /// `date_from` on the Phase 2 delta is for; the full read happens once.
+    static let extendedMode = "full"
+
+    /// Reads are where this integration has been silently wrong twice. One line per read, saying
+    /// what actually came back, is worth the log noise.
+    private func logRead(_ entries: [LibraryEntry], phase: String) {
+        let withProgress = entries.filter { $0.progress > 0 }.count
+        Logger.shared.log(
+            "[Simkl] \(phase) read: \(entries.count) entries, \(withProgress) with progress > 0",
+            type: "Provider")
     }
 
     /// Only what changed, per Simkl's Phase 2 rule. The timestamp is passed back exactly as it
@@ -172,9 +192,11 @@ final class SimklLibraryService {
     private func deltaRead(since timestamp: String) async throws -> [LibraryEntry] {
         let data = try await get("/sync/all-items/", query: [
             URLQueryItem(name: "date_from", value: timestamp),
-            URLQueryItem(name: "extended", value: "ids_only"),
+            URLQueryItem(name: "extended", value: Self.extendedMode),
         ])
-        return try Self.decodeLibrary(from: data)
+        let entries = try Self.decodeLibrary(from: data)
+        logRead(entries, phase: "delta")
+        return entries
     }
 
     /// The `all` timestamp from `/sync/activities`, or nil when it cannot be read.
