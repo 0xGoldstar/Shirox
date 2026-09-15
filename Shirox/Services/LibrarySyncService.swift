@@ -75,7 +75,29 @@ final class LibrarySyncService: ObservableObject {
             summaries[target] = await execute(plan)
         }
 
+        // Simkl writes are queued rather than sent one at a time, so that batching and the
+        // 1 POST/sec limit are respected. Nothing has actually reached Simkl until this runs —
+        // without it a run reported a tally of writes that never left the device.
+        if run.writes(to: .simkl), summaries[.simkl] != nil {
+            let undelivered = await SimklLibraryService.shared.flush()
+            if undelivered > 0 { Self.chargeUndelivered(undelivered, to: &summaries[.simkl]!) }
+        }
+
         report(run, summaries: summaries)
+    }
+
+    /// Moves `count` writes out of the optimistic created/advanced tallies and into `failed`.
+    ///
+    /// The per-title tally is recorded when a write is *queued*, because that is the only point
+    /// the run knows which title it belonged to. A batch that then fails to send has to be
+    /// corrected here. Which specific titles were in the failed batch is not recoverable, so the
+    /// count comes off `advanced` before `created` — the totals stay truthful even though the
+    /// attribution cannot be.
+    static func chargeUndelivered(_ count: Int, to summary: inout LibrarySyncSummary) {
+        summary.failed += count
+        let fromAdvanced = min(count, summary.advanced)
+        summary.advanced -= fromAdvanced
+        summary.created -= min(count - fromAdvanced, summary.created)
     }
 
     /// Works out everything an overwrite or mirror would do **without writing anything**, so it can

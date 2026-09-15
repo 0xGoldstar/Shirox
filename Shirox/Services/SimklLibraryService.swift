@@ -258,8 +258,13 @@ final class SimklLibraryService {
             episodes: episodes.isEmpty ? nil : episodes))
     }
 
-    func flush() async {
+    /// Sends everything queued. Returns how many writes could **not** be delivered — a failed
+    /// batch stays queued rather than vanishing, so this is the honest count of what did not
+    /// reach Simkl.
+    @discardableResult
+    func flush() async -> Int {
         await queue.flush()
+        return queue.pendingCount
     }
 
     /// Un-marks specific episodes. The title stays in the user's library.
