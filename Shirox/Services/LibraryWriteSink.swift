@@ -26,11 +26,21 @@ struct LibraryWriteSink: PendingWriteSink {
             } else {
                 try await MALLibraryService.shared.rawDeleteEntry(malId: w.mediaId ?? 0)
             }
-        case (.simkl, _):
-            // Wired in the Simkl client plan, where it also has to batch: Simkl allows 1 POST/sec
-            // and replaying a backlog one write at a time would breach that. Throwing keeps the
-            // write queued for a later drain rather than silently dropping it.
-            throw ProviderError.unsupported
+        case (.simkl, .update):
+            // Manga never reaches Simkl — it has none.
+            guard w.mediaType != .manga else { break }
+            SimklLibraryService.shared.rawUpdateEntry(
+                malId: w.mediaId, anilistId: w.entryId, status: w.status ?? .current,
+                progress: w.progress ?? 0, previousProgress: nil,
+                score: w.score ?? 0, format: .point10)
+            await SimklLibraryService.shared.flush()
+        case (.simkl, .delete):
+            guard w.mediaType != .manga else { break }
+            var ids: [String: Int] = [:]
+            if let mal = w.mediaId { ids["mal"] = mal }
+            if let anilist = w.entryId { ids["anilist"] = anilist }
+            guard !ids.isEmpty else { break }
+            try await SimklLibraryService.shared.rawDeleteEntry(ids: ids)
         case (.local, _):
             break   // local source is never queued
         }

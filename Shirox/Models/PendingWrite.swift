@@ -24,6 +24,11 @@ struct PendingWrite: Codable, Identifiable {
         switch (provider, kind) {
         case (.anilist, .update): return "anilist|update|\(typeSlug)|\(mediaId ?? -1)"
         case (.anilist, .delete): return "anilist|delete|\(entryId ?? -1)"
+        // Simkl accepts either a MyAnimeList or an AniList id, so a title with only the latter
+        // has no `mediaId`. Under the `default` case every such write collapsed onto the same
+        // "…|-1" key, and dedup is last-write-wins — so all but one were silently discarded.
+        case (.simkl, .update):   return "simkl|update|\(typeSlug)|\(mediaId ?? entryId ?? -1)"
+        case (.simkl, .delete):   return "simkl|delete|\(mediaId ?? entryId ?? -1)"
         default:                  return "\(provider.rawValue)|\(kind.rawValue)|\(typeSlug)|\(mediaId ?? -1)"
         }
     }

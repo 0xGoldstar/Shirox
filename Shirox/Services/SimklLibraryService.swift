@@ -84,21 +84,34 @@ final class SimklLibraryService {
         let anime: [Item]?
     }
 
-    /// The user's whole anime library, or nil when `/sync/activities` says nothing has changed.
+    /// The user's whole anime library.
     ///
     /// `extended=ids_only` is what carries the `mal` and `anilist` ids; `watched_episodes_count`
     /// is already part of the default item-level response, so `full` — which Simkl warns is a
-    /// large payload — is not needed.
-    func fetchLibrary(force: Bool = false) async throws -> [LibraryEntry] {
+    /// large payload — is never requested.
+    ///
+    /// When `/sync/activities` reports nothing has moved, the **cached** library is returned
+    /// rather than a fresh request. It must never return an empty list in that case: to a sync
+    /// run "empty" means Simkl holds nothing, which would make a merge write the user's entire
+    /// library across. With no cache yet, the gate is ignored and a real fetch happens.
+    func fetchLibrary() async throws -> [LibraryEntry] {
         guard auth.isLoggedIn else { throw ProviderError.unauthenticated }
 
-        if !force, try await isUnchanged() { return [] }
+        if let cached, (try? await isUnchanged()) == true { return cached }
 
         let data = try await get("/sync/all-items/anime/all",
                                  query: [URLQueryItem(name: "extended", value: "ids_only")])
         let decoded = try JSONDecoder().decode(AllItemsResponse.self, from: data)
-        return (decoded.anime ?? []).compactMap(entry(from:))
+        let entries = (decoded.anime ?? []).compactMap(entry(from:))
+        cached = entries
+        return entries
     }
+
+    /// Last library read this session. Backs the `/sync/activities` gate — see `fetchLibrary`.
+    private var cached: [LibraryEntry]?
+
+    /// Drops the cache so the next read goes to the network regardless of activities.
+    func invalidateCache() { cached = nil }
 
     /// Simkl's own guidance: call `/sync/activities` first and only read when it has moved.
     private func isUnchanged() async throws -> Bool {

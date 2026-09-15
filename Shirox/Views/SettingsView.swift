@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 import Combine
 
 struct SettingsView: View {
@@ -39,6 +40,19 @@ struct SettingsView: View {
     @State private var showClearLocalLibrary = false
     @ObservedObject private var aniListAuth = AniListAuthManager.shared
     @ObservedObject private var malAuth = MALAuthManager.shared
+    @ObservedObject private var simklAuth = SimklAuthManager.shared
+
+    #if !os(tvOS)
+    /// The window Simkl's sign-in sheet is anchored to.
+    static func presentationAnchor() -> ASPresentationAnchor {
+        #if os(macOS)
+        return NSApplication.shared.keyWindow ?? ASPresentationAnchor()
+        #else
+        let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+        return scene?.keyWindow ?? ASPresentationAnchor()
+        #endif
+    }
+    #endif
 
     /// The sync sections are generated from whoever is signed in. Defined once on
     /// `LibrarySyncService` so reads and the UI can never disagree about who that is.
@@ -216,6 +230,43 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                }
+
+                // Simkl is a write-side tracker, not a browsing source, so it sits here rather
+                // than in the provider list — it has no "make primary" and never serves Home.
+                Section("Simkl") {
+                    HStack(spacing: 12) {
+                        CachedAsyncImage(urlString: ProviderType.simkl.iconURL)
+                            .frame(width: 28, height: 28)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(simklAuth.username ?? "Simkl")
+                                .font(.headline)
+                            Text(simklAuth.isLoggedIn ? "Signed in" : "Not signed in")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        #if !os(tvOS)
+                        Button(simklAuth.isLoggedIn ? "Sign Out" : "Sign In") {
+                            if simklAuth.isLoggedIn {
+                                simklAuth.logout()
+                            } else {
+                                simklAuth.login(presentationAnchor: Self.presentationAnchor())
+                            }
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(simklAuth.isLoggedIn ? Color.red : Color.accentColor)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background((simklAuth.isLoggedIn ? Color.red : Color.accentColor)
+                            .opacity(0.1), in: Capsule())
+                        .buttonStyle(.plain)
+                        #endif
+                    }
+                    Text("Tracks your anime library on Simkl alongside AniList and MyAnimeList. "
+                         + "Simkl has no manga, so manga tracking is unaffected.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if signedInSides.count >= 2 {

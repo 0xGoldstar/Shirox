@@ -12,6 +12,7 @@
 		0345A08DCF61CF5C647B7CD5 /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D9D985D9ED34BCD80E74692 /* SplashView.swift */; };
 		0419ECB764F9090BBBB52289 /* JellyfinEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF4C00BAA407FF400B069044 /* JellyfinEntryView.swift */; };
 		05CAE013AB731685896B2FB5 /* SimklPayloadBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00057EFE3BA37F4C8D9AB09 /* SimklPayloadBuilderTests.swift */; };
+		066C7A1C6B365988BE83ED5F /* SimklQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C818D0DBB893464E4124CFC5 /* SimklQueueTests.swift */; };
 		06ADAE227115BFC37CA3EB39 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E87688CB577983F43E550D /* OnboardingView.swift */; };
 		06D7AFDABCC054071C9DA405 /* CopyTitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 250387834E819E85E4CD966E /* CopyTitle.swift */; };
 		074D937EBB3DF5A34CCD9F10 /* LibrarySyncPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9970B31153A18CDD095323FB /* LibrarySyncPlanner.swift */; };
@@ -994,6 +995,7 @@
 		C33E435703AA1308538E7D59 /* MALOfficialDiscoveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MALOfficialDiscoveryTests.swift; sourceTree = "<group>"; };
 		C372736CDF3DAFB6621F4326 /* JellyfinCore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JellyfinCore.swift; sourceTree = "<group>"; };
 		C581970F3C23C369DD7CA074 /* SearchBrowseView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SearchBrowseView.swift; sourceTree = "<group>"; };
+		C818D0DBB893464E4124CFC5 /* SimklQueueTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklQueueTests.swift; sourceTree = "<group>"; };
 		C9C80D0B3C80A6C74E9CB5DE /* BackupEnvelopeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackupEnvelopeTests.swift; sourceTree = "<group>"; };
 		C9DF617989E51E2EB07B0134 /* LocalLibraryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLibraryManager.swift; sourceTree = "<group>"; };
 		CF6B7E2E4A3D9F1B8C0E5A33 /* Shirox.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shirox.xcconfig; sourceTree = "<group>"; };
@@ -1476,6 +1478,7 @@
 				0738DEBB38C658250DDB6A58 /* MergeFoldTests.swift */,
 				A00057EFE3BA37F4C8D9AB09 /* SimklPayloadBuilderTests.swift */,
 				7F8DF1638344A52ED8F86BD4 /* SimklBatchingTests.swift */,
+				C818D0DBB893464E4124CFC5 /* SimklQueueTests.swift */,
 			);
 			path = ShiroxTests;
 			sourceTree = SOURCE_ROOT;
@@ -1779,6 +1782,7 @@
 				9D966E8686A8426872756A71 /* MergeFoldTests.swift in Sources */,
 				05CAE013AB731685896B2FB5 /* SimklPayloadBuilderTests.swift in Sources */,
 				D735FE376DC1B979E2E382AA /* SimklBatchingTests.swift in Sources */,
+				066C7A1C6B365988BE83ED5F /* SimklQueueTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

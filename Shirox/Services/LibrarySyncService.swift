@@ -63,9 +63,12 @@ final class LibrarySyncService: ObservableObject {
                     if let anilist = anilistForMAL[entry.media.id] { ids[.anilist] = anilist }
                     return ids
                 case .simkl:
-                    // Wired in the Simkl client plan. `signedInSides` never yields .simkl until
-                    // then, so no Simkl entries reach this resolver.
-                    return [:]
+                    // Simkl entries are keyed by the MyAnimeList id where they have one, so they
+                    // land on the same canonical key as the other two sides.
+                    var ids: [LibrarySide: Int] = [.simkl: entry.media.id]
+                    if let mal = entry.media.idMal { ids[.mal] = mal }
+                    else { ids[.anilist] = entry.media.id }
+                    return ids
                 }
             })
 
@@ -118,9 +121,12 @@ final class LibrarySyncService: ObservableObject {
                     if let anilist = anilistForMAL[entry.media.id] { ids[.anilist] = anilist }
                     return ids
                 case .simkl:
-                    // Wired in the Simkl client plan. `signedInSides` never yields .simkl until
-                    // then, so no Simkl entries reach this resolver.
-                    return [:]
+                    // Simkl entries are keyed by the MyAnimeList id where they have one, so they
+                    // land on the same canonical key as the other two sides.
+                    var ids: [LibrarySide: Int] = [.simkl: entry.media.id]
+                    if let mal = entry.media.idMal { ids[.mal] = mal }
+                    else { ids[.anilist] = entry.media.id }
+                    return ids
                 }
             })
         return LibrarySyncPlanner.overwritePlan(
@@ -255,10 +261,9 @@ final class LibrarySyncService: ObservableObject {
             case .mal:
                 try await MALLibraryService.shared.deleteEntry(malId: deletion.id)
             case .simkl:
-                // Inside a sync run a crash is worse than a reported failure: the run should
-                // finish and say what it could not do.
-                Logger.shared.log("[LibrarySync] Simkl delete not wired yet", type: "Error")
-                return .failed
+                // Whole-entry removal: history and watchlist entry both. `rawUnmarkEpisodes` is
+                // the other, much narrower one — see SimklLibraryService.
+                try await SimklLibraryService.shared.rawDeleteEntry(ids: ["mal": deletion.id])
             }
             try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
             return .deleted
@@ -290,9 +295,13 @@ final class LibrarySyncService: ObservableObject {
                     malId: id, status: status, progress: progress,
                     score: score, numTimesRewatched: timesRewatched)
             case .simkl:
-                // As in `remove`: report the failure, do not take the run down with it.
-                Logger.shared.log("[LibrarySync] Simkl write not wired yet", type: "Error")
-                return .failed
+                // Queued rather than sent: Simkl allows 1 POST/sec and batches 50 items, so a
+                // per-title request here would be the exact pattern that gets a client_id
+                // suspended. `flush()` sends them after the run.
+                SimklLibraryService.shared.rawUpdateEntry(
+                    malId: id, anilistId: nil, status: status,
+                    progress: progress, previousProgress: nil,
+                    score: score, format: .point10)
             }
             try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
             return hadEntry ? .advanced : .created
@@ -314,9 +323,7 @@ final class LibrarySyncService: ObservableObject {
             switch side {
             case .anilist: return AniListAuthManager.shared.isLoggedIn
             case .mal:     return MALAuthManager.shared.isLoggedIn
-            // No Simkl auth manager yet, so Simkl is never signed in. This is what keeps every
-            // other .simkl arm below unreachable rather than latent.
-            case .simkl:   return false
+            case .simkl:   return SimklAuthManager.shared.isLoggedIn
             }
         }
     }
@@ -327,7 +334,7 @@ final class LibrarySyncService: ObservableObject {
         var result: [LibrarySide: [LibraryEntry]] = [:]
         for side in signedInSides {
             do {
-                result[side] = try await provider(for: side).fetchLibrary()
+                result[side] = try await fetchLibrary(for: side)
             } catch {
                 reportReadFailure(side: side, error: error)
                 return nil
@@ -336,15 +343,16 @@ final class LibrarySyncService: ObservableObject {
         return result
     }
 
-    /// The provider that serves one side's library.
-    private func provider(for side: LibrarySide) -> any MediaProvider {
+    /// One side's library.
+    ///
+    /// Deliberately not routed through `MediaProvider`: Simkl is a write-side tracker with no
+    /// discovery, profile or social endpoints, so conforming it to that protocol would mean
+    /// two dozen dead stubs and would let the fallback chain ask it for Home rows.
+    private func fetchLibrary(for side: LibrarySide) async throws -> [LibraryEntry] {
         switch side {
-        case .anilist: return AniListProvider.shared
-        case .mal:     return MALProvider.shared
-        case .simkl:
-            // Unreachable: readLibraries iterates signedInSides, which never yields .simkl until
-            // the Simkl client lands. Fail loudly rather than inventing a provider.
-            preconditionFailure("Simkl provider not wired yet")
+        case .anilist: return try await AniListProvider.shared.fetchLibrary()
+        case .mal:     return try await MALProvider.shared.fetchLibrary()
+        case .simkl:   return try await SimklLibraryService.shared.fetchLibrary()
         }
     }
 
