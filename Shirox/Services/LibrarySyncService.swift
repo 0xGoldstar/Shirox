@@ -48,12 +48,22 @@ final class LibrarySyncService: ObservableObject {
         // The reverse lookups only earn their keep when AniList entries may be written, or when a
         // mirror has to prove a MyAnimeList entry really is absent before deleting it.
         let needsReverseIds = run.writes(to: .anilist) || run.kind == .mirror
+        let malForAniList = await malIds(for: anilistEntries)
+        let anilistForMAL = needsReverseIds ? await anilistIds(for: malEntries) : [:]
         let pairing = LibrarySyncPlanner.pair(
-            anilist: anilistEntries,
-            mal: malEntries,
-            malIdForAniListId: await malIds(for: anilistEntries),
-            anilistIdForMALId: needsReverseIds ? await anilistIds(for: malEntries) : [:]
-        )
+            entries: entriesBySide,
+            ids: { side, entry in
+                switch side {
+                case .anilist:
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let mal = malForAniList[entry.media.id] { ids[.mal] = mal }
+                    return ids
+                case .mal:
+                    var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                    if let anilist = anilistForMAL[entry.media.id] { ids[.anilist] = anilist }
+                    return ids
+                }
+            })
 
         var summaries: [LibrarySide: LibrarySyncSummary] = [:]
 
@@ -88,13 +98,23 @@ final class LibrarySyncService: ObservableObject {
         guard let entriesBySide = await readLibraries() else { return nil }
         let anilistEntries = entriesBySide[.anilist] ?? []
         let malEntries = entriesBySide[.mal] ?? []
+        let malForAniList = await malIds(for: anilistEntries)
+        let anilistForMAL = (target == .anilist || run.kind == .mirror)
+            ? await anilistIds(for: malEntries) : [:]
         let pairing = LibrarySyncPlanner.pair(
-            anilist: anilistEntries,
-            mal: malEntries,
-            malIdForAniListId: await malIds(for: anilistEntries),
-            anilistIdForMALId: (target == .anilist || run.kind == .mirror)
-                ? await anilistIds(for: malEntries) : [:]
-        )
+            entries: entriesBySide,
+            ids: { side, entry in
+                switch side {
+                case .anilist:
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let mal = malForAniList[entry.media.id] { ids[.mal] = mal }
+                    return ids
+                case .mal:
+                    var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                    if let anilist = anilistForMAL[entry.media.id] { ids[.anilist] = anilist }
+                    return ids
+                }
+            })
         return LibrarySyncPlanner.overwritePlan(
             from: pairing,
             writing: target,
@@ -121,8 +141,8 @@ final class LibrarySyncService: ObservableObject {
     ) async -> [LibrarySide: LibrarySyncSummary] {
         var anilist = LibrarySyncSummary()
         var mal = LibrarySyncSummary()
-        if run.writes(to: .mal) { mal.unmatched = pairing.unmatched(on: .anilist) }
-        if run.writes(to: .anilist) { anilist.unmatched = pairing.unmatched(on: .mal) }
+        if run.writes(to: .mal) { mal.unmatched = pairing.unmatched(writingTo: .mal) }
+        if run.writes(to: .anilist) { anilist.unmatched = pairing.unmatched(writingTo: .anilist) }
 
         // A pair with nothing on the side being read from has nothing to contribute.
         let workable = pairing.pairs.filter { pair in
