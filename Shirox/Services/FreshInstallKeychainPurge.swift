@@ -30,6 +30,7 @@ enum FreshInstallKeychainPurge {
         "anilist_access_token",
         "mal_access_token",
         "mal_refresh_token",
+        "simkl_access_token",
         "jellyfin_access_token",
         "jellyfin_user_id"
     ]

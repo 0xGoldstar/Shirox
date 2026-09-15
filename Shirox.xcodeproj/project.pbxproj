@@ -548,6 +548,7 @@
 		81EBD987209651DE3429B894 /* CopyTitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 250387834E819E85E4CD966E /* CopyTitle.swift */; };
 		83D181EC651FE51A5DAFBAC8 /* NSFWContentFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB32994B31FB72D2DAA8327A /* NSFWContentFilter.swift */; };
 		8767B4606F160B81224EA19D /* SimklPayloadBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835B68265BF761EA1E24A98A /* SimklPayloadBuilder.swift */; };
+		877F13A26E834ED6A766076C /* SimklAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D014C2144DABC77965030616 /* SimklAuthManager.swift */; };
 		87A1792C0381E4A08038D0F4 /* HomeCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F766E2B1601412A7B7D9F02 /* HomeCacheStore.swift */; };
 		8A38ECB64A6717CEED682DF0 /* HLSManifestParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 434062BAE638F3D33467EBCF /* HLSManifestParser.swift */; };
 		8A3B1A010F48F8614C2559F0 /* LibraryDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1659CAEADDD8118DA5FF4FFF /* LibraryDataSource.swift */; };
@@ -560,6 +561,7 @@
 		942D8709B3AE503E6D790993 /* JellyfinPlaybackCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56C921630CAED5B7B10A681B /* JellyfinPlaybackCoordinator.swift */; };
 		94B697176EF98978DE15DF49 /* LibrarySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D4488D593D0B711FA06E32 /* LibrarySyncService.swift */; };
 		94E60D2B2A6D92400B0C5431 /* ManageCollectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE497D28BD37BD64210898B9 /* ManageCollectionsView.swift */; };
+		95E68AEBFBB80F2D51186BA1 /* SimklAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D014C2144DABC77965030616 /* SimklAuthManager.swift */; };
 		973AD5CE33B4A1B0455FADE9 /* MALMangaLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BAE193514A5E83E81EF31B8 /* MALMangaLibraryService.swift */; };
 		9759F7A614D6C4373F0D37C5 /* LibrarySourceSwitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 340C623B04A57EE34B09333C /* LibrarySourceSwitcher.swift */; };
 		98110DAC1AB480D6E7FB3CC8 /* MangaReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A163F438470905CAA8B912B0 /* MangaReaderView.swift */; };
@@ -658,6 +660,7 @@
 		D1A2B3C4E5F60718293A4B64 /* ContinueWatchingSeasonMatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A2B3C4E5F60718293A4B65 /* ContinueWatchingSeasonMatchTests.swift */; };
 		D21F803B1289756FE8ECCC41 /* PendingWrite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A5A6BA34DDCEF8AFDF2E059 /* PendingWrite.swift */; };
 		D2552A62F80024BCBEC45902 /* PendingWriteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49DFA57CE44ED5570821789D /* PendingWriteTests.swift */; };
+		D340465C2F9996D0B7CFAD46 /* SimklAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D014C2144DABC77965030616 /* SimklAuthManager.swift */; };
 		D35A711A9A3A9DF150C7DD04 /* JellyfinPosterCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D4FBF1385A6C9330CBE7EAB /* JellyfinPosterCard.swift */; };
 		D40AC9F8DA221DE6E8FB835F /* HomeCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A24D9074CE6FD30E60EEA4C /* HomeCacheStoreTests.swift */; };
 		D4C8B24F733A507E93ACB3D2 /* MangaModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44010E61F429972277F10D2F /* MangaModels.swift */; };
@@ -986,6 +989,7 @@
 		CF6B7E2E4A3D9F1B8C0E5A33 /* Shirox.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shirox.xcconfig; sourceTree = "<group>"; };
 		CF6B7E2E4A3D9F1B8C0E5A44 /* Shirox.local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shirox.local.xcconfig; sourceTree = "<group>"; };
 		CF6B7E2E4A3D9F1B8C0E5A55 /* Shirox.local.xcconfig.template */ = {isa = PBXFileReference; lastKnownFileType = text; path = Shirox.local.xcconfig.template; sourceTree = "<group>"; };
+		D014C2144DABC77965030616 /* SimklAuthManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklAuthManager.swift; sourceTree = "<group>"; };
 		D15FDAB330588459FA8A0714 /* JSEngine+Manga.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "JSEngine+Manga.swift"; sourceTree = "<group>"; };
 		D1A2B3C4E5F60718293A4B5D /* SeasonChainMathTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SeasonChainMathTests.swift; sourceTree = "<group>"; };
 		D1A2B3C4E5F60718293A4B61 /* EpisodeNavigatorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EpisodeNavigatorTests.swift; sourceTree = "<group>"; };
@@ -1202,6 +1206,7 @@
 				BA0000000000000000000E31 /* BackupAccountsSection.swift */,
 				AB699100F232CDB1648C513F /* MALOfficialDiscoveryService.swift */,
 				835B68265BF761EA1E24A98A /* SimklPayloadBuilder.swift */,
+				D014C2144DABC77965030616 /* SimklAuthManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1972,6 +1977,7 @@
 				C7A86D020389F742D74AE52E /* HomeCacheStore.swift in Sources */,
 				FF0C14E2BFB7E229AC061F3D /* FreshInstallKeychainPurge.swift in Sources */,
 				8767B4606F160B81224EA19D /* SimklPayloadBuilder.swift in Sources */,
+				877F13A26E834ED6A766076C /* SimklAuthManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2185,6 +2191,7 @@
 				87A1792C0381E4A08038D0F4 /* HomeCacheStore.swift in Sources */,
 				E40ED5A5A03F9A3ECCE3BEC7 /* FreshInstallKeychainPurge.swift in Sources */,
 				4D2C1698FD0A2633782D3612 /* SimklPayloadBuilder.swift in Sources */,
+				95E68AEBFBB80F2D51186BA1 /* SimklAuthManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2398,6 +2405,7 @@
 				408862BA9DA473140FE66302 /* HomeCacheStore.swift in Sources */,
 				0C420821718959529F2289AA /* FreshInstallKeychainPurge.swift in Sources */,
 				2901C863D564317F8C743795 /* SimklPayloadBuilder.swift in Sources */,
+				D340465C2F9996D0B7CFAD46 /* SimklAuthManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
