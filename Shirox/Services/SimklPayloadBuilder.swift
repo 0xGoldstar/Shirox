@@ -81,7 +81,13 @@ enum SimklPayloadBuilder {
             var show: [String: Any] = ["ids": item.ids, "status": item.status.rawValue]
             if let rating = item.rating { show["rating"] = rating }
             if let episodes = item.episodes, !episodes.isEmpty {
-                show["seasons"] = [["number": 1, "episodes": episodes.map { ["number": $0] }]]
+                // The top-level `episodes` shorthand, not `seasons: [{number: 1, …}]`.
+                //
+                // Both are documented, and the explicit form is a TVDB-style "season 1" — which
+                // anime on Simkl is not, because it numbers by AniDB sequential. Writes using
+                // `seasons` were accepted and stored nothing: the response reported
+                // `added.episodes: 0` while the status change landed fine.
+                show["episodes"] = episodes.map { ["number": $0] }
             }
             return show
         }]
@@ -98,7 +104,9 @@ enum SimklPayloadBuilder {
     static func removalBody(ids: [String: Int], episodes: [Int]?) -> [String: Any] {
         var show: [String: Any] = ["ids": ids]
         if let episodes {
-            show["seasons"] = [["number": 1, "episodes": episodes.map { ["number": $0] }]]
+            // Same shorthand as `historyBody`, for the same reason: anime is numbered AniDB
+            // sequential, not as TVDB season 1.
+            show["episodes"] = episodes.map { ["number": $0] }
         }
         return ["shows": [show]]
     }

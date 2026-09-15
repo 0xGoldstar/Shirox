@@ -81,7 +81,8 @@ final class SimklPayloadBuilderTests: XCTestCase {
     func testPartialRemovalNamesItsEpisodes() {
         let body = SimklPayloadBuilder.removalBody(ids: ["mal": 38000], episodes: [6, 7, 8])
         let shows = body["shows"] as? [[String: Any]]
-        XCTAssertNotNil(shows?.first?["seasons"])
+        XCTAssertNotNil(shows?.first?["episodes"], "naming episodes is what keeps this partial")
+        XCTAssertNil(shows?.first?["seasons"])
     }
 
     /// With no episodes, Simkl removes the title from the user's library entirely — history and
@@ -97,7 +98,8 @@ final class SimklPayloadBuilderTests: XCTestCase {
     func testEmptyEpisodeListIsNotAWholeEntryDelete() {
         let body = SimklPayloadBuilder.removalBody(ids: ["mal": 38000], episodes: [])
         let shows = body["shows"] as? [[String: Any]]
-        XCTAssertNotNil(shows?.first?["seasons"])
+        XCTAssertNotNil(shows?.first?["episodes"],
+                        "an empty list must stay the partial form, not become a library delete")
     }
 
     // MARK: - Batching (protects the shared client_id)
@@ -138,6 +140,33 @@ final class SimklPayloadBuilderTests: XCTestCase {
         let ids = (body["shows"] as? [[String: Any]])?.first?["ids"] as? [String: Int]
         XCTAssertEqual(ids?["mal"], 38000)
         XCTAssertEqual(ids?["anilist"], 101922)
+    }
+
+    /// Episodes go in the top-level shorthand, which Simkl auto-wraps to season 1 under AniDB
+    /// sequential numbering. The explicit `seasons: [{number: 1}]` form is TVDB-shaped: live
+    /// writes using it were accepted and stored nothing, reporting `added.episodes: 0`.
+    func testEpisodesUseTheTopLevelShorthandNotASeasonsBlock() {
+        let body = SimklPayloadBuilder.historyBody(items: [
+            SimklWrite(ids: ["mal": 38000], status: .completed, rating: 9, episodes: [1, 2, 3])
+        ])
+        let show = (body["shows"] as? [[String: Any]])?.first
+
+        XCTAssertNil(show?["seasons"], "the seasons form is TVDB-shaped and silently stores nothing")
+        let episodes = show?["episodes"] as? [[String: Int]]
+        XCTAssertEqual(episodes?.count, 3)
+        XCTAssertEqual(episodes?.map { $0["number"]! }, [1, 2, 3])
+    }
+
+    /// A status-only write carries no episode key at all.
+    func testStatusOnlyWriteCarriesNoEpisodes() {
+        let body = SimklPayloadBuilder.historyBody(items: [
+            SimklWrite(ids: ["mal": 38000], status: .plantowatch, rating: nil, episodes: nil)
+        ])
+        let show = (body["shows"] as? [[String: Any]])?.first
+
+        XCTAssertNil(show?["episodes"])
+        XCTAssertNil(show?["seasons"])
+        XCTAssertEqual(show?["status"] as? String, "plantowatch")
     }
 
     /// TVDB-style per-season numbering is exactly what this design avoids.
