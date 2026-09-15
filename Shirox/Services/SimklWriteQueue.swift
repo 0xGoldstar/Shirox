@@ -32,6 +32,7 @@ final class SimklWriteQueue {
 
     /// One raw response per flush is logged, to see the shape rather than assume it.
     private var loggedSample = false
+    private var loggedOutgoing = false
 
     init(minInterval: TimeInterval = 1.0,
          send: @escaping Send,
@@ -64,6 +65,7 @@ final class SimklWriteQueue {
         acceptedShows = 0
         acceptedEpisodes = 0
         loggedSample = false
+        loggedOutgoing = false
 
         let batches = SimklPayloadBuilder.batches(pending)
         pending = []
@@ -71,7 +73,9 @@ final class SimklWriteQueue {
         for (index, batch) in batches.enumerated() {
             if index > 0 { await sleep(minInterval) }
             do {
-                let data = try await send(SimklPayloadBuilder.historyBody(items: batch))
+                let body = SimklPayloadBuilder.historyBody(items: batch)
+                logOutgoing(body)
+                let data = try await send(body)
                 tally(data)
             } catch {
                 Logger.shared.log("[Simkl] Write batch failed, keeping it queued: \(error)", type: "Error")
@@ -85,6 +89,20 @@ final class SimklWriteQueue {
             "[Simkl] flush done: \(acceptedShows) shows / \(acceptedEpisodes) episodes stored, "
             + "\(notFoundCount) not found, \(pending.count) still queued",
             type: "Provider")
+    }
+
+    /// Logs the first item of the first batch **as this app serialises it**.
+    ///
+    /// Simkl's reply echoes a `request` object, but that echo is its own reconstruction — it is
+    /// not proof of what was sent. Two rounds have now been spent guessing whether episodes were
+    /// missing from the payload or being dropped on receipt; this settles which.
+    private func logOutgoing(_ body: [String: Any]) {
+        guard !loggedOutgoing else { return }
+        loggedOutgoing = true
+        guard let first = (body["shows"] as? [[String: Any]])?.first,
+              let data = try? JSONSerialization.data(withJSONObject: first),
+              let json = String(data: data, encoding: .utf8) else { return }
+        Logger.shared.log("[Simkl] outgoing item: \(json.prefix(300))", type: "Provider")
     }
 
     /// Reads what Simkl says it did with a batch.
