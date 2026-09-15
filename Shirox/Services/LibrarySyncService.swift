@@ -48,12 +48,26 @@ final class LibrarySyncService: ObservableObject {
         // The reverse lookups only earn their keep when AniList entries may be written, or when a
         // mirror has to prove a MyAnimeList entry really is absent before deleting it.
         let needsReverseIds = run.writes(to: .anilist) || run.kind == .mirror
+        let malForAniList = await malIds(for: anilistEntries)
+        let anilistForMAL = needsReverseIds ? await anilistIds(for: malEntries) : [:]
         let pairing = LibrarySyncPlanner.pair(
-            anilist: anilistEntries,
-            mal: malEntries,
-            malIdForAniListId: await malIds(for: anilistEntries),
-            anilistIdForMALId: needsReverseIds ? await anilistIds(for: malEntries) : [:]
-        )
+            entries: entriesBySide,
+            ids: { side, entry in
+                switch side {
+                case .anilist:
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let mal = malForAniList[entry.media.id] { ids[.mal] = mal }
+                    return ids
+                case .mal:
+                    var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                    if let anilist = anilistForMAL[entry.media.id] { ids[.anilist] = anilist }
+                    return ids
+                case .simkl:
+                    // Wired in the Simkl client plan. `signedInSides` never yields .simkl until
+                    // then, so no Simkl entries reach this resolver.
+                    return [:]
+                }
+            })
 
         var summaries: [LibrarySide: LibrarySyncSummary] = [:]
 
@@ -88,13 +102,27 @@ final class LibrarySyncService: ObservableObject {
         guard let entriesBySide = await readLibraries() else { return nil }
         let anilistEntries = entriesBySide[.anilist] ?? []
         let malEntries = entriesBySide[.mal] ?? []
+        let malForAniList = await malIds(for: anilistEntries)
+        let anilistForMAL = (target == .anilist || run.kind == .mirror)
+            ? await anilistIds(for: malEntries) : [:]
         let pairing = LibrarySyncPlanner.pair(
-            anilist: anilistEntries,
-            mal: malEntries,
-            malIdForAniListId: await malIds(for: anilistEntries),
-            anilistIdForMALId: (target == .anilist || run.kind == .mirror)
-                ? await anilistIds(for: malEntries) : [:]
-        )
+            entries: entriesBySide,
+            ids: { side, entry in
+                switch side {
+                case .anilist:
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let mal = malForAniList[entry.media.id] { ids[.mal] = mal }
+                    return ids
+                case .mal:
+                    var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                    if let anilist = anilistForMAL[entry.media.id] { ids[.anilist] = anilist }
+                    return ids
+                case .simkl:
+                    // Wired in the Simkl client plan. `signedInSides` never yields .simkl until
+                    // then, so no Simkl entries reach this resolver.
+                    return [:]
+                }
+            })
         return LibrarySyncPlanner.overwritePlan(
             from: pairing,
             writing: target,
@@ -119,39 +147,50 @@ final class LibrarySyncService: ObservableObject {
     private func runSync(
         _ run: SyncRun, _ pairing: LibraryPairing
     ) async -> [LibrarySide: LibrarySyncSummary] {
-        var anilist = LibrarySyncSummary()
-        var mal = LibrarySyncSummary()
-        if run.writes(to: .mal) { mal.unmatched = pairing.unmatched(on: .anilist) }
-        if run.writes(to: .anilist) { anilist.unmatched = pairing.unmatched(on: .mal) }
+        let targets = LibrarySide.allCases.filter { run.writes(to: $0) }
+        // Everything for the all-ways merge; just the named source otherwise.
+        let sources = run.source.map { [$0] } ?? LibrarySide.allCases
 
-        // A pair with nothing on the side being read from has nothing to contribute.
+        var summaries: [LibrarySide: LibrarySyncSummary] = [:]
+        for side in targets {
+            var summary = LibrarySyncSummary()
+            summary.unmatched = pairing.unmatched(writingTo: side)
+            summaries[side] = summary
+        }
+
+        // A pair with nothing on any side being read from has nothing to contribute.
         let workable = pairing.pairs.filter { pair in
-            (run.writes(to: .mal) && pair.entry(on: .anilist) != nil)
-                || (run.writes(to: .anilist) && pair.entry(on: .mal) != nil)
+            sources.contains { pair.entry(on: $0) != nil }
         }
 
         for (index, pair) in workable.enumerated() {
             statusText = "Syncing \(index + 1) of \(workable.count)"
 
-            if run.writes(to: .mal), let source = pair.entry(on: .anilist), let malId = pair.id(on: .mal) {
-                mal.record(await apply(
-                    LibrarySyncPlanner.decide(source: source, target: pair.entry(on: .mal)),
-                    to: .mal, id: malId,
-                    title: source.media.title.displayTitle, hadEntry: pair.entry(on: .mal) != nil))
+            // The one entry every other side should be brought up to, and which side it came
+            // from. Ties keep the earlier side, matching `LibrarySyncPlanner.winner(among:)`.
+            var best: (side: LibrarySide, entry: LibraryEntry)?
+            for side in sources {
+                guard let candidate = pair.entry(on: side) else { continue }
+                if best == nil
+                    || LibrarySyncPlanner.viewing(candidate) > LibrarySyncPlanner.viewing(best!.entry) {
+                    best = (side, candidate)
+                }
             }
+            guard let winner = best else { continue }
 
-            if run.writes(to: .anilist), let source = pair.entry(on: .mal), let anilistId = pair.id(on: .anilist) {
-                anilist.record(await apply(
-                    LibrarySyncPlanner.decide(source: source, target: pair.entry(on: .anilist)),
-                    to: .anilist, id: anilistId,
-                    title: source.media.title.displayTitle, hadEntry: pair.entry(on: .anilist) != nil))
+            for side in targets {
+                // Never write a side's own entry back to itself.
+                guard side != winner.side else { continue }
+                guard let id = pair.id(on: side) else { continue }
+                let existing = pair.entry(on: side)
+
+                summaries[side]?.record(await apply(
+                    LibrarySyncPlanner.decide(source: winner.entry, target: existing),
+                    to: side, id: id,
+                    title: winner.entry.media.title.displayTitle, hadEntry: existing != nil))
             }
         }
 
-        // Only the sides this run actually wrote to belong in the report.
-        var summaries: [LibrarySide: LibrarySyncSummary] = [:]
-        if run.writes(to: .anilist) { summaries[.anilist] = anilist }
-        if run.writes(to: .mal) { summaries[.mal] = mal }
         return summaries
     }
 
@@ -215,6 +254,11 @@ final class LibrarySyncService: ObservableObject {
                 try await AniListLibraryService.shared.deleteEntry(entryId: deletion.id)
             case .mal:
                 try await MALLibraryService.shared.deleteEntry(malId: deletion.id)
+            case .simkl:
+                // Inside a sync run a crash is worse than a reported failure: the run should
+                // finish and say what it could not do.
+                Logger.shared.log("[LibrarySync] Simkl delete not wired yet", type: "Error")
+                return .failed
             }
             try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
             return .deleted
@@ -245,6 +289,10 @@ final class LibrarySyncService: ObservableObject {
                 try await MALLibraryService.shared.updateEntry(
                     malId: id, status: status, progress: progress,
                     score: score, numTimesRewatched: timesRewatched)
+            case .simkl:
+                // As in `remove`: report the failure, do not take the run down with it.
+                Logger.shared.log("[LibrarySync] Simkl write not wired yet", type: "Error")
+                return .failed
             }
             try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
             return hadEntry ? .advanced : .created
@@ -257,11 +305,27 @@ final class LibrarySyncService: ObservableObject {
 
     // MARK: - Reading and reporting
 
+    /// The tracking services signed in right now, in `LibrarySide.allCases` order.
+    ///
+    /// Reads iterate this rather than `allCases`: a side nobody signed into has no library to
+    /// fetch, and asking for one fails the whole run.
+    var signedInSides: [LibrarySide] {
+        LibrarySide.allCases.filter { side in
+            switch side {
+            case .anilist: return AniListAuthManager.shared.isLoggedIn
+            case .mal:     return MALAuthManager.shared.isLoggedIn
+            // No Simkl auth manager yet, so Simkl is never signed in. This is what keeps every
+            // other .simkl arm below unreachable rather than latent.
+            case .simkl:   return false
+            }
+        }
+    }
+
     private func readLibraries() async -> [LibrarySide: [LibraryEntry]]? {
         // Read each side under its own catch. Collapsing them into one message was what made a
         // failure impossible to act on — it named neither the service nor the reason.
         var result: [LibrarySide: [LibraryEntry]] = [:]
-        for side in LibrarySide.allCases {
+        for side in signedInSides {
             do {
                 result[side] = try await provider(for: side).fetchLibrary()
             } catch {
@@ -277,6 +341,10 @@ final class LibrarySyncService: ObservableObject {
         switch side {
         case .anilist: return AniListProvider.shared
         case .mal:     return MALProvider.shared
+        case .simkl:
+            // Unreachable: readLibraries iterates signedInSides, which never yields .simkl until
+            // the Simkl client lands. Fail loudly rather than inventing a provider.
+            preconditionFailure("Simkl provider not wired yet")
         }
     }
 
@@ -414,6 +482,12 @@ struct SyncRun: Identifiable, Equatable {
     let source: LibrarySide?
     let target: LibrarySide?
     let kind: Kind
+    /// The sides an all-ways merge actually spans — the signed-in ones, not every case that
+    /// exists. A targeted run leaves this nil because it already names both ends.
+    ///
+    /// Without it the merge title was built from `LibrarySide.allCases`, so somebody signed
+    /// into two services was shown a confirmation naming a third they had never connected.
+    var sides: [LibrarySide]? = nil
 
     var id: String { "\(kind.rawValue)|\(source?.rawValue ?? "all")|\(target?.rawValue ?? "all")" }
 
@@ -441,7 +515,7 @@ struct SyncRun: Identifiable, Equatable {
 
         switch section {
         case .sync:
-            return [SyncRun(source: nil, target: nil, kind: .merge)]
+            return [SyncRun(source: nil, target: nil, kind: .merge, sides: ordered)]
                 + pairs.map { SyncRun(source: $0.source, target: $0.target, kind: .copyForward) }
         case .overwrite:
             return pairs.map { SyncRun(source: $0.source, target: $0.target, kind: .overwrite) }
@@ -454,10 +528,9 @@ struct SyncRun: Identifiable, Equatable {
     /// "Overwrite AniList with MyAnimeList" was ambiguous in English about which of the two was
     /// about to be overwritten; an arrow isn't.
     var title: String {
-        guard let source, let target else {
-            return LibrarySide.allCases.map(\.name).joined(separator: " ⇄ ")
-        }
-        return "\(source.name) → \(target.name)"
+        if let source, let target { return "\(source.name) → \(target.name)" }
+        guard let sides, sides.count >= 2 else { return "Sync All Ways" }
+        return sides.map(\.name).joined(separator: " ⇄ ")
     }
 
     /// Names the account that changes, so the arrow never has to be read twice.

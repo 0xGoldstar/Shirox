@@ -40,14 +40,9 @@ struct SettingsView: View {
     @ObservedObject private var aniListAuth = AniListAuthManager.shared
     @ObservedObject private var malAuth = MALAuthManager.shared
 
-    /// The tracking services signed in right now, in `LibrarySide.allCases` order. The sync
-    /// sections are generated from this rather than from a fixed list of run permutations.
-    private var signedInSides: [LibrarySide] {
-        var sides: [LibrarySide] = []
-        if aniListAuth.isLoggedIn { sides.append(.anilist) }
-        if malAuth.isLoggedIn { sides.append(.mal) }
-        return sides
-    }
+    /// The sync sections are generated from whoever is signed in. Defined once on
+    /// `LibrarySyncService` so reads and the UI can never disagree about who that is.
+    private var signedInSides: [LibrarySide] { librarySync.signedInSides }
     @ObservedObject private var providerManager = ProviderManager.shared
     @EnvironmentObject private var moduleManager: ModuleManager
     @State private var showResetCWConfirmation = false
@@ -1245,6 +1240,7 @@ private struct ProvidersSettingsSection: View {
         switch type {
         case .anilist: return aniListAuth.isLoggedIn
         case .mal:     return malAuth.isLoggedIn
+        case .simkl:   return false   // no Simkl auth manager yet
         case .local:   return false   // not a sign-in-able provider
         }
     }
@@ -1259,6 +1255,7 @@ private struct ProvidersSettingsSection: View {
             // part that left people with no idea what to do about it.
             return aniListAuth.needsReauthentication ? "Sign in again" : "Signed in"
         case .mal: return malAuth.isLoggedIn ? "Signed in" : "Not signed in"
+        case .simkl: return "Not signed in"
         case .local: return "Not signed in"
         }
     }

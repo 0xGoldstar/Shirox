@@ -21,12 +21,13 @@ enum LibrarySyncDecision: Equatable {
 /// iterated in a stable order. The name used to be a ternary — `self == .anilist ? … : …` —
 /// which silently labelled any future third side "MyAnimeList".
 enum LibrarySide: String, CaseIterable {
-    case anilist, mal
+    case anilist, mal, simkl
 
     var name: String {
         switch self {
         case .anilist: return "AniList"
         case .mal:     return "MyAnimeList"
+        case .simkl:   return "Simkl"
         }
     }
 }
@@ -79,6 +80,28 @@ struct LibraryOverwritePlan {
     var isEmpty: Bool { writes.isEmpty && deletions.isEmpty }
 }
 
+/// A title's identity across sides.
+///
+/// MyAnimeList's id is the spine because every side speaks it: a MyAnimeList entry's `media.id`
+/// *is* the id, AniList entries carry `media.idMal`, and Simkl returns it under
+/// `extended=ids_only`. AniList's id is the fallback so a title MyAnimeList has never heard of
+/// still pairs rather than vanishing.
+struct CanonicalKey: Hashable {
+    private let value: String
+
+    /// nil when nothing can identify the title — the one genuinely unpairable case, which is
+    /// reported rather than dropped.
+    init?(ids: [LibrarySide: Int]) {
+        if let mal = ids[.mal] {
+            value = "mal:\(mal)"
+        } else if let anilist = ids[.anilist] {
+            value = "anilist:\(anilist)"
+        } else {
+            return nil
+        }
+    }
+}
+
 /// One title as it stands on each side, ready to be merged.
 ///
 /// A side may have an id but no entry, which is how "that service has never seen this title"
@@ -99,14 +122,27 @@ struct LibraryPair {
 /// The union of both libraries, plus the titles that could not be placed.
 struct LibraryPairing {
     var pairs: [LibraryPair] = []
-    /// Per side: that side's titles with no counterpart id, so there was nothing to write to.
-    var unmatchedBySide: [LibrarySide: [String]] = [:]
+    /// Titles no side could identify at all, by the side they came from.
+    var unidentified: [LibrarySide: [String]] = [:]
 
-    func unmatched(on side: LibrarySide) -> [String] { unmatchedBySide[side] ?? [] }
+    /// Titles that exist somewhere but have no id on `side`, so a run writing to `side` has
+    /// nowhere to put them.
+    ///
+    /// Relative to the destination, not the source. The old `unmatched(on:)` was named for the
+    /// side a title came from but consumed as the *other* side's shortfall, which only reads
+    /// sensibly while there are exactly two sides.
+    func unmatched(writingTo side: LibrarySide) -> [String] {
+        let noIdThere = pairs
+            .filter { $0.id(on: side) == nil && !$0.entries.isEmpty }
+            .compactMap { pair in
+                LibrarySide.allCases.compactMap { pair.entry(on: $0) }.first?.media.title.displayTitle
+            }
+        return (unidentified[side] ?? []) + noIdThere
+    }
 
-    /// Everything that couldn't be placed, for a run that covers every direction. Ordered by
-    /// `LibrarySide.allCases` so a summary sentence reads the same way on every run.
-    var unmatched: [String] { LibrarySide.allCases.flatMap { unmatched(on: $0) } }
+    /// Everything that couldn't be placed anywhere, ordered by `LibrarySide.allCases` so a
+    /// summary sentence reads the same way on every run.
+    var unmatched: [String] { LibrarySide.allCases.flatMap { unidentified[$0] ?? [] } }
 }
 
 /// Pure decision logic for merging a tracking library between AniList and MyAnimeList.
@@ -177,6 +213,21 @@ enum LibrarySyncPlanner {
         return !(watching.contains(a) && watching.contains(b))
     }
 
+    /// The single entry every other side should be brought up to.
+    ///
+    /// Folds across the sides rather than running pairwise passes: with more than two sides a
+    /// chain of pairwise updates has no order-independent answer. The winner is by construction
+    /// behind nobody, so writing it everywhere preserves the forward-only guarantee and a second
+    /// run changes nothing.
+    ///
+    /// Ties keep the earlier entry, so the result does not depend on iteration order.
+    static func winner(among entries: [LibraryEntry]) -> LibraryEntry? {
+        entries.reduce(nil) { best, candidate in
+            guard let best else { return candidate }
+            return viewing(candidate) > viewing(best) ? candidate : best
+        }
+    }
+
     /// The decision for one title. `target` is nil when the other service has never seen it.
     static func decide(source: LibraryEntry, target: LibraryEntry?) -> LibrarySyncDecision {
         guard let target else {
@@ -230,44 +281,37 @@ enum LibrarySyncPlanner {
         )
     }
 
-    /// Lines up both libraries title by title, covering the *union* of the two — a two-way merge
-    /// has to carry titles back from MyAnimeList as well as out to it.
+    /// Lines up every side's library title by title, covering the union of all of them.
     ///
-    /// Ids are resolved by the caller (the lookup is async and this stays pure).
+    /// Joined on a canonical key rather than pairwise id maps: with more than two sides there is
+    /// no "the other service" to resolve an id against. Ids are resolved by the caller, because
+    /// the lookups are async and this stays pure.
     static func pair(
-        anilist: [LibraryEntry],
-        mal: [LibraryEntry],
-        malIdForAniListId: [Int: Int],
-        anilistIdForMALId: [Int: Int]
+        entries: [LibrarySide: [LibraryEntry]],
+        ids resolve: (LibrarySide, LibraryEntry) -> [LibrarySide: Int]
     ) -> LibraryPairing {
         var pairing = LibraryPairing()
-        let malByID = Dictionary(mal.map { ($0.media.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var claimed = Set<Int>()
+        var byKey: [CanonicalKey: LibraryPair] = [:]
+        var order: [CanonicalKey] = []
 
-        for entry in anilist {
-            guard let malId = malIdForAniListId[entry.media.id] else {
-                pairing.unmatchedBySide[.anilist, default: []].append(entry.media.title.displayTitle)
-                continue
+        for side in LibrarySide.allCases {
+            for entry in entries[side] ?? [] {
+                let ids = resolve(side, entry)
+                guard let key = CanonicalKey(ids: ids) else {
+                    pairing.unidentified[side, default: []].append(entry.media.title.displayTitle)
+                    continue
+                }
+                if byKey[key] == nil {
+                    byKey[key] = LibraryPair(ids: [:], entries: [:])
+                    order.append(key)
+                }
+                // First writer wins on ids: a later side must not relabel a title's identity.
+                byKey[key]?.ids.merge(ids) { existing, _ in existing }
+                byKey[key]?.entries[side] = entry
             }
-            claimed.insert(malId)
-            var pair = LibraryPair(
-                ids: [.anilist: entry.media.id, .mal: malId],
-                entries: [.anilist: entry])
-            if let malEntry = malByID[malId] { pair.entries[.mal] = malEntry }
-            pairing.pairs.append(pair)
         }
 
-        // Whatever MyAnimeList has that the pass above didn't already account for.
-        for entry in mal where !claimed.contains(entry.media.id) {
-            guard let anilistId = anilistIdForMALId[entry.media.id] else {
-                pairing.unmatchedBySide[.mal, default: []].append(entry.media.title.displayTitle)
-                continue
-            }
-            pairing.pairs.append(LibraryPair(
-                ids: [.anilist: anilistId, .mal: entry.media.id],
-                entries: [.mal: entry]))
-        }
-
+        pairing.pairs = order.compactMap { byKey[$0] }
         return pairing
     }
 
@@ -309,7 +353,7 @@ enum LibrarySyncPlanner {
         deletingExtras: Bool
     ) -> LibraryOverwritePlan {
         var plan = LibraryOverwritePlan()
-        plan.unmatched = pairing.unmatched(on: source)
+        plan.unmatched = pairing.unmatched(writingTo: target)
 
         for pair in pairing.pairs {
             guard let sourceEntry = pair.entry(on: source) else { continue }
@@ -333,7 +377,7 @@ enum LibrarySyncPlanner {
 
         guard deletingExtras else { return plan }
 
-        plan.keptUnverified = pairing.unmatched(on: target).count
+        plan.keptUnverified = pairing.unmatched(writingTo: source).count
         plan.deletions = deletions(
             from: pairing, writing: target, reading: source, sourceMediaIds: sourceMediaIds)
             .compactMap { pair in
@@ -345,12 +389,15 @@ enum LibrarySyncPlanner {
         return plan
     }
 
-    /// The id `side` deletes by. AniList needs the *list entry's* own id; MyAnimeList deletes by
-    /// media id. Resolved in one place so a caller cannot pass the wrong one.
+    /// The id `side` deletes by. AniList needs the *list entry's* own id; MyAnimeList and Simkl
+    /// delete by media id. Resolved in one place so a caller cannot pass the wrong one.
     static func deletionId(for side: LibrarySide, pair: LibraryPair, entry: LibraryEntry) -> Int? {
         switch side {
         case .anilist: return entry.id
         case .mal:     return pair.id(on: .mal)
+        // Simkl identifies a title by the ids it was given; the MyAnimeList id is the one this
+        // app always has for it. See the Simkl spec §4 — removal is by ids, not by an entry id.
+        case .simkl:   return pair.id(on: .mal) ?? pair.id(on: .anilist)
         }
     }
 

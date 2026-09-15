@@ -11,7 +11,7 @@ final class SyncRunTests: XCTestCase {
         let runs = SyncRun.runs(in: .sync, among: bothSides)
 
         XCTAssertEqual(runs.count, 3)
-        XCTAssertEqual(runs.first, SyncRun(source: nil, target: nil, kind: .merge))
+        XCTAssertEqual(runs.first, SyncRun(source: nil, target: nil, kind: .merge, sides: bothSides))
         XCTAssertEqual(
             Set(runs.dropFirst().map { "\($0.source!.rawValue)->\($0.target!.rawValue)" }),
             ["anilist->mal", "mal->anilist"])
@@ -66,9 +66,13 @@ final class SyncRunTests: XCTestCase {
         XCTAssertEqual(
             SyncRun(source: .anilist, target: .mal, kind: .copyForward).title,
             "AniList → MyAnimeList")
+        // The merge names the sides actually signed in, never every case the enum has.
         XCTAssertEqual(
-            SyncRun(source: nil, target: nil, kind: .merge).title,
+            SyncRun.runs(in: .sync, among: bothSides).first?.title,
             "AniList ⇄ MyAnimeList")
+        XCTAssertEqual(
+            SyncRun.runs(in: .sync, among: [.anilist, .mal, .simkl]).first?.title,
+            "AniList ⇄ MyAnimeList ⇄ Simkl")
     }
 
     /// Each run needs a stable identity of its own, or SwiftUI's ForEach reuses rows between

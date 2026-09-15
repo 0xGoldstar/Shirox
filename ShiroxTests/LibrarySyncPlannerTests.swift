@@ -256,10 +256,19 @@ final class LibrarySyncPlannerTests: XCTestCase {
 
     func testPairingMatchesTitlesPresentOnBothServices() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5)],
-            mal: [entry(id: 900, progress: 2)],
-            malIdForAniListId: [100: 900],
-            anilistIdForMALId: [900: 100])
+            entries: [.anilist: [entry(id: 100, progress: 5)], .mal: [entry(id: 900, progress: 2)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [100: 900]
+                let rev: [Int: Int] = [900: 100]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         XCTAssertEqual(pairing.pairs.count, 1)
         XCTAssertEqual(pairing.pairs.first?.id(on: .anilist), 100)
@@ -273,10 +282,19 @@ final class LibrarySyncPlannerTests: XCTestCase {
     /// the other way, which is the whole point of a two-way run.
     func testPairingCoversTitlesOnlyOneServiceHas() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5)],
-            mal: [entry(id: 901, progress: 7)],
-            malIdForAniListId: [100: 900],
-            anilistIdForMALId: [901: 101])
+            entries: [.anilist: [entry(id: 100, progress: 5)], .mal: [entry(id: 901, progress: 7)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [100: 900]
+                let rev: [Int: Int] = [901: 101]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         XCTAssertEqual(pairing.pairs.count, 2)
         let anilistOnly = pairing.pairs.first { $0.id(on: .anilist) == 100 }
@@ -290,21 +308,43 @@ final class LibrarySyncPlannerTests: XCTestCase {
     /// A title present on both must not also come back as a MyAnimeList-only entry.
     func testPairingDoesNotClaimTheSameTitleTwice() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5)],
-            mal: [entry(id: 900, progress: 2)],
-            malIdForAniListId: [100: 900],
-            anilistIdForMALId: [900: 100])
+            entries: [.anilist: [entry(id: 100, progress: 5)], .mal: [entry(id: 900, progress: 2)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [100: 900]
+                let rev: [Int: Int] = [900: 100]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
         XCTAssertEqual(pairing.pairs.count, 1)
     }
 
     func testPairingReportsTitlesWithNoCounterpartId() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5)],
-            mal: [entry(id: 900, progress: 2)],
-            malIdForAniListId: [:],
-            anilistIdForMALId: [:])
-        XCTAssertTrue(pairing.pairs.isEmpty)
-        XCTAssertEqual(pairing.unmatched.sorted(), ["Title 100", "Title 900"])
+            entries: [.anilist: [entry(id: 100, progress: 5)], .mal: [entry(id: 900, progress: 2)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [:]
+                let rev: [Int: Int] = [:]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
+        // A title known to one side with no counterpart now gets a pair of its own rather than
+        // vanishing — required once a third side exists, where an AniList+Simkl title with no
+        // MyAnimeList id must still pair. What this test is actually about is that both titles
+        // are reported as having nowhere to go.
+        XCTAssertEqual(pairing.unmatched(writingTo: .mal), ["Title 100"])
+        XCTAssertEqual(pairing.unmatched(writingTo: .anilist), ["Title 900"])
     }
 
     // MARK: - Summary copy
@@ -386,10 +426,19 @@ final class LibrarySyncPlannerTests: XCTestCase {
 
     func testMirrorDeletesEntriesTheSourceProvablyLacks() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5)],
-            mal: [entry(id: 900, progress: 5), entry(id: 901, progress: 3)],
-            malIdForAniListId: [100: 900],
-            anilistIdForMALId: [901: 101])
+            entries: [.anilist: [entry(id: 100, progress: 5)], .mal: [entry(id: 900, progress: 5), entry(id: 901, progress: 3)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [100: 900]
+                let rev: [Int: Int] = [901: 101]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         let deletions = LibrarySyncPlanner.deletions(
             from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100])
@@ -399,10 +448,19 @@ final class LibrarySyncPlannerTests: XCTestCase {
 
     func testMirrorKeepsEntriesTheSourceStillHas() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5)],
-            mal: [entry(id: 900, progress: 5)],
-            malIdForAniListId: [100: 900],
-            anilistIdForMALId: [900: 100])
+            entries: [.anilist: [entry(id: 100, progress: 5)], .mal: [entry(id: 900, progress: 5)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [100: 900]
+                let rev: [Int: Int] = [900: 100]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         let deletions = LibrarySyncPlanner.deletions(
             from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100])
@@ -414,26 +472,47 @@ final class LibrarySyncPlannerTests: XCTestCase {
     /// would turn a failed lookup into lost watch history.
     func testMirrorNeverDeletesAnEntryItCouldNotLookUp() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5)],
-            mal: [entry(id: 900, progress: 5), entry(id: 902, progress: 3)],
-            malIdForAniListId: [100: 900],
-            anilistIdForMALId: [:])
+            entries: [.anilist: [entry(id: 100, progress: 5)], .mal: [entry(id: 900, progress: 5), entry(id: 902, progress: 3)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [100: 900]
+                let rev: [Int: Int] = [:]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         let deletions = LibrarySyncPlanner.deletions(
             from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100])
 
         XCTAssertTrue(deletions.isEmpty)
-        XCTAssertEqual(pairing.unmatched(on: .mal), ["Title 902"])
+        XCTAssertEqual(pairing.unmatched(writingTo: .anilist), ["Title 902"])
     }
 
     /// THE ONE THAT MATTERS: the source *does* have this title, but its own id lookup failed, so
     /// the destination copy looks orphaned. Checking against the source's real ids catches it.
     func testMirrorKeepsAnEntryWhoseCounterpartFailedToMap() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5), entry(id: 101, progress: 4)],
-            mal: [entry(id: 900, progress: 5), entry(id: 901, progress: 4)],
-            malIdForAniListId: [100: 900],          // 101's MyAnimeList id could not be resolved
-            anilistIdForMALId: [901: 101])
+            entries: [
+                .anilist: [entry(id: 100, progress: 5), entry(id: 101, progress: 4)],
+                .mal: [entry(id: 900, progress: 5), entry(id: 901, progress: 4)],
+            ],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [100: 900]   // 101's MyAnimeList id could not be resolved
+                let rev: [Int: Int] = [901: 101]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         let deletions = LibrarySyncPlanner.deletions(
             from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100, 101])
@@ -443,10 +522,19 @@ final class LibrarySyncPlannerTests: XCTestCase {
 
     func testMirrorDeletesFromAniListWhenMyAnimeListIsTheSource() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5), entry(id: 101, progress: 4)],
-            mal: [entry(id: 900, progress: 5)],
-            malIdForAniListId: [100: 900, 101: 901],
-            anilistIdForMALId: [900: 100])
+            entries: [.anilist: [entry(id: 100, progress: 5), entry(id: 101, progress: 4)], .mal: [entry(id: 900, progress: 5)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [100: 900, 101: 901]
+                let rev: [Int: Int] = [900: 100]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         let deletions = LibrarySyncPlanner.deletions(
             from: pairing, writing: .anilist, reading: .mal, sourceMediaIds: [900])
@@ -466,10 +554,19 @@ final class LibrarySyncPlannerTests: XCTestCase {
 
     func testPlanWritesEverySourceTitleAndMarksWhichAreNew() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5), entry(id: 101, progress: 3)],
-            mal: [entry(id: 900, progress: 1)],
-            malIdForAniListId: [100: 900, 101: 901],
-            anilistIdForMALId: [:])
+            entries: [.anilist: [entry(id: 100, progress: 5), entry(id: 101, progress: 3)], .mal: [entry(id: 900, progress: 1)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [100: 900, 101: 901]
+                let rev: [Int: Int] = [:]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         let plan = LibrarySyncPlanner.overwritePlan(
             from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100, 101], deletingExtras: false)
@@ -482,10 +579,19 @@ final class LibrarySyncPlannerTests: XCTestCase {
 
     func testPlanCountsAlreadyMatchingEntriesAsUnchanged() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5, score: 8)],
-            mal: [entry(id: 900, progress: 5, score: 8)],
-            malIdForAniListId: [100: 900],
-            anilistIdForMALId: [900: 100])
+            entries: [.anilist: [entry(id: 100, progress: 5, score: 8)], .mal: [entry(id: 900, progress: 5, score: 8)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [100: 900]
+                let rev: [Int: Int] = [900: 100]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         let plan = LibrarySyncPlanner.overwritePlan(
             from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100], deletingExtras: false)
@@ -497,10 +603,19 @@ final class LibrarySyncPlannerTests: XCTestCase {
     /// An overwrite never removes anything, however many extras the destination has.
     func testPlanForAnOverwriteNeverDeletes() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5)],
-            mal: [entry(id: 900, progress: 5), entry(id: 901, progress: 2)],
-            malIdForAniListId: [100: 900],
-            anilistIdForMALId: [901: 101])
+            entries: [.anilist: [entry(id: 100, progress: 5)], .mal: [entry(id: 900, progress: 5), entry(id: 901, progress: 2)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [100: 900]
+                let rev: [Int: Int] = [901: 101]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         let plan = LibrarySyncPlanner.overwritePlan(
             from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100], deletingExtras: false)
@@ -510,10 +625,19 @@ final class LibrarySyncPlannerTests: XCTestCase {
 
     func testPlanForAMirrorListsWhatWouldBeDeletedByName() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5)],
-            mal: [entry(id: 900, progress: 5), entry(id: 901, progress: 2)],
-            malIdForAniListId: [100: 900],
-            anilistIdForMALId: [901: 101])
+            entries: [.anilist: [entry(id: 100, progress: 5)], .mal: [entry(id: 900, progress: 5), entry(id: 901, progress: 2)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [100: 900]
+                let rev: [Int: Int] = [901: 101]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         let plan = LibrarySyncPlanner.overwritePlan(
             from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100], deletingExtras: true)
@@ -526,10 +650,19 @@ final class LibrarySyncPlannerTests: XCTestCase {
     /// or, worse, remove a different entry.
     func testPlanDeletesFromAniListByListEntryId() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 101, entryId: 5000, progress: 3)],
-            mal: [],
-            malIdForAniListId: [101: 901],
-            anilistIdForMALId: [:])
+            entries: [.anilist: [entry(id: 101, entryId: 5000, progress: 3)], .mal: []],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [101: 901]
+                let rev: [Int: Int] = [:]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         let plan = LibrarySyncPlanner.overwritePlan(
             from: pairing, writing: .anilist, reading: .mal, sourceMediaIds: [], deletingExtras: true)
@@ -539,10 +672,19 @@ final class LibrarySyncPlannerTests: XCTestCase {
 
     func testPlanCarriesForwardWhatCouldNotBeMatched() {
         let pairing = LibrarySyncPlanner.pair(
-            anilist: [entry(id: 100, progress: 5)],
-            mal: [entry(id: 902, progress: 2)],
-            malIdForAniListId: [:],
-            anilistIdForMALId: [:])
+            entries: [.anilist: [entry(id: 100, progress: 5)], .mal: [entry(id: 902, progress: 2)]],
+            ids: { side, entry in
+                let fwd: [Int: Int] = [:]
+                let rev: [Int: Int] = [:]
+                if side == .anilist {
+                    var ids: [LibrarySide: Int] = [.anilist: entry.media.id]
+                    if let m = fwd[entry.media.id] { ids[.mal] = m }
+                    return ids
+                }
+                var ids: [LibrarySide: Int] = [.mal: entry.media.id]
+                if let a = rev[entry.media.id] { ids[.anilist] = a }
+                return ids
+            })
 
         let plan = LibrarySyncPlanner.overwritePlan(
             from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100], deletingExtras: true)
