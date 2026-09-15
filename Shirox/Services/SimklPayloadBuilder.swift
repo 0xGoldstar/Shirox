@@ -75,6 +75,9 @@ enum SimklPayloadBuilder {
 
     // MARK: - Bodies
 
+    /// The array anime entries are posted under. See `historyBody`.
+    static let animeKey = "anime"
+
     /// Builds a `/sync/history` body.
     ///
     /// A write that carries **both** a status and episodes is emitted as **two entries** for the
@@ -90,8 +93,16 @@ enum SimklPayloadBuilder {
     /// Episodes use `seasons: [{number: 1, …}]`, which is the documented shape for anime too —
     /// the top-level shorthand is not anime-specific and was a wrong turn.
     static func historyBody(items: [SimklWrite]) -> [String: Any] {
-        // Anime goes under `shows[]`. Simkl's docs are explicit: it resolves to the anime
-        // catalog from the ids, and `anime[]` exists only for backwards compatibility.
+        // Anime goes under `anime[]`, not `shows[]`.
+        //
+        // Simkl's docs say `shows[]` is the cleaner pattern for both, and that is true for the
+        // status half — statuses and ratings land through it. But episodes sent that way are
+        // discarded: three shapes were tried under `shows[]` (seasons with a status, the
+        // top-level shorthand, and seasons alone, which is their own documented anime example)
+        // and every one came back echoed as `{"ids":…,"type":"show"}` with the episodes gone
+        // and `added.episodes: 0`. The response labels those items `type: show` while reporting
+        // `simkl_type: anime`, and the read endpoint is `/sync/all-items/anime/all`, so the
+        // anime catalog is keyed separately here too.
         var shows: [[String: Any]] = []
 
         for item in items {
@@ -107,7 +118,7 @@ enum SimklPayloadBuilder {
             shows.append(state)
         }
 
-        return ["shows": shows]
+        return [Self.animeKey: shows]
     }
 
     /// `/sync/history/remove` does two very different things depending on one field.
@@ -124,7 +135,7 @@ enum SimklPayloadBuilder {
             // `seasons` is the documented shape for anime episodes, same as `historyBody`.
             show["seasons"] = [["number": 1, "episodes": episodes.map { ["number": $0] }]]
         }
-        return ["shows": [show]]
+        return [Self.animeKey: [show]]
     }
 
     // MARK: - Batching

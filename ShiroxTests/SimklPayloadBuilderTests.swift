@@ -80,7 +80,7 @@ final class SimklPayloadBuilderTests: XCTestCase {
     /// With episodes named, only those episodes are un-marked; the title stays in the library.
     func testPartialRemovalNamesItsEpisodes() {
         let body = SimklPayloadBuilder.removalBody(ids: ["mal": 38000], episodes: [6, 7, 8])
-        let shows = body["shows"] as? [[String: Any]]
+        let shows = body[SimklPayloadBuilder.animeKey] as? [[String: Any]]
         XCTAssertNotNil(shows?.first?["seasons"], "naming episodes is what keeps this partial")
     }
 
@@ -88,7 +88,7 @@ final class SimklPayloadBuilderTests: XCTestCase {
     /// watchlist entry both. These two must never be confusable.
     func testWholeEntryRemovalNamesNoEpisodes() {
         let body = SimklPayloadBuilder.removalBody(ids: ["mal": 38000], episodes: nil)
-        let shows = body["shows"] as? [[String: Any]]
+        let shows = body[SimklPayloadBuilder.animeKey] as? [[String: Any]]
         XCTAssertNil(shows?.first?["seasons"])
         XCTAssertNil(shows?.first?["episodes"])
     }
@@ -96,7 +96,7 @@ final class SimklPayloadBuilderTests: XCTestCase {
     /// An empty episode list must not silently become a whole-library delete.
     func testEmptyEpisodeListIsNotAWholeEntryDelete() {
         let body = SimklPayloadBuilder.removalBody(ids: ["mal": 38000], episodes: [])
-        let shows = body["shows"] as? [[String: Any]]
+        let shows = body[SimklPayloadBuilder.animeKey] as? [[String: Any]]
         XCTAssertNotNil(shows?.first?["seasons"],
                         "an empty list must stay the partial form, not become a library delete")
     }
@@ -123,7 +123,7 @@ final class SimklPayloadBuilderTests: XCTestCase {
         let body = SimklPayloadBuilder.historyBody(items: [
             SimklWrite(ids: ["mal": 38000], status: .completed, rating: 9, episodes: nil)
         ])
-        let shows = body["shows"] as? [[String: Any]]
+        let shows = body[SimklPayloadBuilder.animeKey] as? [[String: Any]]
         XCTAssertEqual(shows?.count, 1)
         XCTAssertEqual(shows?.first?["status"] as? String, "completed")
         XCTAssertEqual(shows?.first?["rating"] as? Int, 9)
@@ -136,7 +136,7 @@ final class SimklPayloadBuilderTests: XCTestCase {
             SimklWrite(ids: ["mal": 38000, "anilist": 101922],
                        status: .watching, rating: nil, episodes: [1])
         ])
-        let ids = (body["shows"] as? [[String: Any]])?.first?["ids"] as? [String: Int]
+        let ids = (body[SimklPayloadBuilder.animeKey] as? [[String: Any]])?.first?["ids"] as? [String: Int]
         XCTAssertEqual(ids?["mal"], 38000)
         XCTAssertEqual(ids?["anilist"], 101922)
     }
@@ -149,7 +149,7 @@ final class SimklPayloadBuilderTests: XCTestCase {
         let body = SimklPayloadBuilder.historyBody(items: [
             SimklWrite(ids: ["mal": 38000], status: .completed, rating: 9, episodes: [1, 2, 3])
         ])
-        let shows = body["shows"] as? [[String: Any]]
+        let shows = body[SimklPayloadBuilder.animeKey] as? [[String: Any]]
 
         XCTAssertEqual(shows?.count, 2, "one entry for the episodes, one for the status")
 
@@ -170,12 +170,12 @@ final class SimklPayloadBuilderTests: XCTestCase {
         let body = SimklPayloadBuilder.historyBody(items: [
             SimklWrite(ids: ["mal": 38000], status: .plantowatch, rating: nil, episodes: nil)
         ])
-        let show = (body["shows"] as? [[String: Any]])?.first
+        let show = (body[SimklPayloadBuilder.animeKey] as? [[String: Any]])?.first
 
         XCTAssertNil(show?["episodes"])
         XCTAssertNil(show?["seasons"])
         XCTAssertEqual(show?["status"] as? String, "plantowatch")
-        XCTAssertEqual((body["shows"] as? [[String: Any]])?.count, 1, "no episodes, so one entry")
+        XCTAssertEqual((body[SimklPayloadBuilder.animeKey] as? [[String: Any]])?.count, 1, "no episodes, so one entry")
     }
 
     /// TVDB-style per-season numbering is exactly what this design avoids.

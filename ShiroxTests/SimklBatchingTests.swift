@@ -14,7 +14,7 @@ final class SimklBatchingTests: XCTestCase {
         var sleeps: [TimeInterval] = []
 
         func itemCounts() -> [Int] {
-            bodies.map { ($0["shows"] as? [[String: Any]])?.count ?? 0 }
+            bodies.map { ($0[SimklPayloadBuilder.animeKey] as? [[String: Any]])?.count ?? 0 }
         }
     }
 

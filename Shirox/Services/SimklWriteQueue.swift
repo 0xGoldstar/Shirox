@@ -99,7 +99,7 @@ final class SimklWriteQueue {
     private func logOutgoing(_ body: [String: Any]) {
         guard !loggedOutgoing else { return }
         loggedOutgoing = true
-        guard let first = (body["shows"] as? [[String: Any]])?.first,
+        guard let first = (body[SimklPayloadBuilder.animeKey] as? [[String: Any]])?.first,
               let data = try? JSONSerialization.data(withJSONObject: first),
               let json = String(data: data, encoding: .utf8) else { return }
         Logger.shared.log("[Simkl] outgoing item: \(json.prefix(300))", type: "Provider")
