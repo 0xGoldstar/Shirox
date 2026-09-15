@@ -153,6 +153,10 @@ final class SimklLibraryService {
         return merged
     }
 
+    /// Counts the per-write diagnostics emitted this run, so a 400-title sync logs three
+    /// lines rather than four hundred.
+    private var loggedWriteSamples = 0
+
     /// Last library read. Backs Phase 2 — see `fetchLibrary`.
     private var cached: [LibraryEntry]?
 
@@ -274,6 +278,19 @@ final class SimklLibraryService {
         guard !ids.isEmpty else { return }
 
         let episodes = SimklPayloadBuilder.episodeNumbers(from: previousProgress, to: progress)
+
+        // The live write response showed requests with no episodes at all, so the inputs that
+        // decide that are worth seeing for the first few writes of a run.
+        if loggedWriteSamples < 3 {
+            loggedWriteSamples += 1
+            Logger.shared.log(
+                "[Simkl] write in: mal=\(malId.map(String.init) ?? "nil") status=\(status.rawValue) "
+                + "progress=\(progress) prev=\(previousProgress.map(String.init) ?? "nil") "
+                + "episodes=\(episodes.count) score=\(score) format=\(format.rawValue) "
+                + "rating=\(SimklPayloadBuilder.rating(from: score, format: format).map(String.init) ?? "nil")",
+                type: "Provider")
+        }
+
         queue.enqueue(SimklWrite(
             ids: ids,
             status: SimklPayloadBuilder.status(for: status),
@@ -287,6 +304,7 @@ final class SimklLibraryService {
     @discardableResult
     func flush() async -> Int {
         await queue.flush()
+        loggedWriteSamples = 0
         return queue.pendingCount
     }
 
