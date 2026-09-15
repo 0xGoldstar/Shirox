@@ -187,8 +187,15 @@ final class SimklLibraryService {
     /// what actually came back, is worth the log noise.
     private func logRead(_ entries: [LibraryEntry], phase: String) {
         let withProgress = entries.filter { $0.progress > 0 }.count
+        // Status distribution matters as much as progress: Simkl tracks a list status separately
+        // from episode history, so a title can read as completed with watched_episodes_count 0.
+        // Whether the status writes are landing is only visible here.
+        let byStatus = Dictionary(grouping: entries, by: \.status)
+            .map { "\($0.key.rawValue)=\($0.value.count)" }
+            .sorted()
+            .joined(separator: " ")
         Logger.shared.log(
-            "[Simkl] \(phase) read: \(entries.count) entries, \(withProgress) with progress > 0",
+            "[Simkl] \(phase) read: \(entries.count) entries, \(withProgress) with progress > 0 — \(byStatus)",
             type: "Provider")
     }
 

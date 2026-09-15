@@ -76,7 +76,9 @@ enum SimklPayloadBuilder {
     // MARK: - Bodies
 
     /// The array anime entries are posted under. See `historyBody`.
-    static let animeKey = "anime"
+    /// Tried as `"anime"` when episode writes were being dropped; it made no difference, so
+    /// this is back to the key Simkl's docs recommend for both TV and anime.
+    static let animeKey = "shows"
 
     /// Builds a `/sync/history` body.
     ///
