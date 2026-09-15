@@ -78,6 +78,11 @@ final class LibrarySyncService: ObservableObject {
         // Simkl writes are queued rather than sent one at a time, so that batching and the
         // 1 POST/sec limit are respected. Nothing has actually reached Simkl until this runs —
         // without it a run reported a tally of writes that never left the device.
+        if run.writes(to: .simkl) {
+            Logger.shared.log(
+                "[Simkl] run finished, flushing (summary present: \(summaries[.simkl] != nil))",
+                type: "Provider")
+        }
         if run.writes(to: .simkl), summaries[.simkl] != nil {
             let undelivered = await SimklLibraryService.shared.flush()
             if undelivered > 0 { Self.chargeUndelivered(undelivered, to: &summaries[.simkl]!) }

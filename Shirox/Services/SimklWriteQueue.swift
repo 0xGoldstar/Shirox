@@ -30,6 +30,9 @@ final class SimklWriteQueue {
     private(set) var acceptedShows = 0
     private(set) var acceptedEpisodes = 0
 
+    /// One raw response per flush is logged, to see the shape rather than assume it.
+    private var loggedSample = false
+
     init(minInterval: TimeInterval = 1.0,
          send: @escaping Send,
          sleep: @escaping Sleep = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }) {
@@ -51,11 +54,16 @@ final class SimklWriteQueue {
     /// would silently lose somebody's progress; carrying on would spend the rate-limit budget on
     /// requests likely to fail the same way.
     func flush() async {
-        guard !pending.isEmpty else { return }
+        guard !pending.isEmpty else {
+            Logger.shared.log("[Simkl] flush: nothing queued", type: "Provider")
+            return
+        }
+        Logger.shared.log("[Simkl] flush: sending \(pending.count) queued write(s)", type: "Provider")
 
         notFoundCount = 0
         acceptedShows = 0
         acceptedEpisodes = 0
+        loggedSample = false
 
         let batches = SimklPayloadBuilder.batches(pending)
         pending = []
@@ -72,12 +80,11 @@ final class SimklWriteQueue {
             }
         }
 
-        if notFoundCount > 0 || acceptedShows > 0 {
-            Logger.shared.log(
-                "[Simkl] write flush: \(acceptedShows) shows / \(acceptedEpisodes) episodes stored, "
-                + "\(notFoundCount) not found",
-                type: "Provider")
-        }
+        // Unconditional: a silent flush is exactly what hid the last two bugs.
+        Logger.shared.log(
+            "[Simkl] flush done: \(acceptedShows) shows / \(acceptedEpisodes) episodes stored, "
+            + "\(notFoundCount) not found, \(pending.count) still queued",
+            type: "Provider")
     }
 
     /// Reads what Simkl says it did with a batch.
@@ -86,6 +93,14 @@ final class SimklWriteQueue {
     /// back under `not_found`, and nothing is written for them. Without reading this, a run
     /// reports those as added on every single run and never notices.
     private func tally(_ data: Data) {
+        // The first response of a flush is logged verbatim. Simkl's write reply is the only
+        // place that says what was actually stored, and guessing at its shape has cost two
+        // rounds of wrong fixes already.
+        if !loggedSample {
+            loggedSample = true
+            let body = String(data: data.prefix(400), encoding: .utf8) ?? "<undecodable>"
+            Logger.shared.log("[Simkl] write response sample: \(body)", type: "Provider")
+        }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
         if let added = json["added"] as? [String: Any] {
