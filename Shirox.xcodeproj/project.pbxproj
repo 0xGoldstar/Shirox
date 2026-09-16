@@ -481,7 +481,6 @@
 		5A0429134E9EE5812B06C894 /* MangaTrackingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED767F1E614FFA030840F80 /* MangaTrackingTests.swift */; };
 		5C5B78EFA2A189F5865F491D /* JellyfinAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EA13A2F15016892850F349E /* JellyfinAuthManager.swift */; };
 		5DAFAF546B855F625D90343A /* JellyfinModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C4A4D717CED7197DBAD4A83 /* JellyfinModels.swift */; };
-		5E334D3A71C8D59C71724B7E /* SimklStartupRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961F160F3148BDC2C626748B /* SimklStartupRefreshTests.swift */; };
 		5EA50C4A17000000000000B1 /* SeasonChainMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA50C4A17000000000000F1 /* SeasonChainMath.swift */; };
 		5EA50C4A17000000000000B2 /* SeasonChainMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA50C4A17000000000000F1 /* SeasonChainMath.swift */; };
 		5EA50C4A17000000000000B3 /* SeasonChainMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA50C4A17000000000000F1 /* SeasonChainMath.swift */; };
@@ -953,7 +952,6 @@
 		8A50AF544C5119B3356CF020 /* MALMangaStatusMappingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MALMangaStatusMappingTests.swift; sourceTree = "<group>"; };
 		8AEB99F66BCE9D9EB4997319 /* ShiroxTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ShiroxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		92928753257FE3CDF1DBEB3D /* ProviderFallbackChainTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderFallbackChainTests.swift; sourceTree = "<group>"; };
-		961F160F3148BDC2C626748B /* SimklStartupRefreshTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklStartupRefreshTests.swift; sourceTree = "<group>"; };
 		96EBB0C251BF7BA4CC2FFD80 /* AniraDetailFeaturesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AniraDetailFeaturesTests.swift; sourceTree = "<group>"; };
 		970524A22BA3A16D27DFD973 /* AnimeModulePreferenceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimeModulePreferenceTests.swift; sourceTree = "<group>"; };
 		98CCF0AD5072D908AB74D31A /* HostBlocklistTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HostBlocklistTests.swift; sourceTree = "<group>"; };
@@ -1490,7 +1488,6 @@
 				E3800962BA82FB8E9A66BFEE /* SimklDecodingTests.swift */,
 				36F064AD3C6B43DE76338DA2 /* SimklSideIDTests.swift */,
 				5BD1999E97E8434684AEFB45 /* SimklFlushAccountingTests.swift */,
-				961F160F3148BDC2C626748B /* SimklStartupRefreshTests.swift */,
 			);
 			path = ShiroxTests;
 			sourceTree = SOURCE_ROOT;
@@ -1798,7 +1795,6 @@
 				0F0C546765233CB1009B3BE0 /* SimklDecodingTests.swift in Sources */,
 				D5B049BEF372C06F38170479 /* SimklSideIDTests.swift in Sources */,
 				A96328AACE3D280E1F3D49FE /* SimklFlushAccountingTests.swift in Sources */,
-				5E334D3A71C8D59C71724B7E /* SimklStartupRefreshTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

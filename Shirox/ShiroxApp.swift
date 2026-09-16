@@ -162,10 +162,10 @@ struct ShiroxApp: App {
                 .onChange(of: scenePhase) { phase in
                     if phase == .active {
                         Task { await PendingWriteQueue.shared.flush() }
-                        // Picks up changes made on Simkl elsewhere. Throttled to once every
-                        // 30 minutes, and gated on /sync/activities, so a quiet activation
-                        // costs one request. Activation-driven only — nothing polls.
-                        Task { await SimklLibraryService.shared.refreshIfStale() }
+                        // Picks up changes made on Simkl elsewhere. Gated on /sync/activities,
+                        // so a quiet activation costs one request and no library read.
+                        // Activation-driven only — nothing polls.
+                        Task { await SimklLibraryService.shared.refreshOnActivation() }
                     }
                 }
         }
