@@ -135,20 +135,36 @@ final class SimklLibraryService {
         let savedTimestamp = UserDefaults.standard.string(forKey: lastActivityKey)
 
         // Phase 1: nothing to build on, so take the full library once.
-        guard let cached, let savedTimestamp else {
+        guard let cached = cachedLibrary(), let savedTimestamp else {
+            Logger.shared.log(
+                "[Simkl] sync phase 1: full read, no date_from (no saved timestamp or cache yet)",
+                type: "Provider")
             let entries = try await fullRead()
-            self.cached = entries
-            UserDefaults.standard.set(try await currentActivityStamp(), forKey: lastActivityKey)
+            store(entries)
+            if let stamp = try await currentActivityStamp() {
+                UserDefaults.standard.set(stamp, forKey: lastActivityKey)
+                Logger.shared.log("[Simkl] saved activities timestamp \(stamp)", type: "Provider")
+            }
             return entries
         }
 
         // Phase 2: ask whether anything moved before asking for anything else.
         let stamp = try await currentActivityStamp()
-        guard let stamp, stamp != savedTimestamp else { return cached }
+        Logger.shared.log(
+            "[Simkl] sync phase 2: /sync/activities checked — saved=\(savedTimestamp) "
+            + "current=\(stamp ?? "nil")",
+            type: "Provider")
+
+        guard let stamp, stamp != savedTimestamp else {
+            Logger.shared.log(
+                "[Simkl] nothing changed — skipping the library request entirely",
+                type: "Provider")
+            return cached
+        }
 
         let delta = try await deltaRead(since: savedTimestamp)
         let merged = Self.merge(delta, into: cached)
-        self.cached = merged
+        store(merged)
         UserDefaults.standard.set(stamp, forKey: lastActivityKey)
         return merged
     }
@@ -157,8 +173,26 @@ final class SimklLibraryService {
     /// lines rather than four hundred.
     private var loggedWriteSamples = 0
 
-    /// Last library read. Backs Phase 2 — see `fetchLibrary`.
+    /// Last library read, in memory for this session.
     private var cached: [LibraryEntry]?
+
+    /// The cached library, falling back to the on-disk snapshot.
+    ///
+    /// Persisting matters for more than speed. `cached` alone is empty on every launch, so the
+    /// Phase 1 branch was taken every single time and `date_from` was never actually used —
+    /// exactly the behaviour Simkl's sync policy exists to prevent. `LibraryCacheStore` already
+    /// keeps per-provider snapshots on disk, and Simkl is a `ProviderType`, so it just works.
+    private func cachedLibrary() -> [LibraryEntry]? {
+        if let cached { return cached }
+        let snapshot = LibraryCacheStore.shared.snapshot(provider: .simkl, mediaType: .anime)
+        cached = snapshot?.entries
+        return cached
+    }
+
+    private func store(_ entries: [LibraryEntry]) {
+        cached = entries
+        LibraryCacheStore.shared.save(entries: entries, provider: .simkl, mediaType: .anime)
+    }
 
     /// Drops the cache and the saved timestamp, forcing the next read back to Phase 1.
     func invalidateCache() {
@@ -202,6 +236,7 @@ final class SimklLibraryService {
     /// Only what changed, per Simkl's Phase 2 rule. The timestamp is passed back exactly as it
     /// was returned, which their guide calls out specifically.
     private func deltaRead(since timestamp: String) async throws -> [LibraryEntry] {
+        Logger.shared.log("[Simkl] delta read using date_from=\(timestamp)", type: "Provider")
         let data = try await get("/sync/all-items/", query: [
             URLQueryItem(name: "date_from", value: timestamp),
             URLQueryItem(name: "extended", value: Self.extendedMode),
