@@ -169,6 +169,21 @@ final class SimklLibraryService {
         return merged
     }
 
+    /// The one full download, taken when the user connects their account.
+    ///
+    /// Simkl's flow is: connect, download the whole watchlist once, then only ever fetch
+    /// changes. Doing it at connect rather than lazily means the first thing the app does with
+    /// a new account is the one request that is supposed to be large.
+    func primeLibrary() async {
+        guard auth.isLoggedIn else { return }
+        do {
+            _ = try await fetchLibrary()
+            UserDefaults.standard.set(Date(), forKey: lastCheckKey)
+        } catch {
+            Logger.shared.log("[Simkl] initial library download failed: \(error)", type: "Error")
+        }
+    }
+
     // MARK: - Startup refresh
 
     private let lastCheckKey = "simkl_last_check"

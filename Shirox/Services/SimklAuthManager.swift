@@ -209,6 +209,9 @@ final class SimklAuthManager: NSObject, ObservableObject {
         do {
             try await exchangeCode(code, verifier: verifier)
             await fetchCurrentUser()
+            // Simkl's documented flow starts here: on connect, download the full watchlist once.
+            // Everything after this is an activities check and a `date_from` delta.
+            await SimklLibraryService.shared.primeLibrary()
         } catch {
             Logger.shared.log("[Simkl] Auth failed: \(error)", type: "Error")
         }

@@ -162,8 +162,13 @@ final class LibrarySyncService: ObservableObject {
             summaries[.simkl]!.unmatched.append(
                 contentsOf: (0..<rejected).map { _ in "(not on Simkl)" })
         }
-        // The library on Simkl has moved, so the cached copy is stale.
-        SimklLibraryService.shared.invalidateCache()
+        // Deliberately does *not* invalidate the cache.
+        //
+        // Dropping it here also dropped the saved activities timestamp, so the next read fell
+        // back to a full download of the entire watchlist — the one thing Simkl's sync policy
+        // says not to do. The writes just made are a change like any other: the next
+        // `/sync/activities` check sees the timestamp move and pulls them back as a `date_from`
+        // delta, which is both correct and one small request.
     }
 
     // MARK: - Forward-only runs
