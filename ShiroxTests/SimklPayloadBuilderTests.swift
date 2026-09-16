@@ -105,7 +105,7 @@ final class SimklPayloadBuilderTests: XCTestCase {
 
     func testBatchesAreNeverLargerThanFifty() {
         let batches = SimklPayloadBuilder.batches(Array(1...120))
-        XCTAssertEqual(batches.map(\.count), [25, 25, 25, 25, 20])
+        XCTAssertEqual(batches.map(\.count), [50, 50, 20])
     }
 
     func testBatchingPreservesEveryItemAndTheirOrder() {

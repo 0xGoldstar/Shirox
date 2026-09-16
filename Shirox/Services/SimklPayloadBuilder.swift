@@ -145,9 +145,17 @@ enum SimklPayloadBuilder {
     /// Simkl's guidance is explicit: "Send 50 items in one call rather than 50 calls." Sustained
     /// write-hammering suspends the `client_id` with no warning and no appeal, and a single one
     /// serves every user of this app.
-    /// Default 25, not 50: a write carrying both episodes and a status expands to two entries
-    /// in the body, so 25 writes is what keeps a request at Simkl's suggested 50 items.
-    static func batches<T>(_ items: [T], size: Int = 25) -> [[T]] {
+    /// Sized to minimise **request count**, not payload size.
+    ///
+    /// An unapproved `client_id` is capped at 1,000 requests per day app-wide — across every
+    /// user of the app, not per account. That cap is the binding constraint, and it punishes
+    /// many small requests, so batches are deliberately large: Simkl's own guidance is that
+    /// "one POST per second is enough for arrays of 50+ items".
+    ///
+    /// 50 writes is up to 100 body entries, since a write carrying both episodes and a status
+    /// expands to two. That is twice their suggested 50 items and well inside "50+", and it
+    /// halves the requests a backfill spends.
+    static func batches<T>(_ items: [T], size: Int = 50) -> [[T]] {
         guard !items.isEmpty, size > 0 else { return [] }
         return stride(from: 0, to: items.count, by: size).map {
             Array(items[$0 ..< min($0 + size, items.count)])

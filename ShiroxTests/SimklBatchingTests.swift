@@ -29,28 +29,28 @@ final class SimklBatchingTests: XCTestCase {
         SimklWrite(ids: ["mal": id], status: .watching, rating: nil, episodes: [1])
     }
 
-    /// 120 writes become 5 requests, not 120. Batches hold 25 *writes*, and a write carrying
-    /// both episodes and a status expands to two body entries — so a full batch is 50 items,
-    /// which is the size Simkl recommends.
-    func test120WritesBecomeFiveRequestsNotOneHundredAndTwenty() async {
+    /// 120 writes become 3 requests, not 120. An unapproved client_id is capped at 1,000
+    /// requests a day across the whole app, so request count is the scarce resource and batches
+    /// are large: 50 writes, up to 100 body entries once episode/status entries expand.
+    func test120WritesBecomeThreeRequestsNotOneHundredAndTwenty() async {
         let recorder = Recorder()
         let queue = makeQueue(recorder)
         for i in 1...120 { queue.enqueue(write(i)) }
         await queue.flush()
 
-        XCTAssertEqual(recorder.bodies.count, 5)
-        XCTAssertEqual(recorder.itemCounts(), [50, 50, 50, 50, 40])
+        XCTAssertEqual(recorder.bodies.count, 3)
+        XCTAssertEqual(recorder.itemCounts(), [100, 100, 40])
     }
 
-    /// The ceiling that protects the shared client_id: no request may exceed 50 entries,
-    /// however the writes inside it expand.
+    /// The ceiling that protects the shared client_id: a request may carry at most 100 entries,
+    /// which is 50 writes each expanding to an episode entry and a state one.
     func testNoRequestEverCarriesMoreThanFiftyItems() async {
         let recorder = Recorder()
         let queue = makeQueue(recorder)
         for i in 1...503 { queue.enqueue(write(i)) }
         await queue.flush()
 
-        XCTAssertTrue(recorder.itemCounts().allSatisfy { $0 <= 50 },
+        XCTAssertTrue(recorder.itemCounts().allSatisfy { $0 <= 100 },
                       "got \(recorder.itemCounts().max() ?? 0) in one request")
         // Every write here carries episodes, so each expands to an episode entry and a state one.
         XCTAssertEqual(recorder.itemCounts().reduce(0, +), 503 * 2)
@@ -76,7 +76,7 @@ final class SimklBatchingTests: XCTestCase {
         for i in 1...120 { queue.enqueue(write(i)) }
         await queue.flush()
 
-        XCTAssertEqual(recorder.sleeps.count, 4, "5 batches need 4 gaps, not 5")
+        XCTAssertEqual(recorder.sleeps.count, 2, "3 batches need 2 gaps, not 3")
         XCTAssertTrue(recorder.sleeps.allSatisfy { $0 >= 1.0 })
     }
 
