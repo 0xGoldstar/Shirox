@@ -184,28 +184,64 @@ final class SimklLibraryService {
         }
     }
 
-    // MARK: - Startup refresh
+    // MARK: - Activation refresh
 
     private let lastCheckKey = "simkl_last_check"
+    private let backgroundedAtKey = "simkl_backgrounded_at"
 
-    /// Picks up changes made on Simkl elsewhere, every time the app becomes active.
+    /// Simkl's developer, on when to call the activities endpoint: *"usually after app goes into
+    /// background for 30 minutes or on pull to refresh check activity — don't spam activity
+    /// endpoint unnecessarily, will use user requests."*
     ///
-    /// Costs one `/sync/activities` call when nothing has moved, because `fetchLibrary` skips
-    /// the library request entirely in that case. Driven by app activation only — there is no
-    /// timer and nothing polls.
+    /// The last clause is the reason this exists. Activity checks are charged to the user's own
+    /// request budget, so a check on every activation is spending something that belongs to them.
+    static let minimumAwayInterval: TimeInterval = 30 * 60
+
+    /// Whether returning to the foreground should check for changes.
     ///
-    /// Simkl's guidance suggests throttling these checks to once every 15-30 minutes, to avoid
-    /// what they call rapid-switch spam. That throttle was here and has been deliberately
-    /// removed, so every activation checks. Restoring it means gating this on the time since
-    /// `lastCheckKey`.
+    /// Keyed on how long the app was **away**, not on wall-clock since the last check: coming
+    /// back after a moment is the rapid-switch case their guidance names, however long ago the
+    /// last check happened to be.
+    nonisolated static func shouldCheckOnActivation(
+        backgroundedAt: Date?, lastCheck: Date?, now: Date,
+        minimumAway: TimeInterval = minimumAwayInterval
+    ) -> Bool {
+        // Never checked: a first run, or the account was just connected.
+        guard let lastCheck else { return true }
+        // No background marker yet this install — fall back to time since the last check.
+        guard let backgroundedAt else { return now.timeIntervalSince(lastCheck) >= minimumAway }
+        return now.timeIntervalSince(backgroundedAt) >= minimumAway
+    }
+
+    /// Records when the app left the foreground, so the next activation knows how long it was away.
+    func noteEnteredBackground(now: Date = Date()) {
+        UserDefaults.standard.set(now, forKey: backgroundedAtKey)
+    }
+
+    /// Picks up changes made on Simkl elsewhere, when the app returns after being away a while.
     func refreshOnActivation(now: Date = Date()) async {
         guard auth.isLoggedIn else { return }
-        UserDefaults.standard.set(now, forKey: lastCheckKey)
 
+        let backgroundedAt = UserDefaults.standard.object(forKey: backgroundedAtKey) as? Date
+        let lastCheck = UserDefaults.standard.object(forKey: lastCheckKey) as? Date
+        guard Self.shouldCheckOnActivation(backgroundedAt: backgroundedAt,
+                                           lastCheck: lastCheck, now: now) else {
+            Logger.shared.log(
+                "[Simkl] activation: away too briefly to check activities", type: "Provider")
+            return
+        }
+        await refreshNow(now: now)
+    }
+
+    /// An explicit user request — pull to refresh, or a sync the user started. Always checks,
+    /// because the user asked; the throttle exists for automatic checks only.
+    func refreshNow(now: Date = Date()) async {
+        guard auth.isLoggedIn else { return }
+        UserDefaults.standard.set(now, forKey: lastCheckKey)
         do {
             _ = try await fetchLibrary()
         } catch {
-            Logger.shared.log("[Simkl] activation refresh failed: \(error)", type: "Error")
+            Logger.shared.log("[Simkl] refresh failed: \(error)", type: "Error")
         }
     }
 

@@ -724,6 +724,9 @@ struct LibraryView: View {
         .softScrollEdges()
         .listStyle(.plain)
         .refreshable {
+            // An explicit user request, so it always checks — the away-time throttle is
+            // for automatic checks only.
+            await SimklLibraryService.shared.refreshNow()
             async let count: Void = refreshUnreadCountIfNeeded()
             await vm.refresh()
             await count

@@ -160,12 +160,17 @@ struct ShiroxApp: App {
                     showOnboarding = !hasCompletedOnboarding
                 }
                 .onChange(of: scenePhase) { phase in
-                    if phase == .active {
+                    switch phase {
+                    case .active:
                         Task { await PendingWriteQueue.shared.flush() }
-                        // Picks up changes made on Simkl elsewhere. Gated on /sync/activities,
-                        // so a quiet activation costs one request and no library read.
-                        // Activation-driven only — nothing polls.
+                        // Picks up changes made on Simkl elsewhere, but only after the app has
+                        // been away a while — activity checks are charged to the user's own
+                        // request budget. Nothing polls; this is activation-driven only.
                         Task { await SimklLibraryService.shared.refreshOnActivation() }
+                    case .background, .inactive:
+                        SimklLibraryService.shared.noteEnteredBackground()
+                    @unknown default:
+                        break
                     }
                 }
         }
