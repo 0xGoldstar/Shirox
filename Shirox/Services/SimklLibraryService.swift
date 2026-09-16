@@ -169,6 +169,44 @@ final class SimklLibraryService {
         return merged
     }
 
+    // MARK: - Startup refresh
+
+    private let lastCheckKey = "simkl_last_check"
+
+    /// Simkl's guidance for mobile apps: sync on startup or on waking, "throttle checks to once
+    /// every 15-30 mins to avoid rapid-switch spam", and "never run unconditional background
+    /// polling timers without active user interaction".
+    static let minimumCheckInterval: TimeInterval = 30 * 60
+
+    /// Whether a startup check is due. Pure, so the throttle is testable without waiting.
+    nonisolated static func shouldCheck(lastCheck: Date?, now: Date,
+                                        minimumInterval: TimeInterval = minimumCheckInterval) -> Bool {
+        guard let lastCheck else { return true }
+        return now.timeIntervalSince(lastCheck) >= minimumInterval
+    }
+
+    /// Picks up changes made on Simkl elsewhere, when the app becomes active.
+    ///
+    /// Costs one `/sync/activities` call when nothing has moved, because `fetchLibrary` skips
+    /// the library request entirely in that case. Driven by app activation only — there is no
+    /// timer and nothing polls.
+    func refreshIfStale(now: Date = Date()) async {
+        guard auth.isLoggedIn else { return }
+
+        let lastCheck = UserDefaults.standard.object(forKey: lastCheckKey) as? Date
+        guard Self.shouldCheck(lastCheck: lastCheck, now: now) else {
+            Logger.shared.log("[Simkl] startup refresh skipped — checked recently", type: "Provider")
+            return
+        }
+        UserDefaults.standard.set(now, forKey: lastCheckKey)
+
+        do {
+            _ = try await fetchLibrary()
+        } catch {
+            Logger.shared.log("[Simkl] startup refresh failed: \(error)", type: "Error")
+        }
+    }
+
     /// Counts the per-write diagnostics emitted this run, so a 400-title sync logs three
     /// lines rather than four hundred.
     private var loggedWriteSamples = 0

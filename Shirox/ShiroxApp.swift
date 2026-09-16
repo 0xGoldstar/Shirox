@@ -160,7 +160,13 @@ struct ShiroxApp: App {
                     showOnboarding = !hasCompletedOnboarding
                 }
                 .onChange(of: scenePhase) { phase in
-                    if phase == .active { Task { await PendingWriteQueue.shared.flush() } }
+                    if phase == .active {
+                        Task { await PendingWriteQueue.shared.flush() }
+                        // Picks up changes made on Simkl elsewhere. Throttled to once every
+                        // 30 minutes, and gated on /sync/activities, so a quiet activation
+                        // costs one request. Activation-driven only — nothing polls.
+                        Task { await SimklLibraryService.shared.refreshIfStale() }
+                    }
                 }
         }
         #if targetEnvironment(macCatalyst) || os(macOS)
