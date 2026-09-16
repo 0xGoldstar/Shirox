@@ -277,12 +277,24 @@ final class SimklLibraryService {
     }
 
     private func fullRead() async throws -> [LibraryEntry] {
-        let data = try await get("/sync/all-items/anime/all",
+        let data = try await get(Self.libraryPath,
                                  query: [URLQueryItem(name: "extended", value: Self.extendedMode)])
         let entries = try Self.decodeLibrary(from: data)
         logRead(entries, phase: "full")
         return entries
     }
+
+    /// The anime category, not the combined `/sync/all-items/` endpoint.
+    ///
+    /// Simkl's Phase 2 guidance points at the combined endpoint, and their developer added the
+    /// qualifier: *"if you have only anime, you can add sync /anime/ category … whatever you
+    /// support, if both shows and movies then it's correct."*
+    ///
+    /// Only anime reaches Simkl from here. The library comes from AniList and MyAnimeList, which
+    /// are anime trackers — what the app can *play* is a separate matter and none of it syncs.
+    /// The delta read used the combined endpoint and then discarded every shows and movies entry
+    /// it had just downloaded.
+    static let libraryPath = "/sync/all-items/anime/all"
 
     /// `ids_only` looked like the lightweight choice and is a trap: it returns **only** ids,
     /// stripping `status`, `watched_episodes_count` and `user_rating`. Every entry then read back
@@ -313,7 +325,7 @@ final class SimklLibraryService {
     /// was returned, which their guide calls out specifically.
     private func deltaRead(since timestamp: String) async throws -> [LibraryEntry] {
         Logger.shared.log("[Simkl] delta read using date_from=\(timestamp)", type: "Provider")
-        let data = try await get("/sync/all-items/", query: [
+        let data = try await get(Self.libraryPath, query: [
             URLQueryItem(name: "date_from", value: timestamp),
             URLQueryItem(name: "extended", value: Self.extendedMode),
         ])
