@@ -81,54 +81,183 @@ struct SettingsView: View {
         titlePriority.components(separatedBy: ",").filter { !$0.isEmpty }
     }
 
-    var body: some View {
-        NavigationStack {
-            List {                
-                Section("Modules") {
-                    NavigationLink {
-                        ModuleListView()
-                    } label: {
-                        HStack(spacing: 12) {
-                            // Icon
-                            Group {
-                                if let active = moduleManager.activeModule {
-                                    CachedAsyncImage(urlString: active.iconUrl ?? "", base64String: active.iconData)
-                                } else {
-                                    AsyncImage(url: URL(string: providerManager.primary?.providerType.iconURL ?? "")) { phase in
-                                        if case .success(let image) = phase {
-                                            image.resizable().aspectRatio(contentMode: .fit)
-                                        } else {
-                                            Image(systemName: "list.bullet")
-                                                .font(.title)
-                                                .foregroundStyle(Color.red)
-                                        }
-                                    }
-                                }
-                            }
-                            .frame(width: 48, height: 48)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
 
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(moduleManager.activeModule?.sourceName ?? providerManager.primary?.providerType.displayName ?? "AniList")
-                                    .font(.headline)
-                                Text("Manage your modules")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    Toggle("Use Default Extension", isOn: $useDefaultExtension)
-                        .tint(.secondary)
-                        .disabled(moduleManager.activeModule == nil)
-                    Toggle("Auto-pick Last Search Result", isOn: $autoPickLastSearchResult)
-                        .tint(.secondary)
-                    Toggle("Auto-pick Last Stream", isOn: $autoPickLastStream)
-                        .tint(.secondary)
-                }
+    /// One folder row on the root Settings screen.
+    ///
+    /// Settings had grown to fifteen top-level sections in a single scroll, which is how the
+    /// library sync runs ended up effectively unfindable. Each group is now one row.
+    @ViewBuilder
+    private func settingsFolderRow<Destination: View>(
+        _ title: String, _ icon: String, @ViewBuilder destination: () -> Destination
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            Label(title, systemImage: icon)
+        }
+    }
 
+    /// Accounts & Tracking
+    @ViewBuilder
+    private var accountsFolder: some View {
+        List {
                 ProvidersSettingsSection()
 
+                if aniListAuth.isLoggedIn || malAuth.isLoggedIn {
+                    Section("Tracking") {
+                        if aniListAuth.isLoggedIn {
+                            Toggle("Track on AniList", isOn: $aniListTrackingEnabled)
+                                .tint(.secondary)
+                        }
+                        if malAuth.isLoggedIn {
+                            Toggle("Track on MyAnimeList", isOn: $malTrackingEnabled)
+                                .tint(.secondary)
+                        }
+                        if aniListAuth.isLoggedIn && malAuth.isLoggedIn {
+                            Toggle("Sync edits to both services", isOn: $dualSync)
+                                .tint(.secondary)
+                        }
+                        Toggle("Never reduce progress", isOn: $skipReWatchTracking)
+                            .tint(.secondary)
+                        Toggle("Prompt to rate after finishing", isOn: $rateOnFinish)
+                            .tint(.secondary)
+                        Text("Automatically update your watch progress as you watch.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                // Simkl is a write-side tracker, not a browsing source, so it sits here rather
+
+                Section("Simkl") {
+                    HStack(spacing: 12) {
+                        CachedAsyncImage(urlString: ProviderType.simkl.iconURL)
+                            .frame(width: 28, height: 28)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(simklAuth.username ?? "Simkl")
+                                .font(.headline)
+                            Text(simklAuth.isLoggedIn ? "Signed in" : "Not signed in")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        #if !os(tvOS)
+                        Button(simklAuth.isLoggedIn ? "Sign Out" : "Sign In") {
+                            if simklAuth.isLoggedIn {
+                                simklAuth.logout()
+                            } else {
+                                simklAuth.login(presentationAnchor: Self.presentationAnchor())
+                            }
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(simklAuth.isLoggedIn ? Color.red : Color.accentColor)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background((simklAuth.isLoggedIn ? Color.red : Color.accentColor)
+                            .opacity(0.1), in: Capsule())
+                        .buttonStyle(.plain)
+                        #endif
+                    }
+                    Text("Tracks your anime library on Simkl alongside AniList and MyAnimeList. "
+                         + "Simkl has no manga, so manga tracking is unaffected.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if signedInSides.count >= 2 {
+                    Section("Sync Library") {
+                        ForEach(SyncRun.runs(in: .sync, among: signedInSides)) { run in
+                            syncRow(run)
+                        }
+                        Text("Brings your two accounts into line — a one-time backfill for everything you tracked before signing in here. Syncing both ways reconciles them in a single pass; the one-way copies only ever write to the destination. Either way progress is only ever moved forward, so anything further along is left as it is.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Section("Overwrite Library") {
+                        ForEach(SyncRun.runs(in: .overwrite, among: signedInSides)) { run in
+                            syncRow(run)
+                        }
+                        Text("Use when one account is simply the one you want to keep. Overwrites the other with it — progress, status, score and rewatch count — even where that means going backwards. Titles only the overwritten account has are left in place. This can't be undone.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Section("Mirror Library") {
+                        ForEach(SyncRun.runs(in: .mirror, among: signedInSides)) { run in
+                            syncRow(run)
+                        }
+                        Text("Everything Overwrite does, and the overwritten account also loses any entry the other doesn't have, ending up an exact copy. Entries whose match can't be confirmed are kept rather than deleted. This can't be undone.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+
+                Section("Matching") {
+                    ForEach(orderedLanguages, id: \.self) { lang in
+                        HStack {
+                            Image(systemName: "line.3.horizontal")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Text(lang.capitalized)
+                        }
+                    }
+                    .onMove { from, to in
+                        var langs = orderedLanguages
+                        langs.move(fromOffsets: from, toOffset: to)
+                        titlePriority = langs.joined(separator: ",")
+                    }
+                    Text("Drag to reorder title priority for display and matching.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                #if os(iOS)
+                .environment(\.editMode, .constant(.active))
+                #endif
+        }
+        .softScrollEdges()
+        .navigationTitle("Accounts & Tracking")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+            .alert(
+                pendingSyncRun?.title ?? "Sync Library",
+                isPresented: Binding(
+                    get: { pendingSyncRun != nil },
+                    set: { if !$0 { pendingSyncRun = nil } }
+                ),
+                presenting: pendingSyncRun
+            ) { run in
+                Button(run.confirmButtonTitle, role: run.isDestructive ? .destructive : nil) {
+                    pendingSyncRun = nil
+                    Task { await librarySync.sync(run) }
+                }
+                Button("Cancel", role: .cancel) { pendingSyncRun = nil }
+            } message: { run in
+                Text(run.confirmationMessage)
+            }
+            .sheet(isPresented: Binding(
+                get: { overwritePlan != nil && previewRun != nil },
+                set: { if !$0 { overwritePlan = nil; previewRun = nil } }
+            )) {
+                if let plan = overwritePlan, let run = previewRun {
+                    OverwritePreviewSheet(run: run, plan: plan) {
+                        overwritePlan = nil
+                        previewRun = nil
+                        Task { await librarySync.apply(plan, for: run) }
+                    } onCancel: {
+                        overwritePlan = nil
+                        previewRun = nil
+                    }
+                }
+            }
+    }
+
+    /// Playback
+    @ViewBuilder
+    private var playbackFolder: some View {
+        List {
                 Section("Player") {
                     Toggle("Force Landscape Mode", isOn: $forceLandscape)
                         .tint(.secondary)
@@ -208,96 +337,77 @@ struct SettingsView: View {
                 }
                 #endif
 
-                if aniListAuth.isLoggedIn || malAuth.isLoggedIn {
-                    Section("Tracking") {
-                        if aniListAuth.isLoggedIn {
-                            Toggle("Track on AniList", isOn: $aniListTrackingEnabled)
-                                .tint(.secondary)
+                Section("Downloads") {
+                    Picker("Concurrent Downloads", selection: $maxConcurrentDownloads) {
+                        ForEach(1...5, id: \.self) { count in
+                            Text("\(count)").tag(count)
                         }
-                        if malAuth.isLoggedIn {
-                            Toggle("Track on MyAnimeList", isOn: $malTrackingEnabled)
-                                .tint(.secondary)
-                        }
-                        if aniListAuth.isLoggedIn && malAuth.isLoggedIn {
-                            Toggle("Sync edits to both services", isOn: $dualSync)
-                                .tint(.secondary)
-                        }
-                        Toggle("Never reduce progress", isOn: $skipReWatchTracking)
-                            .tint(.secondary)
-                        Toggle("Prompt to rate after finishing", isOn: $rateOnFinish)
-                            .tint(.secondary)
-                        Text("Automatically update your watch progress as you watch.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
-                }
-
-                // Simkl is a write-side tracker, not a browsing source, so it sits here rather
-                // than in the provider list — it has no "make primary" and never serves Home.
-                Section("Simkl") {
-                    HStack(spacing: 12) {
-                        CachedAsyncImage(urlString: ProviderType.simkl.iconURL)
-                            .frame(width: 28, height: 28)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(simklAuth.username ?? "Simkl")
-                                .font(.headline)
-                            Text(simklAuth.isLoggedIn ? "Signed in" : "Not signed in")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        #if !os(tvOS)
-                        Button(simklAuth.isLoggedIn ? "Sign Out" : "Sign In") {
-                            if simklAuth.isLoggedIn {
-                                simklAuth.logout()
-                            } else {
-                                simklAuth.login(presentationAnchor: Self.presentationAnchor())
-                            }
-                        }
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(simklAuth.isLoggedIn ? Color.red : Color.accentColor)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background((simklAuth.isLoggedIn ? Color.red : Color.accentColor)
-                            .opacity(0.1), in: Capsule())
-                        .buttonStyle(.plain)
-                        #endif
-                    }
-                    Text("Tracks your anime library on Simkl alongside AniList and MyAnimeList. "
-                         + "Simkl has no manga, so manga tracking is unaffected.")
+                    Toggle("Background Downloads", isOn: $backgroundDownloadsEnabled)
+                        .tint(.secondary)
+                    Toggle("Auto-Resume Interrupted", isOn: $autoResumeDownloads)
+                        .tint(.secondary)
+                    Toggle("Delete After Watching", isOn: $autoDeleteWatched)
+                        .tint(.secondary)
+                    Text("Delete After Watching removes a downloaded episode once you finish it and close the player. Retry downloads that were interrupted or failed when the app next opens — off by default so reopening the app never starts a large transfer on cellular without you asking.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+        }
+        .softScrollEdges()
+        .navigationTitle("Playback")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
 
-                if signedInSides.count >= 2 {
-                    Section("Sync Library") {
-                        ForEach(SyncRun.runs(in: .sync, among: signedInSides)) { run in
-                            syncRow(run)
-                        }
-                        Text("Brings your two accounts into line — a one-time backfill for everything you tracked before signing in here. Syncing both ways reconciles them in a single pass; the one-way copies only ever write to the destination. Either way progress is only ever moved forward, so anything further along is left as it is.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+    /// Content
+    @ViewBuilder
+    private var contentFolder: some View {
+        List {
+                Section("Modules") {
+                    NavigationLink {
+                        ModuleListView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            // Icon
+                            Group {
+                                if let active = moduleManager.activeModule {
+                                    CachedAsyncImage(urlString: active.iconUrl ?? "", base64String: active.iconData)
+                                } else {
+                                    AsyncImage(url: URL(string: providerManager.primary?.providerType.iconURL ?? "")) { phase in
+                                        if case .success(let image) = phase {
+                                            image.resizable().aspectRatio(contentMode: .fit)
+                                        } else {
+                                            Image(systemName: "list.bullet")
+                                                .font(.title)
+                                                .foregroundStyle(Color.red)
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(width: 48, height: 48)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
 
-                    Section("Overwrite Library") {
-                        ForEach(SyncRun.runs(in: .overwrite, among: signedInSides)) { run in
-                            syncRow(run)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(moduleManager.activeModule?.sourceName ?? providerManager.primary?.providerType.displayName ?? "AniList")
+                                    .font(.headline)
+                                Text("Manage your modules")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        Text("Use when one account is simply the one you want to keep. Overwrites the other with it — progress, status, score and rewatch count — even where that means going backwards. Titles only the overwritten account has are left in place. This can't be undone.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
-
-                    Section("Mirror Library") {
-                        ForEach(SyncRun.runs(in: .mirror, among: signedInSides)) { run in
-                            syncRow(run)
-                        }
-                        Text("Everything Overwrite does, and the overwritten account also loses any entry the other doesn't have, ending up an exact copy. Entries whose match can't be confirmed are kept rather than deleted. This can't be undone.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Toggle("Use Default Extension", isOn: $useDefaultExtension)
+                        .tint(.secondary)
+                        .disabled(moduleManager.activeModule == nil)
+                    Toggle("Auto-pick Last Search Result", isOn: $autoPickLastSearchResult)
+                        .tint(.secondary)
+                    Toggle("Auto-pick Last Stream", isOn: $autoPickLastStream)
+                        .tint(.secondary)
                 }
-                
+
                 Section("Library") {
                     NavigationLink {
                         LibrarySettingsView()
@@ -332,46 +442,18 @@ struct SettingsView: View {
                 } message: {
                     Text("This permanently removes all on-device entries and collections. AniList/MyAnimeList lists are not affected.")
                 }
+        }
+        .softScrollEdges()
+        .navigationTitle("Content")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
 
-                Section("Downloads") {
-                    Picker("Concurrent Downloads", selection: $maxConcurrentDownloads) {
-                        ForEach(1...5, id: \.self) { count in
-                            Text("\(count)").tag(count)
-                        }
-                    }
-                    Toggle("Background Downloads", isOn: $backgroundDownloadsEnabled)
-                        .tint(.secondary)
-                    Toggle("Auto-Resume Interrupted", isOn: $autoResumeDownloads)
-                        .tint(.secondary)
-                    Toggle("Delete After Watching", isOn: $autoDeleteWatched)
-                        .tint(.secondary)
-                    Text("Delete After Watching removes a downloaded episode once you finish it and close the player. Retry downloads that were interrupted or failed when the app next opens — off by default so reopening the app never starts a large transfer on cellular without you asking.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("Matching") {
-                    ForEach(orderedLanguages, id: \.self) { lang in
-                        HStack {
-                            Image(systemName: "line.3.horizontal")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                            Text(lang.capitalized)
-                        }
-                    }
-                    .onMove { from, to in
-                        var langs = orderedLanguages
-                        langs.move(fromOffsets: from, toOffset: to)
-                        titlePriority = langs.joined(separator: ",")
-                    }
-                    Text("Drag to reorder title priority for display and matching.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                #if os(iOS)
-                .environment(\.editMode, .constant(.active))
-                #endif
-
+    /// Data & Storage
+    @ViewBuilder
+    private var dataFolder: some View {
+        List {
                 #if os(iOS)
                 Section("Data") {
                     Toggle("Data Saver", isOn: $dataSaverEnabled)
@@ -547,6 +629,23 @@ struct SettingsView: View {
                     }
                 }
                 #endif
+        }
+        .softScrollEdges()
+        .navigationTitle("Data & Storage")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {                
+                Section {
+                    settingsFolderRow("Accounts & Tracking", "person.crop.circle") { accountsFolder }
+                    settingsFolderRow("Playback", "play.circle") { playbackFolder }
+                    settingsFolderRow("Content", "square.grid.2x2") { contentFolder }
+                    settingsFolderRow("Data & Storage", "internaldrive") { dataFolder }
+                }
 
                 Section {
                     ForEach([LegalPage.imprint, .privacy, .contributors, .licenses], id: \.title) { page in
@@ -605,37 +704,6 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This will clear all 'Watched' checkmarks from episode lists.")
-            }
-            .alert(
-                pendingSyncRun?.title ?? "Sync Library",
-                isPresented: Binding(
-                    get: { pendingSyncRun != nil },
-                    set: { if !$0 { pendingSyncRun = nil } }
-                ),
-                presenting: pendingSyncRun
-            ) { run in
-                Button(run.confirmButtonTitle, role: run.isDestructive ? .destructive : nil) {
-                    pendingSyncRun = nil
-                    Task { await librarySync.sync(run) }
-                }
-                Button("Cancel", role: .cancel) { pendingSyncRun = nil }
-            } message: { run in
-                Text(run.confirmationMessage)
-            }
-            .sheet(isPresented: Binding(
-                get: { overwritePlan != nil && previewRun != nil },
-                set: { if !$0 { overwritePlan = nil; previewRun = nil } }
-            )) {
-                if let plan = overwritePlan, let run = previewRun {
-                    OverwritePreviewSheet(run: run, plan: plan) {
-                        overwritePlan = nil
-                        previewRun = nil
-                        Task { await librarySync.apply(plan, for: run) }
-                    } onCancel: {
-                        overwritePlan = nil
-                        previewRun = nil
-                    }
-                }
             }
             .onAppear {
                 #if os(iOS)
