@@ -218,7 +218,8 @@ final class LibrarySyncService: ObservableObject {
                     to: side, id: id,
                     title: winner.entry.media.title.displayTitle, hadEntry: existing != nil,
                     previousProgress: existing?.progress,
-                    sourceFormat: Self.scoreFormat(for: winner.side)))
+                    sourceFormat: Self.scoreFormat(for: winner.side),
+                    year: winner.entry.media.seasonYear))
             }
         }
 
@@ -228,7 +229,7 @@ final class LibrarySyncService: ObservableObject {
     private func apply(
         _ decision: LibrarySyncDecision, to side: LibrarySide,
         id: Int, title: String, hadEntry: Bool, previousProgress: Int? = nil,
-        sourceFormat: ScoreFormat = .point10
+        sourceFormat: ScoreFormat = .point10, year: Int? = nil
     ) async -> Outcome {
         switch decision {
         case .skipUpToDate:
@@ -251,7 +252,7 @@ final class LibrarySyncService: ObservableObject {
             return await performWrite(
                 to: side, id: id, title: title, hadEntry: hadEntry,
                 status: status, progress: progress, score: score, timesRewatched: timesRewatched,
-                previousProgress: previousProgress, sourceFormat: sourceFormat)
+                previousProgress: previousProgress, sourceFormat: sourceFormat, year: year)
         }
     }
 
@@ -315,7 +316,8 @@ final class LibrarySyncService: ObservableObject {
     private func performWrite(
         to side: LibrarySide, id: Int, title: String, hadEntry: Bool,
         status: MediaListStatus, progress: Int, score: Double, timesRewatched: Int?,
-        previousProgress: Int? = nil, sourceFormat: ScoreFormat = .point10
+        previousProgress: Int? = nil, sourceFormat: ScoreFormat = .point10,
+        year: Int? = nil
     ) async -> Outcome {
         do {
             switch side {
@@ -334,7 +336,7 @@ final class LibrarySyncService: ObservableObject {
                 SimklLibraryService.shared.rawUpdateEntry(
                     malId: id, anilistId: nil, status: status,
                     progress: progress, previousProgress: previousProgress,
-                    score: score, format: sourceFormat)
+                    score: score, format: sourceFormat, title: title, year: year)
             }
             try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
             return hadEntry ? .advanced : .created

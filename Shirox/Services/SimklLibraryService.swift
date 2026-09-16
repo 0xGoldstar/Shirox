@@ -401,7 +401,7 @@ final class SimklLibraryService {
     /// Queues a status/progress/score write. Nothing leaves the app until `flush()`.
     func rawUpdateEntry(malId: Int?, anilistId: Int?, status: MediaListStatus,
                         progress: Int, previousProgress: Int?, score: Double,
-                        format: ScoreFormat) {
+                        format: ScoreFormat, title: String? = nil, year: Int? = nil) {
         var ids: [String: Int] = [:]
         if let malId { ids["mal"] = malId }
         if let anilistId { ids["anilist"] = anilistId }
@@ -425,7 +425,8 @@ final class SimklLibraryService {
             ids: ids,
             status: SimklPayloadBuilder.status(for: status),
             rating: SimklPayloadBuilder.rating(from: score, format: format),
-            episodes: episodes.isEmpty ? nil : episodes))
+            episodes: episodes.isEmpty ? nil : episodes,
+            title: title, year: year))
     }
 
     /// Sends everything queued. Returns how many writes could **not** be delivered — a failed

@@ -165,6 +165,32 @@ final class SimklPayloadBuilderTests: XCTestCase {
         XCTAssertNil(stateEntry?["seasons"])
     }
 
+    /// Simkl resolves a title from its ids "or via fuzzy title+year", so both entries carry the
+    /// metadata as a fallback for when an id does not resolve.
+    func testTitleAndYearAccompanyBothEntries() {
+        let body = SimklPayloadBuilder.historyBody(items: [
+            SimklWrite(ids: ["mal": 38000], status: .completed, rating: 9, episodes: [1],
+                       title: "Frieren", year: 2023)
+        ])
+        let shows = body[SimklPayloadBuilder.animeKey] as? [[String: Any]]
+
+        XCTAssertEqual(shows?.count, 2)
+        XCTAssertTrue(shows?.allSatisfy { $0["title"] as? String == "Frieren" } ?? false)
+        XCTAssertTrue(shows?.allSatisfy { $0["year"] as? Int == 2023 } ?? false)
+    }
+
+    /// Absent metadata is omitted rather than sent as null or an empty string.
+    func testMissingMetadataIsOmitted() {
+        let body = SimklPayloadBuilder.historyBody(items: [
+            SimklWrite(ids: ["mal": 38000], status: .completed, rating: nil, episodes: nil,
+                       title: "", year: nil)
+        ])
+        let show = (body[SimklPayloadBuilder.animeKey] as? [[String: Any]])?.first
+
+        XCTAssertNil(show?["title"])
+        XCTAssertNil(show?["year"])
+    }
+
     /// A status-only write carries no episode key at all.
     func testStatusOnlyWriteCarriesNoEpisodes() {
         let body = SimklPayloadBuilder.historyBody(items: [

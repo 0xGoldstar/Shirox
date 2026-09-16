@@ -18,6 +18,10 @@ struct SimklWrite {
     let rating: Int?
     /// Episode numbers to mark watched, or nil for a status/rating-only write.
     let episodes: [Int]?
+    /// Sent alongside the ids. Simkl resolves a title from ids "or via fuzzy title+year", so
+    /// this is context for the matcher rather than the primary key.
+    var title: String? = nil
+    var year: Int? = nil
 }
 
 /// Every Simkl mapping decision, with no network and no state.
@@ -109,18 +113,27 @@ enum SimklPayloadBuilder {
 
         for item in items {
             if let episodes = item.episodes, !episodes.isEmpty {
-                shows.append([
+                var entry: [String: Any] = [
                     "ids": item.ids,
                     "seasons": [["number": 1, "episodes": episodes.map { ["number": $0] }]],
-                ])
+                ]
+                Self.addMetadata(from: item, to: &entry)
+                shows.append(entry)
             }
 
             var state: [String: Any] = ["ids": item.ids, "status": item.status.rawValue]
             if let rating = item.rating { state["rating"] = rating }
+            Self.addMetadata(from: item, to: &state)
             shows.append(state)
         }
 
         return [Self.animeKey: shows]
+    }
+
+    /// Attaches the title and year Simkl can fall back on when an id does not resolve.
+    private static func addMetadata(from item: SimklWrite, to entry: inout [String: Any]) {
+        if let title = item.title, !title.isEmpty { entry["title"] = title }
+        if let year = item.year { entry["year"] = year }
     }
 
     /// `/sync/history/remove` does two very different things depending on one field.
