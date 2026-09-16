@@ -89,6 +89,10 @@ final class SimklAuthManager: NSObject, ObservableObject {
 
     // MARK: - Request building
 
+    /// Simkl's convention: "Short, lowercase identifier for your app". Sent on every request
+    /// as a query parameter, and what their developer analytics attributes traffic by.
+    static let appName = "shirox"
+
     static var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }
@@ -102,7 +106,7 @@ final class SimklAuthManager: NSObject, ObservableObject {
         var components = URLComponents(string: "https://api.simkl.com\(path)")!
         components.queryItems = query + [
             URLQueryItem(name: "client_id", value: clientId),
-            URLQueryItem(name: "app-name", value: "Shirox"),
+            URLQueryItem(name: "app-name", value: Self.appName),
             URLQueryItem(name: "app-version", value: Self.appVersion),
         ]
         var request = URLRequest(url: components.url!)
@@ -117,8 +121,20 @@ final class SimklAuthManager: NSObject, ObservableObject {
         if let body {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
+
+        // One line per session, so the parameters Simkl attributes traffic by can be confirmed
+        // from a log rather than assumed.
+        if !Self.loggedSampleURL {
+            Self.loggedSampleURL = true
+            Logger.shared.log(
+                "[Simkl] request url: \(components.url?.absoluteString ?? "-") "
+                + "ua=Shirox/\(Self.appVersion)",
+                type: "Provider")
+        }
         return request
     }
+
+    private nonisolated(unsafe) static var loggedSampleURL = false
 
     // MARK: - PKCE
 
@@ -160,7 +176,7 @@ final class SimklAuthManager: NSObject, ObservableObject {
             URLQueryItem(name: "code_challenge", value: codeChallenge(for: verifier)),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
             URLQueryItem(name: "state", value: state),
-            URLQueryItem(name: "app-name", value: "Shirox"),
+            URLQueryItem(name: "app-name", value: Self.appName),
             URLQueryItem(name: "app-version", value: Self.appVersion),
         ]
 
@@ -201,9 +217,19 @@ final class SimklAuthManager: NSObject, ObservableObject {
     }
 
     private func exchangeCode(_ code: String, verifier: String) async throws {
-        var request = URLRequest(url: URL(string: "https://api.simkl.com/oauth/token")!)
+        // Carries the same identification as every other call. This one built its own request
+        // and sent none of it — no query parameters and no User-Agent — so the very first call
+        // a new user makes was unattributable in Simkl's developer analytics.
+        var components = URLComponents(string: "https://api.simkl.com/oauth/token")!
+        components.queryItems = [
+            URLQueryItem(name: "client_id", value: clientId),
+            URLQueryItem(name: "app-name", value: Self.appName),
+            URLQueryItem(name: "app-version", value: Self.appVersion),
+        ]
+        var request = URLRequest(url: components.url!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Shirox/\(Self.appVersion)", forHTTPHeaderField: "User-Agent")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "code": code,
             "client_id": clientId,
