@@ -360,9 +360,10 @@ final class SimklLibraryService {
         // Keyed by the MyAnimeList id where there is one — the spine the pairing joins on.
         guard let id = ids.mal?.value ?? ids.anilist?.value else { return nil }
 
-        let progress = item.watched_episodes_count ?? 0
+        let watched = item.watched_episodes_count ?? 0
         let total = item.total_episodes_count
-        let status = Self.status(from: item.status, progress: progress, total: total)
+        let status = Self.status(from: item.status, progress: watched, total: total)
+        let progress = Self.progress(watched: watched, total: total, status: status)
 
         let media = Media(
             id: id, idMal: ids.mal?.value, provider: .simkl,
@@ -376,6 +377,22 @@ final class SimklLibraryService {
             id: id, media: media, status: status, progress: progress,
             score: SimklPayloadBuilder.score(fromRating: item.user_rating, format: .point10),
             timesRewatched: nil)
+    }
+
+    /// How many episodes a Simkl entry represents as watched.
+    ///
+    /// Simkl's developer, on why episode writes to a completed title report `added.episodes: 0`:
+    /// *"if you already have the anime in your completed watchlist, you cannot mark episodes
+    /// there anymore, only as rewatches. Completed = always mean all episodes were watched."*
+    ///
+    /// So a completed title carries no per-episode history and `watched_episodes_count` stays 0.
+    /// Reading that literally made every completed title look unwatched, so every sync decided
+    /// the whole library was behind and rewrote it — forever, because the rewrite could never
+    /// change the number it was reading.
+    nonisolated static func progress(watched: Int?, total: Int?, status: MediaListStatus) -> Int {
+        let watched = watched ?? 0
+        guard status == .completed, let total, total > 0 else { return watched }
+        return max(watched, total)
     }
 
     /// Simkl's statuses map back one-to-one except that it cannot express `repeating` — a

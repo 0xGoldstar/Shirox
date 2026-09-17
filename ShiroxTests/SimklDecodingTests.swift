@@ -107,6 +107,43 @@ final class SimklDecodingTests: XCTestCase {
         XCTAssertEqual(SimklLibraryService.merge([], into: cached).map(\.progress), [5, 8])
     }
 
+    // MARK: - Completed means fully watched
+
+    /// THE ONE THAT MATTERS: Simkl stores no per-episode history for a completed title, so
+    /// watched_episodes_count stays 0. Taken literally, every completed anime looked unwatched,
+    /// every sync decided the library was behind, and the rewrite could never move the number it
+    /// was reading — so it rewrote the same titles on every run, forever.
+    func testCompletedCountsAsEveryEpisodeWatched() throws {
+        let entries = try self.entries(from: """
+        {"anime":[{"show":{"title":"Frieren","ids":{"mal":"52991"}},
+          "status":"completed","watched_episodes_count":0,"total_episodes_count":28}]}
+        """)
+
+        XCTAssertEqual(entries[0].progress, 28, "completed means all of them, however it is stored")
+        XCTAssertEqual(entries[0].status, .completed)
+    }
+
+    /// An explicit count higher than the total is kept — never reduced by the inference.
+    func testAnExplicitCountIsNeverReducedByTheInference() {
+        XCTAssertEqual(
+            SimklLibraryService.progress(watched: 30, total: 28, status: .completed), 30)
+    }
+
+    /// The inference applies only to completed. A dropped or paused title keeps its real count.
+    func testOnlyCompletedInfersFullProgress() {
+        XCTAssertEqual(SimklLibraryService.progress(watched: 3, total: 28, status: .dropped), 3)
+        XCTAssertEqual(SimklLibraryService.progress(watched: 3, total: 28, status: .paused), 3)
+        XCTAssertEqual(SimklLibraryService.progress(watched: 3, total: 28, status: .current), 3)
+        XCTAssertEqual(SimklLibraryService.progress(watched: 0, total: 28, status: .planning), 0)
+    }
+
+    /// A completed title whose total Simkl does not know keeps whatever count it has, rather
+    /// than inventing one.
+    func testCompletedWithNoKnownTotalKeepsItsCount() {
+        XCTAssertEqual(SimklLibraryService.progress(watched: 5, total: nil, status: .completed), 5)
+        XCTAssertEqual(SimklLibraryService.progress(watched: 0, total: 0, status: .completed), 0)
+    }
+
     /// Every status Simkl can send maps back; anything unknown falls back to the numbers.
     func testEveryStatusMapsBack() {
         XCTAssertEqual(SimklLibraryService.status(from: "plantowatch", progress: 0, total: 12), .planning)
