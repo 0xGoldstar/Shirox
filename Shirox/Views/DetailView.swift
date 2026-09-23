@@ -884,7 +884,11 @@ struct DetailView: View {
 
     // MARK: - Hero (unchanged, but poster overlay uses neutral strokes)
     private var heroSection: some View {
+        #if os(iOS)
         let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        let isIPad = false
+        #endif
         let baseHeight: CGFloat = isIPad ? 500 : 420
 
         return ZStack(alignment: .bottom) {

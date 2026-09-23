@@ -299,7 +299,11 @@ struct MangaDetailView: View {
     // MARK: - Hero (mirrors DetailView's parallax banner)
 
     private func heroSection(_ detail: MangaDetail) -> some View {
+        #if os(iOS)
         let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        let isIPad = false
+        #endif
         let baseHeight: CGFloat = isIPad ? 500 : 420
 
         return ZStack(alignment: .bottom) {

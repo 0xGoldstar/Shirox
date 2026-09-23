@@ -252,6 +252,7 @@ struct SettingsView: View {
                     #endif
                 }
 
+                #if os(iOS)
                 Section {
                     NavigationLink {
                         BackupSettingsView()
@@ -262,7 +263,6 @@ struct SettingsView: View {
                         )
                     }
 
-                    #if os(iOS)
                     NavigationLink {
                         SettingsViewLogger()
                     } label: {
@@ -271,8 +271,8 @@ struct SettingsView: View {
                             title: "App Logs"
                         )
                     }
-                    #endif
                 }
+                #endif
 
                 Section {
                     ForEach([LegalPage.imprint, .privacy, .contributors, .licenses], id: \.title) { page in

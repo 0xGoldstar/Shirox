@@ -533,7 +533,11 @@ struct AniListDetailView: View {
     // MARK: - Loading skeleton
     @ViewBuilder
     private var loadingSkeletonView: some View {
+        #if os(iOS)
         let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        let isIPad = false
+        #endif
         let baseHeight: CGFloat = isIPad ? 500 : 420
 
         ScrollView(showsIndicators: false) {
@@ -903,7 +907,11 @@ struct AniListDetailView: View {
     // MARK: - Hero
     @ViewBuilder
     private func heroSection(media: Media) -> some View {
+        #if os(iOS)
         let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        let isIPad = false
+        #endif
         let baseHeight: CGFloat = isIPad ? 500 : 420
 
         ZStack(alignment: .bottom) {
