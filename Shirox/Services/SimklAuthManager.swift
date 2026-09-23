@@ -1,13 +1,12 @@
 import Foundation
 import AuthenticationServices
-import CryptoKit
 import Security
 import Combine
 
-/// Simkl sign-in, over OAuth 2.0 with PKCE.
+/// Simkl sign-in over AUTH V2: OAuth 2.0 with PKCE, scopes and refresh tokens.
 ///
-/// No client secret ships. Simkl's PKCE flow replaces it — one of the reasons Simkl was chosen
-/// over Trakt, whose token exchange requires a secret that a client app cannot keep.
+/// No client secret ships — a "Mobile, desktop & browser apps" registration has none, and PKCE
+/// replaces it. The protocol rules live in `SimklOAuth`; this class holds the session.
 @MainActor
 final class SimklAuthManager: NSObject, ObservableObject {
     static let shared = SimklAuthManager()
@@ -19,19 +18,27 @@ final class SimklAuthManager: NSObject, ObservableObject {
     /// "free", "pro" or "vip". Rewatch tracking is Pro-only and silently records *nothing* on a
     /// free account, so a run must not claim it recorded one.
     @Published var accountType: String?
+    /// Signed in, but Simkl refused a write for lack of `media:write`. Only a new sign-in fixes
+    /// that: a grant's scope can never widen, not even on refresh.
+    @Published var needsReauthorization = false
 
-    // Registered at https://simkl.com/settings/developer/ — Redirect URI: shirox://auth-simkl
-    // Public by design: it ships in the app and goes on every request as a query parameter.
-    // PKCE replaces the client secret; there is no secret to add here.
+    // Must be an AUTH V2 registration — "Mobile, desktop & browser apps", Redirect URI
+    // shirox://auth-simkl. Every /oauth2/* endpoint refuses a V1 client id with 401
+    // invalid_client. Public by design: a V2 client id alone reaches only public catalog data.
     let clientId = "050302bd80ca6d64ea0b8b94af52bcd602f3fbb411a96fb042b5ef04fda2b136"
     private let redirectURI = "shirox://auth-simkl"
 
     private let accessTokenKey = "simkl_access_token"
+    private let refreshTokenKey = "simkl_refresh_token"
+    private let tokenExpiryKey = "simkl_token_expiry"
     private let profileKey = "simkl_user_profile"
     private var codeVerifier: String?
     private var expectedState: String?
     private var authSession: ASWebAuthenticationSession?
     nonisolated(unsafe) var presentationAnchorWindow: ASPresentationAnchor?
+    /// One refresh at a time. Each refresh cancels the previous access token on the spot, so two
+    /// racing refreshes would each invalidate what the other just received.
+    private var refreshTask: Task<Void, Error>?
 
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
@@ -48,9 +55,15 @@ final class SimklAuthManager: NSObject, ObservableObject {
         // See `FreshInstallKeychainPurge`: Keychain tokens outlive the app, so this has to run
         // before the token is read or a reinstall comes up claiming a session nobody opened.
         FreshInstallKeychainPurge.runIfNeeded()
-        if keychainRead(key: accessTokenKey) != nil {
+        guard let token = keychainRead(key: accessTokenKey) else { return }
+        if SimklOAuth.isV2AccessToken(token) {
             isLoggedIn = true
             restoreCachedProfile()
+        } else {
+            // A five-year V1 token from before AUTH V2. Simkl support never shipped on V1, so
+            // there is nobody to carry across: forget it, and the next sign-in is a V2 grant.
+            Logger.shared.log("[Simkl] Dropped a pre-V2 token — sign in again", type: "Info")
+            signOutLocally()
         }
     }
 
@@ -97,38 +110,36 @@ final class SimklAuthManager: NSObject, ObservableObject {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }
 
+    private static var userAgent: String { "Shirox/\(appVersion)" }
+
     /// Simkl wants `client_id`, `app-name` and `app-version` as QUERY PARAMETERS on every
-    /// request — not headers. That differs from both AniList and MyAnimeList, and calls without
-    /// them are rejected, so it lives in one place rather than at each call site.
+    /// request — the token exchange included — so it lives in one place.
+    private var identificationQuery: [URLQueryItem] {
+        [URLQueryItem(name: "client_id", value: clientId),
+         URLQueryItem(name: "app-name", value: Self.appName),
+         URLQueryItem(name: "app-version", value: Self.appVersion)]
+    }
+
     func authorizedRequest(path: String, method: String = "GET",
                            query: [URLQueryItem] = [],
                            body: [String: Any]? = nil) throws -> URLRequest {
         var components = URLComponents(string: "https://api.simkl.com\(path)")!
-        components.queryItems = query + [
-            URLQueryItem(name: "client_id", value: clientId),
-            URLQueryItem(name: "app-name", value: Self.appName),
-            URLQueryItem(name: "app-version", value: Self.appVersion),
-        ]
+        components.queryItems = query + identificationQuery
         var request = URLRequest(url: components.url!)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // Simkl requires a descriptive User-Agent on every request, alongside the query
-        // parameters above. Their example is "PlexMediaServer/1.43.1.10540".
-        request.setValue("Shirox/\(Self.appVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         if let token = keychainRead(key: accessTokenKey) {
+            // Sent exactly as issued: Simkl matches tokens case-sensitively.
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         if let body {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
-
-        // One line per session, so the parameters Simkl attributes traffic by can be confirmed
-        // from a log rather than assumed.
         if !Self.loggedSampleURL {
             Self.loggedSampleURL = true
             Logger.shared.log(
-                "[Simkl] request url: \(components.url?.absoluteString ?? "-") "
-                + "ua=Shirox/\(Self.appVersion)",
+                "[Simkl] request url: \(components.url?.absoluteString ?? "-") ua=\(Self.userAgent)",
                 type: "Provider")
         }
         return request
@@ -136,53 +147,129 @@ final class SimklAuthManager: NSObject, ObservableObject {
 
     private nonisolated(unsafe) static var loggedSampleURL = false
 
-    // MARK: - PKCE
-
-    private func generateCodeVerifier() -> String {
-        var bytes = [UInt8](repeating: 0, count: 64)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        return Self.base64URL(Data(bytes))
-    }
-
-    /// Simkl requires S256 — a SHA-256 of the verifier, base64url-encoded.
+    /// Sends an authenticated API request, refreshing ahead of expiry and — once — on a 401.
     ///
-    /// `MALAuthManager` uses `code_challenge_method=plain`, where the challenge *is* the
-    /// verifier unhashed. Copying that shape here produces a challenge Simkl rejects.
-    private func codeChallenge(for verifier: String) -> String {
-        Self.base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
+    /// A V2 access token lasts seven days, so a 401 is nearly always plain expiry: refresh,
+    /// retry, and give up only if the refresh itself is refused. `user_token_required` is the
+    /// exception — no token went out at all, which refreshing cannot fix. `build` is called
+    /// again for the retry so it picks up the new token.
+    func send(_ build: () throws -> URLRequest) async throws -> (Data, HTTPURLResponse) {
+        try await refreshIfNeeded(force: false)
+        var (data, http) = try await perform(try build())
+        guard http.statusCode == 401 else { return (data, http) }
+
+        if SimklOAuth.errorCode(in: data) == "user_token_required" {
+            Logger.shared.log("[Simkl] 401 user_token_required — a request went out without a token", type: "Error")
+            throw ProviderError.unauthenticated
+        }
+        try await refreshIfNeeded(force: true)
+        (data, http) = try await perform(try build())
+        if http.statusCode == 401 {
+            Logger.shared.log("[Simkl] Still 401 after a refresh — signing out", type: "Error")
+            signOutLocally()
+            throw ProviderError.unauthenticated
+        }
+        return (data, http)
     }
 
-    private static func base64URL(_ data: Data) -> String {
-        data.base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
+    private func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ProviderError.networkError(URLError(.badServerResponse))
+        }
+        return (data, http)
+    }
+
+    // MARK: - Tokens
+
+    private var tokenExpiry: Date? {
+        guard UserDefaults.standard.object(forKey: tokenExpiryKey) != nil else { return nil }
+        return Date(timeIntervalSince1970: UserDefaults.standard.double(forKey: tokenExpiryKey))
+    }
+
+    private func store(_ tokens: SimklOAuth.TokenResponse) {
+        keychainWrite(key: accessTokenKey, value: tokens.access_token)
+        // Non-rotating, so this rewrites the same value on a refresh. Harmless, and it keeps one
+        // path for both grants.
+        keychainWrite(key: refreshTokenKey, value: tokens.refresh_token)
+        UserDefaults.standard.set(
+            Date().addingTimeInterval(TimeInterval(tokens.expires_in)).timeIntervalSince1970,
+            forKey: tokenExpiryKey)
+    }
+
+    /// Concurrent callers share one in-flight refresh — the same shape as `MALAuthManager`.
+    private func refreshIfNeeded(force: Bool) async throws {
+        guard isLoggedIn else { throw ProviderError.unauthenticated }
+        if !force, !SimklOAuth.needsRefresh(expiry: tokenExpiry) { return }
+        if let task = refreshTask {
+            try await task.value
+            return
+        }
+        let task = Task<Void, Error> { try await self.performRefresh() }
+        refreshTask = task
+        defer { refreshTask = nil }
+        try await task.value
+    }
+
+    private func performRefresh() async throws {
+        guard let refresh = keychainRead(key: refreshTokenKey) else {
+            signOutLocally()
+            throw ProviderError.unauthenticated
+        }
+        let (data, http) = try await perform(tokenRequest(
+            SimklOAuth.tokenEndpoint,
+            body: SimklOAuth.refreshBody(clientId: clientId, refreshToken: refresh)))
+        guard http.statusCode == 200 else {
+            let code = SimklOAuth.errorCode(in: data)
+            // invalid_grant: revoked under Connected Apps, or unused for 180 days. No retry
+            // brings that back. Anything else — a 5xx, a timeout — keeps the session.
+            if code == "invalid_grant" || code == "invalid_client" {
+                Logger.shared.log("[Simkl] Refresh refused (\(code ?? "?")) — signing out", type: "Error")
+                signOutLocally()
+                throw ProviderError.unauthenticated
+            }
+            throw ProviderError.serverError(http.statusCode)
+        }
+        let tokens = try JSONDecoder().decode(SimklOAuth.TokenResponse.self, from: data)
+        store(tokens)
+        Logger.shared.log("[Simkl] Access token refreshed (expires in \(tokens.expires_in)s)", type: "Info")
+    }
+
+    /// Form-encoded, per the V2 examples, with the same identification as every other call.
+    private func tokenRequest(_ endpoint: URL, body: Data) -> URLRequest {
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
+        components.queryItems = identificationQuery
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.httpBody = body
+        return request
+    }
+
+    /// Revoking either half ends the whole grant. The endpoint answers 200 whatever happened —
+    /// RFC 7009 — so there is no success to check: send it and move on.
+    private func revoke(_ token: String) async {
+        _ = try? await perform(tokenRequest(
+            SimklOAuth.revokeEndpoint, body: SimklOAuth.revokeBody(clientId: clientId, token: token)))
     }
 
     // MARK: - Login
 
     func login(presentationAnchor: ASPresentationAnchor) {
+        guard let verifier = SimklOAuth.makeCodeVerifier() else {
+            Logger.shared.log("[Simkl] Could not generate a PKCE verifier", type: "Error")
+            return
+        }
         presentationAnchorWindow = presentationAnchor
-        let verifier = generateCodeVerifier()
         let state = UUID().uuidString
         codeVerifier = verifier
         expectedState = state
 
-        var components = URLComponents(string: "https://simkl.com/oauth/authorize")!
-        components.queryItems = [
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "client_id", value: clientId),
-            URLQueryItem(name: "redirect_uri", value: redirectURI),
-            URLQueryItem(name: "code_challenge", value: codeChallenge(for: verifier)),
-            URLQueryItem(name: "code_challenge_method", value: "S256"),
-            URLQueryItem(name: "state", value: state),
-            URLQueryItem(name: "app-name", value: Self.appName),
-            URLQueryItem(name: "app-version", value: Self.appVersion),
-        ]
-
-        let webSession = ASWebAuthenticationSession(
-            url: components.url!, callbackURLScheme: "shirox"
-        ) { [weak self] callbackURL, error in
+        let url = SimklOAuth.authorizeURL(
+            clientId: clientId, redirectURI: redirectURI,
+            codeChallenge: SimklOAuth.codeChallenge(for: verifier), state: state)
+        let webSession = ASWebAuthenticationSession(url: url, callbackURLScheme: "shirox") { [weak self] callbackURL, error in
             guard let self, let url = callbackURL, error == nil else { return }
             Task { await self.handleCallback(url: url) }
         }
@@ -195,56 +282,48 @@ final class SimklAuthManager: NSObject, ObservableObject {
     }
 
     private func handleCallback(url: URL) async {
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
-              let verifier = codeVerifier else { return }
+        defer { codeVerifier = nil; expectedState = nil }
+        guard let verifier = codeVerifier else { return }
 
-        // Reject a callback whose state is not the one this session sent.
-        let returnedState = components.queryItems?.first(where: { $0.name == "state" })?.value
-        guard returnedState == expectedState else {
-            Logger.shared.log("[Simkl] Ignored callback with mismatched state", type: "Error")
-            return
+        switch SimklOAuth.parseCallback(url, expectedState: expectedState) {
+        case .denied:
+            Logger.shared.log("[Simkl] Sign-in declined", type: "Info")
+        case .rejected(let reason):
+            Logger.shared.log("[Simkl] Ignored sign-in callback: \(reason)", type: "Error")
+        case .code(let code):
+            do {
+                try await exchangeCode(code, verifier: verifier)
+                await fetchCurrentUser()
+                // Simkl's documented flow starts here: on connect, download the full watchlist
+                // once. Everything after is an activities check and a `date_from` delta.
+                await SimklLibraryService.shared.primeLibrary()
+            } catch {
+                Logger.shared.log("[Simkl] Auth failed: \(error)", type: "Error")
+            }
         }
-
-        do {
-            try await exchangeCode(code, verifier: verifier)
-            await fetchCurrentUser()
-            // Simkl's documented flow starts here: on connect, download the full watchlist once.
-            // Everything after this is an activities check and a `date_from` delta.
-            await SimklLibraryService.shared.primeLibrary()
-        } catch {
-            Logger.shared.log("[Simkl] Auth failed: \(error)", type: "Error")
-        }
-        codeVerifier = nil
-        expectedState = nil
     }
 
     private func exchangeCode(_ code: String, verifier: String) async throws {
-        // Carries the same identification as every other call. This one built its own request
-        // and sent none of it — no query parameters and no User-Agent — so the very first call
-        // a new user makes was unattributable in Simkl's developer analytics.
-        var components = URLComponents(string: "https://api.simkl.com/oauth/token")!
-        components.queryItems = [
-            URLQueryItem(name: "client_id", value: clientId),
-            URLQueryItem(name: "app-name", value: Self.appName),
-            URLQueryItem(name: "app-version", value: Self.appVersion),
-        ]
-        var request = URLRequest(url: components.url!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Shirox/\(Self.appVersion)", forHTTPHeaderField: "User-Agent")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "code": code,
-            "client_id": clientId,
-            "code_verifier": verifier,
-            "redirect_uri": redirectURI,
-            "grant_type": "authorization_code",
-        ])
-
-        let (data, _) = try await session.data(for: request)
-        struct TokenResponse: Decodable { let access_token: String }
-        let token = try JSONDecoder().decode(TokenResponse.self, from: data)
-        keychainWrite(key: accessTokenKey, value: token.access_token)
+        let (data, http) = try await perform(tokenRequest(
+            SimklOAuth.tokenEndpoint,
+            body: SimklOAuth.authorizationCodeBody(
+                clientId: clientId, code: code, redirectURI: redirectURI, verifier: verifier)))
+        guard http.statusCode == 200 else {
+            Logger.shared.log(
+                "[Simkl] Code exchange failed: HTTP \(http.statusCode) \(SimklOAuth.errorCode(in: data) ?? "")",
+                type: "Error")
+            throw ProviderError.serverError(http.statusCode)
+        }
+        let tokens = try JSONDecoder().decode(SimklOAuth.TokenResponse.self, from: data)
+        guard SimklOAuth.grantsWrite(tokens.scope) else {
+            // Signed in but read-only: every write would come back 403. Failing sign-in visibly
+            // beats looking connected and syncing nothing.
+            Logger.shared.log("[Simkl] Granted '\(tokens.scope)' without media:write — not keeping it", type: "Error")
+            await revoke(tokens.refresh_token)
+            throw ProviderError.unauthenticated
+        }
+        store(tokens)
+        needsReauthorization = false
         isLoggedIn = true
     }
 
@@ -254,8 +333,7 @@ final class SimklAuthManager: NSObject, ObservableObject {
     /// than meaningful.
     func fetchCurrentUser() async {
         do {
-            let request = try authorizedRequest(path: "/users/settings", method: "POST")
-            let (data, _) = try await session.data(for: request)
+            let (data, _) = try await send { try self.authorizedRequest(path: "/users/settings", method: "POST") }
             struct Settings: Decodable {
                 struct User: Decodable { let name: String?; let avatar: String? }
                 struct Account: Decodable { let id: Int?; let type: String? }
@@ -295,10 +373,24 @@ final class SimklAuthManager: NSObject, ObservableObject {
         accountType = profile.type
     }
 
+    // MARK: - Sign out
+
+    /// The user signing out: ends this device's grant at Simkl, then forgets it locally. Queued
+    /// writes are kept for the next sign-in — see `SimklWriteQueue`.
     func logout() {
+        let refresh = keychainRead(key: refreshTokenKey)
+        signOutLocally()
+        if let refresh { Task { await revoke(refresh) } }
+    }
+
+    /// Forgets the session without contacting Simkl — for a grant Simkl has already refused.
+    private func signOutLocally() {
         keychainDelete(key: accessTokenKey)
+        keychainDelete(key: refreshTokenKey)
+        UserDefaults.standard.removeObject(forKey: tokenExpiryKey)
         UserDefaults.standard.removeObject(forKey: profileKey)
         isLoggedIn = false
+        needsReauthorization = false
         username = nil
         avatarURL = nil
         userId = nil
@@ -309,7 +401,7 @@ final class SimklAuthManager: NSObject, ObservableObject {
 #if !os(tvOS)
 extension SimklAuthManager: ASWebAuthenticationPresentationContextProviding {
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        presentationAnchorWindow ?? ASPresentationAnchor()
+        MainActor.assumeIsolated { presentationAnchorWindow ?? ASPresentationAnchor() }
     }
 }
 #endif

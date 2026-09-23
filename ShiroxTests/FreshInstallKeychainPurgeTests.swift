@@ -119,4 +119,12 @@ final class FreshInstallKeychainPurgeTests: XCTestCase {
             kSecAttrAccount: account
         ] as CFDictionary)
     }
+
+    /// V2 adds a second Simkl credential. One missing from this list survives a reinstall and
+    /// signs the app in as whoever held the device before — and a refresh token is the more
+    /// valuable of the two, minting access for six months.
+    func testSimklRefreshTokenIsPurgedOnAFreshInstall() {
+        XCTAssertTrue(FreshInstallKeychainPurge.accounts.contains("simkl_access_token"))
+        XCTAssertTrue(FreshInstallKeychainPurge.accounts.contains("simkl_refresh_token"))
+    }
 }
