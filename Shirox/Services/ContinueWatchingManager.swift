@@ -928,13 +928,17 @@ struct SimklTrackWrite: Equatable {
 
     /// Decides the remote auto-track write for a watched-episode event, shared by AniList and MAL
     /// so both obey the same rewatch convention:
-    ///  • A COMPLETED entry begins a rewatch — REPEATING for multi-episode shows, or a straight
-    ///    repeat-count bump for single-episode entries — unless "never reduce progress" is on.
-    ///  • A REPEATING (rewatching) entry stays REPEATING until the finale, then completes and bumps
-    ///    the repeat count. (Previously it was demoted to CURRENT — the "rewatching → watching" bug.)
+    ///  • A COMPLETED entry begins a rewatch, and the rewatch is counted as it starts — REPEATING
+    ///    at the watched episode for multi-episode shows, or a straight repeat-count bump for
+    ///    single-episode entries. "Never reduce progress" does not stop this: a rewatch is not a
+    ///    reduction, and skipping it left finished shows looking untouched after a rewatch.
+    ///  • A REPEATING (rewatching) entry stays REPEATING until the finale, then completes — with no
+    ///    second bump, since the rewatch was counted when it began. (Previously it was demoted to
+    ///    CURRENT — the "rewatching → watching" bug.)
     ///  • Any other status advances to CURRENT, or COMPLETED at the finale.
-    /// `currentStatus == nil` means there is no existing remote entry. Returns `.skip` when the event
-    /// must not touch the entry (already tracked / never-reduce-progress). Pure, no side effects.
+    /// `skipRewatch` is the "never reduce progress" setting: it only refuses to write an episode at
+    /// or below the one already tracked. `currentStatus == nil` means there is no existing remote
+    /// entry. Returns `.skip` when the event must not touch the entry. Pure, no side effects.
     nonisolated static func remoteTrackDecision(
         currentStatus: MediaListStatus?, currentProgress: Int,
         watchedEpisode ep: Int, totalEpisodes: Int?, isCompleted: Bool,
@@ -942,11 +946,10 @@ struct SimklTrackWrite: Equatable {
 
         switch currentStatus {
         case .completed:
-            if skipRewatch { return .skip }
             if totalEpisodes == 1 { return .write(status: .completed, progress: ep, incrementRepeat: true) }
-            return .write(status: .repeating, progress: ep, incrementRepeat: false)
+            return .write(status: .repeating, progress: ep, incrementRepeat: true)
         case .repeating:
-            if isCompleted { return .write(status: .completed, progress: ep, incrementRepeat: true) }
+            if isCompleted { return .write(status: .completed, progress: ep, incrementRepeat: false) }
             if skipRewatch && ep <= currentProgress { return .skip }
             return .write(status: .repeating, progress: ep, incrementRepeat: false)
         default:
@@ -1026,7 +1029,7 @@ struct SimklTrackWrite: Equatable {
                 case let .write(status, progress, incrementRepeat):
                     if incrementRepeat {
                         let newRepeat = (current?.timesRewatched ?? 0) + 1
-                        Logger.shared.log("[Tracking] AniList rewatch complete: \(status.rawValue) ep \(progress), repeat → \(newRepeat)", type: "Info")
+                        Logger.shared.log("[Tracking] AniList rewatch counted: \(status.rawValue) ep \(progress), repeat → \(newRepeat)", type: "Info")
                         try? await AniListLibraryService.shared.updateEntry(
                             mediaId: aid, status: status, progress: progress, repeat: newRepeat)
                     } else {
@@ -1064,7 +1067,7 @@ struct SimklTrackWrite: Equatable {
                             try await MALLibraryService.shared.updateEntry(
                                 malId: mid, status: status, progress: progress, score: 0,
                                 numTimesRewatched: newRepeat)
-                            Logger.shared.log("[Tracking] MAL rewatch complete: \(status.rawValue) ep \(progress), num_times_rewatched → \(newRepeat)", type: "Info")
+                            Logger.shared.log("[Tracking] MAL rewatch counted: \(status.rawValue) ep \(progress), num_times_rewatched → \(newRepeat)", type: "Info")
                         } else {
                             try await MALProvider.shared.updateEntry(
                                 mediaId: mid, status: status, progress: progress, score: 0)

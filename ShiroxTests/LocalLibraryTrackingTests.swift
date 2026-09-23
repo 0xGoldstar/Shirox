@@ -149,12 +149,13 @@ final class LocalLibraryTrackingTests: XCTestCase {
         XCTAssertEqual(d, .write(status: .repeating, progress: 4, incrementRepeat: false))
     }
 
-    /// Finishing the final episode of a rewatch completes the entry and bumps the repeat count.
-    func testRepeatingFinaleCompletesAndIncrementsRepeat() {
+    /// Finishing the final episode of a rewatch completes the entry — without a second bump,
+    /// since the rewatch was already counted when it started.
+    func testRepeatingFinaleCompletesWithoutCountingTwice() {
         let d = ContinueWatchingManager.remoteTrackDecision(
             currentStatus: .repeating, currentProgress: 11,
             watchedEpisode: 12, totalEpisodes: 12, isCompleted: true, skipRewatch: true)
-        XCTAssertEqual(d, .write(status: .completed, progress: 12, incrementRepeat: true))
+        XCTAssertEqual(d, .write(status: .completed, progress: 12, incrementRepeat: false))
     }
 
     /// Re-watching an episode at/under tracked progress is skipped (no redundant write) while
@@ -168,12 +169,13 @@ final class LocalLibraryTrackingTests: XCTestCase {
 
     // MARK: - remoteTrackDecision: completed → rewatch start (existing behavior)
 
-    /// A completed multi-episode entry begins a rewatch as REPEATING.
+    /// A completed multi-episode entry begins a rewatch as REPEATING, and the rewatch is counted
+    /// as it starts.
     func testCompletedMultiEpStartsRepeating() {
         let d = ContinueWatchingManager.remoteTrackDecision(
             currentStatus: .completed, currentProgress: 12,
             watchedEpisode: 1, totalEpisodes: 12, isCompleted: false, skipRewatch: false)
-        XCTAssertEqual(d, .write(status: .repeating, progress: 1, incrementRepeat: false))
+        XCTAssertEqual(d, .write(status: .repeating, progress: 1, incrementRepeat: true))
     }
 
     /// A completed single-episode entry bumps the repeat count without a REPEATING phase.
@@ -184,12 +186,13 @@ final class LocalLibraryTrackingTests: XCTestCase {
         XCTAssertEqual(d, .write(status: .completed, progress: 1, incrementRepeat: true))
     }
 
-    /// With "never reduce progress" on, a completed entry is left untouched (no rewatch).
-    func testCompletedSkippedWhenNeverReduceProgress() {
+    /// "Never reduce progress" guards against lowering progress within a watch — it does not stop
+    /// a rewatch. Watching episode 6 of a completed show is a rewatch at 6, counted once.
+    func testCompletedStartsRewatchEvenWithNeverReduceProgress() {
         let d = ContinueWatchingManager.remoteTrackDecision(
             currentStatus: .completed, currentProgress: 12,
-            watchedEpisode: 1, totalEpisodes: 12, isCompleted: false, skipRewatch: true)
-        XCTAssertEqual(d, .skip)
+            watchedEpisode: 6, totalEpisodes: 12, isCompleted: false, skipRewatch: true)
+        XCTAssertEqual(d, .write(status: .repeating, progress: 6, incrementRepeat: true))
     }
 
     // MARK: - remoteTrackDecision: normal progress
