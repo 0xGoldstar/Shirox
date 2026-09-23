@@ -247,7 +247,7 @@ final class BackupManagerTests: XCTestCase {
         let ids = BackupManager.defaultSections.map(\.id)
         XCTAssertEqual(Set(ids), Set([BackupSectionID.settings, BackupSectionID.modules,
                                       BackupSectionID.localLibrary, BackupSectionID.progress,
-                                      BackupSectionID.accounts]))
+                                      BackupSectionID.links, BackupSectionID.accounts]))
         XCTAssertEqual(ids.count, Set(ids).count, "A section must be registered once")
     }
 

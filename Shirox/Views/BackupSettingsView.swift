@@ -194,6 +194,7 @@ struct BackupSettingsView: View {
         case BackupSectionID.settings: return "Settings"
         case BackupSectionID.modules: return "Modules"
         case BackupSectionID.accounts: return "Accounts"
+        case BackupSectionID.links: return "Links"
         default: return sectionID
         }
     }

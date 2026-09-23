@@ -766,6 +766,15 @@ final class AniListMappingManager {
         mappings.removeValue(forKey: title.lowercased())
         persist()
     }
+
+    /// Every saved match, for backups.
+    var allMappings: [String: Int] { mappings }
+
+    /// Wholesale replacement, for restoring a backup.
+    func replaceAll(_ newMappings: [String: Int]) {
+        mappings = newMappings
+        persist()
+    }
     
     private func loadMappings() {
         if let data = userDefaults.data(forKey: storageKey),

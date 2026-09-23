@@ -95,6 +95,7 @@ final class BackupManager {
     static var defaultSections: [AnyBackupSection] {
         [SettingsBackupSection().erased(),
          ModulesBackupSection().erased(),
+         LinksBackupSection().erased(),
          LocalLibraryBackupSection().erased(),
          ProgressBackupSection().erased(),
          AccountsBackupSection().erased()]

@@ -84,6 +84,7 @@ enum BackupSectionID {
     static let settings = "settings"
     static let modules = "modules"
     static let accounts = "accounts"
+    static let links = "links"
 }
 
 // MARK: - Errors
