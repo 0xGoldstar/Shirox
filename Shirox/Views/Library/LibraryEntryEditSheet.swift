@@ -13,6 +13,15 @@ struct LibraryEntryEditSheet: View {
     @ObservedObject private var local = LocalLibraryManager.shared
     @State private var status: MediaListStatus
     @State private var progress: Int
+
+    /// The most progress this title can take — its episode or chapter count when known.
+    private var maxProgress: Int { media.episodes ?? 9999 }
+
+    /// What typing into the progress field sets progress to: digits only, never past `max`.
+    static func typedProgress(_ text: String, max: Int) -> Int {
+        let digits = text.filter { $0.isASCII && $0.isNumber }
+        return min(Int(digits) ?? 0, max)
+    }
     @State private var score: Double
     @State private var isPrivate: Bool
     @State private var notes: String
@@ -124,11 +133,23 @@ struct LibraryEntryEditSheet: View {
                 if status != .completed {
                     Section("Progress") {
                         #if !os(tvOS)
-                        Stepper(
-                            "\(progress) \(progressUnit)\(progress == 1 ? "" : "s") \(progressUnit == "chapter" ? "read" : "watched")",
-                            value: $progress,
-                            in: 0...(media.episodes ?? 9999)
-                        )
+                        HStack {
+                            // Typed as well as stepped: stepping through 200 episodes was 200 taps.
+                            // Parsed on every keystroke, so Save right after typing takes the value.
+                            TextField("0", text: Binding(
+                                get: { String(progress) },
+                                set: { progress = Self.typedProgress($0, max: maxProgress) }))
+                                #if os(iOS)
+                                .keyboardType(.numberPad)
+                                #endif
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.center)
+                                .frame(width: 72)
+                            Text("\(progressUnit)\(progress == 1 ? "" : "s") \(progressUnit == "chapter" ? "read" : "watched")")
+                            Spacer()
+                            Stepper("Progress", value: $progress, in: 0...maxProgress)
+                                .labelsHidden()
+                        }
                         #endif
                         if let total = media.episodes {
                             Text("of \(total) total")
