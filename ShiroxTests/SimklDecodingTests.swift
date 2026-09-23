@@ -154,4 +154,10 @@ final class SimklDecodingTests: XCTestCase {
         XCTAssertEqual(SimklLibraryService.status(from: nil, progress: 12, total: 12), .completed)
         XCTAssertEqual(SimklLibraryService.status(from: nil, progress: 3, total: 12), .current)
     }
+
+    /// Simkl sends `notinteresting` where newer registrations get `dropped`, keyed to how old the
+    /// registering app is. The fallback would otherwise read a dropped show as being watched.
+    func testNotInterestingReadsAsDropped() {
+        XCTAssertEqual(SimklLibraryService.status(from: "notinteresting", progress: 3, total: 12), .dropped)
+    }
 }

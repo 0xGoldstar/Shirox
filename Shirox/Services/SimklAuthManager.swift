@@ -40,9 +40,10 @@ final class SimklAuthManager: NSObject, ObservableObject {
     /// racing refreshes would each invalidate what the other just received.
     private var refreshTask: Task<Void, Error>?
 
+    /// Carries every Simkl call, library reads included — `full` reads are large, hence 20 s.
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
-        cfg.timeoutIntervalForRequest = 15
+        cfg.timeoutIntervalForRequest = 20
         return URLSession(configuration: cfg)
     }()
 

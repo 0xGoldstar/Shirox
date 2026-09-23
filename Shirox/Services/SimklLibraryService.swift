@@ -1,5 +1,20 @@
 import Foundation
 
+/// How to treat a non-2xx Simkl response.
+enum SimklFailure: Equatable {
+    /// 429 `rate_limit` — over 1 POST/sec or 10 GET/sec. Clears in about a second.
+    case tooFast
+    /// 429 `user_limit_exceeded` — this user's daily allowance is spent until midnight US
+    /// Eastern. Backing off over seconds cannot clear it.
+    case dailyLimit(retryAfter: TimeInterval?)
+    /// 400 `RATE_LIMIT` — despite the name, another write for this user is still running (a
+    /// lock of up to 20 s on `/sync/history`). Serialise and retry shortly.
+    case writeLocked
+    /// 403 `insufficient_scope` — the token cannot write. Only a new sign-in fixes it.
+    case readOnlyToken
+    case other(Int)
+}
+
 /// Reads and writes a Simkl anime library.
 ///
 /// Two rules from Simkl's own documentation shape this file, and both protect a `client_id`
@@ -13,11 +28,6 @@ final class SimklLibraryService {
     static let shared = SimklLibraryService()
 
     private let auth = SimklAuthManager.shared
-    private let session: URLSession = {
-        let cfg = URLSessionConfiguration.default
-        cfg.timeoutIntervalForRequest = 20
-        return URLSession(configuration: cfg)
-    }()
 
     /// Last `all` timestamp seen from `/sync/activities`, so a read can be skipped entirely when
     /// nothing has changed.
@@ -35,35 +45,54 @@ final class SimklLibraryService {
     @discardableResult
     private func post(_ path: String, body: [String: Any],
                       query: [URLQueryItem] = []) async throws -> Data {
-        let request = try auth.authorizedRequest(path: path, method: "POST", query: query, body: body)
-        let (data, response) = try await session.data(for: request)
-        try check(response)
-        return data
+        try await perform { try auth.authorizedRequest(path: path, method: "POST", query: query, body: body) }
     }
 
     private func get(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
-        let request = try auth.authorizedRequest(path: path, query: query)
-        let (data, response) = try await session.data(for: request)
-        try check(response)
-        return data
+        try await perform { try auth.authorizedRequest(path: path, query: query) }
     }
 
-    private func check(_ response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse else { return }
-        switch http.statusCode {
-        case 200...299:
-            return
-        case 401:
-            // Tokens last ~5 years and there is no refresh grant, so a 401 means exactly one
-            // thing: the user revoked access under Connected Apps. Nothing to retry.
-            auth.logout()
-            throw ProviderError.unauthenticated
-        case 429:
-            let retry = (http.value(forHTTPHeaderField: "Retry-After")).flatMap(Double.init) ?? 1
-            Logger.shared.log("[Simkl] Rate limited, retry after \(retry)s", type: "Error")
-            throw ProviderError.serverError(429)
+    /// One request, through `SimklAuthManager.send` (which owns 401s), with the retries each
+    /// kind of refusal actually wants.
+    private func perform(_ build: () throws -> URLRequest) async throws -> Data {
+        var retriedTooFast = false
+        var lockRetries = 0
+        while true {
+            let (data, http) = try await auth.send(build)
+            if (200...299).contains(http.statusCode) { return data }
+
+            let failure = Self.classify(status: http.statusCode, body: data,
+                                        retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
+            switch failure {
+            case .tooFast where !retriedTooFast:
+                retriedTooFast = true
+                try? await Task.sleep(nanoseconds: 1_100_000_000)
+            case .writeLocked where lockRetries < 3:
+                lockRetries += 1
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            case .readOnlyToken:
+                auth.needsReauthorization = true
+                Logger.shared.log("[Simkl] Write refused: token lacks media:write", type: "Error")
+                throw ProviderError.unauthenticated
+            default:
+                Logger.shared.log("[Simkl] Request failed: \(failure)", type: "Error")
+                throw ProviderError.serverError(http.statusCode)
+            }
+        }
+    }
+
+    nonisolated static func classify(status: Int, body: Data, retryAfter: String?) -> SimklFailure {
+        switch (status, SimklOAuth.errorCode(in: body)) {
+        case (429, "user_limit_exceeded"), (429, "app_limit_exceeded"):
+            return .dailyLimit(retryAfter: retryAfter.flatMap(TimeInterval.init))
+        case (429, _):
+            return .tooFast
+        case (400, "RATE_LIMIT"):
+            return .writeLocked
+        case (403, "insufficient_scope"):
+            return .readOnlyToken
         default:
-            throw ProviderError.serverError(http.statusCode)
+            return .other(status)
         }
     }
 
@@ -403,7 +432,8 @@ final class SimklLibraryService {
         switch raw {
         case "plantowatch": return .planning
         case "completed":   return .completed
-        case "dropped":     return .dropped
+        // Older registrations receive `notinteresting` where newer ones get `dropped`.
+        case "dropped", "notinteresting": return .dropped
         case "hold":        return .paused
         case "watching":    return .current
         default:
