@@ -25,7 +25,7 @@ final class SimklAuthManager: NSObject, ObservableObject {
     // Must be an AUTH V2 registration — "Mobile, desktop & browser apps", Redirect URI
     // shirox://auth-simkl. Every /oauth2/* endpoint refuses a V1 client id with 401
     // invalid_client. Public by design: a V2 client id alone reaches only public catalog data.
-    let clientId = "050302bd80ca6d64ea0b8b94af52bcd602f3fbb411a96fb042b5ef04fda2b136"
+    let clientId = "69f6182a4823d2a442052d70f2725424420fc9c5b029cb039453a860649611be"
     private let redirectURI = "shirox://auth-simkl"
 
     private let accessTokenKey = "simkl_access_token"
