@@ -1084,7 +1084,6 @@
 				8A24D9074CE6FD30E60EEA4C /* HomeCacheStoreTests.swift */,
 				9EC3ED0C2D6F7589559C879E /* FreshInstallKeychainPurgeTests.swift */,
 			);
-			name = ShiroxTests;
 			path = ShiroxTests;
 			sourceTree = "<group>";
 		};
@@ -1415,7 +1414,6 @@
 			children = (
 				6AE700EBDD4760C062AE487A /* Services */,
 			);
-			name = Shirox;
 			path = Shirox;
 			sourceTree = "<group>";
 		};
@@ -1502,7 +1500,6 @@
 				3F766E2B1601412A7B7D9F02 /* HomeCacheStore.swift */,
 				DF9A299B7B1F54AA1675478F /* FreshInstallKeychainPurge.swift */,
 			);
-			name = Services;
 			path = Services;
 			sourceTree = "<group>";
 		};
