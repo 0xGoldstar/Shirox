@@ -4,28 +4,26 @@ import Foundation
 /// edits on that service are mirrored there.
 @MainActor
 enum SimklEditMirror {
-    static func edit(malId: Int?, anilistId: Int?, editedOn side: LibrarySide,
+    static func edit(malId: Int?, anilistId: Int?, simklId: Int? = nil, editedOn side: LibrarySide,
                      status: MediaListStatus, progress: Int, score: Double,
                      format: ScoreFormat, title: String?) async {
         guard shouldMirror(from: side) else { return }
         let mal = await resolvedMALId(malId: malId, anilistId: anilistId)
         await SimklLibraryService.shared.writeNow(
-            malId: mal, anilistId: anilistId, status: status, progress: progress,
+            malId: mal, anilistId: anilistId, simklId: simklId, status: status, progress: progress,
             score: score, format: format, title: title)
     }
 
     /// The edit sheet's Delete removes the title, so this is whole-entry removal — never the
     /// narrower episode un-mark.
-    static func delete(malId: Int?, anilistId: Int?, editedOn side: LibrarySide) async {
+    static func delete(malId: Int?, anilistId: Int?, simklId: Int? = nil, editedOn side: LibrarySide) async {
         guard shouldMirror(from: side) else { return }
         let mal = await resolvedMALId(malId: malId, anilistId: anilistId)
-        var ids: [String: Int] = [:]
-        if let mal { ids["mal"] = mal }
-        if let anilistId { ids["anilist"] = anilistId }
+        let ids = SimklLibraryService.writeIDs(malId: mal, anilistId: anilistId, simklId: simklId)
         guard !ids.isEmpty else { return }
         do {
             try await SimklLibraryService.shared.rawDeleteEntry(ids: ids)
-            SimklLibraryService.shared.noteDeleted(malId: mal, anilistId: anilistId)
+            SimklLibraryService.shared.noteDeleted(malId: mal, anilistId: anilistId, simklId: simklId)
         } catch {
             Logger.shared.log("[Simkl] Mirroring a delete failed: \(error)", type: "Error")
         }

@@ -160,4 +160,13 @@ final class SimklDecodingTests: XCTestCase {
     func testNotInterestingReadsAsDropped() {
         XCTAssertEqual(SimklLibraryService.status(from: "notinteresting", progress: 3, total: 12), .dropped)
     }
+
+    /// The entry keeps Simkl's own id as its entry id, so a show linked by Simkl id can be found
+    /// in the cache. `media.id` stays the MyAnimeList id the pairing joins on.
+    func testAnEntryKeepsItsSimklId() throws {
+        let json = #"{"anime":[{"show":{"title":"Death Parade","ids":{"simkl":37145,"mal":28223}},"status":"completed","watched_episodes_count":12,"total_episodes_count":12}]}"#
+        let entry = try XCTUnwrap(SimklLibraryService.decodeLibrary(from: Data(json.utf8)).first)
+        XCTAssertEqual(entry.id, 37145)
+        XCTAssertEqual(entry.media.id, 28223)
+    }
 }

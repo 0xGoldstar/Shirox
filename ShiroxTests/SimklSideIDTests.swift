@@ -102,4 +102,21 @@ final class SimklSideIDTests: XCTestCase {
     func testAnAniListIdDoesNotMatchAMyAnimeListKeyedEntry() throws {
         XCTAssertNil(SimklLibraryService.entry(in: try cachedLibrary(), malId: nil, anilistId: 100))
     }
+
+    func testCachedEntryIsFoundBySimklId() throws {
+        let json = #"{"anime":[{"show":{"title":"A","ids":{"simkl":37145,"mal":900}},"status":"watching","watched_episodes_count":4,"total_episodes_count":12}]}"#
+        let entries = try SimklLibraryService.decodeLibrary(from: Data(json.utf8))
+        XCTAssertEqual(SimklLibraryService.entry(in: entries, malId: nil, anilistId: nil, simklId: 37145)?.progress, 4)
+    }
+
+    /// A linked Simkl id goes out alone: the MAL/AniList ids could steer Simkl back to the entry
+    /// the user corrected away from.
+    func testALinkedSimklIdIsWrittenAlone() {
+        XCTAssertEqual(SimklLibraryService.writeIDs(malId: 900, anilistId: 100, simklId: 37145), ["simkl": 37145])
+    }
+
+    func testWithoutALinkTheWriteIdsAreUnchanged() {
+        XCTAssertEqual(SimklLibraryService.writeIDs(malId: 900, anilistId: 100, simklId: nil), ["mal": 900, "anilist": 100])
+        XCTAssertEqual(SimklLibraryService.writeIDs(malId: nil, anilistId: nil, simklId: nil), [:])
+    }
 }

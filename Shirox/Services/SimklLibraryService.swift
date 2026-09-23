@@ -318,32 +318,45 @@ final class SimklLibraryService {
 
     // MARK: - Single-title writes
 
+    /// The `ids` a write sends. A linked Simkl id goes alone — the MAL/AniList ids could steer
+    /// Simkl back to the entry the user corrected away from.
+    nonisolated static func writeIDs(malId: Int?, anilistId: Int?, simklId: Int?) -> [String: Int] {
+        if let simklId { return ["simkl": simklId] }
+        var ids: [String: Int] = [:]
+        if let malId { ids["mal"] = malId }
+        if let anilistId { ids["anilist"] = anilistId }
+        return ids
+    }
+
     /// Entries are keyed by MyAnimeList id where Simkl gave one, otherwise by AniList id — and
     /// an entry keyed by MyAnimeList id keeps no AniList id, so that lookup needs the MAL id.
-    nonisolated static func entry(in entries: [LibraryEntry], malId: Int?, anilistId: Int?) -> LibraryEntry? {
+    nonisolated static func entry(in entries: [LibraryEntry], malId: Int?, anilistId: Int?,
+                                  simklId: Int? = nil) -> LibraryEntry? {
+        if let simklId, let hit = entries.first(where: { $0.id == simklId }) { return hit }
         if let malId, let hit = entries.first(where: { $0.media.idMal == malId }) { return hit }
         guard let anilistId else { return nil }
         return entries.first { $0.media.idMal == nil && $0.media.id == anilistId }
     }
 
-    func cachedEntry(malId: Int?, anilistId: Int?) -> LibraryEntry? {
-        cachedLibrary().flatMap { Self.entry(in: $0, malId: malId, anilistId: anilistId) }
+    func cachedEntry(malId: Int?, anilistId: Int?, simklId: Int? = nil) -> LibraryEntry? {
+        cachedLibrary().flatMap { Self.entry(in: $0, malId: malId, anilistId: anilistId, simklId: simklId) }
     }
 
     /// Folds a write just delivered into the cache, so the next write's episode delta starts
     /// from where Simkl now is. A title not cached yet arrives with the next activities read.
-    func noteWritten(malId: Int?, anilistId: Int?, status: MediaListStatus, progress: Int) {
+    func noteWritten(malId: Int?, anilistId: Int?, simklId: Int? = nil,
+                     status: MediaListStatus, progress: Int) {
         guard var entries = cachedLibrary(),
-              let hit = Self.entry(in: entries, malId: malId, anilistId: anilistId),
+              let hit = Self.entry(in: entries, malId: malId, anilistId: anilistId, simklId: simklId),
               let index = entries.firstIndex(where: { $0.media.id == hit.media.id }) else { return }
         entries[index].status = status
         entries[index].progress = progress
         store(entries)
     }
 
-    func noteDeleted(malId: Int?, anilistId: Int?) {
+    func noteDeleted(malId: Int?, anilistId: Int?, simklId: Int? = nil) {
         guard var entries = cachedLibrary(),
-              let hit = Self.entry(in: entries, malId: malId, anilistId: anilistId) else { return }
+              let hit = Self.entry(in: entries, malId: malId, anilistId: anilistId, simklId: simklId) else { return }
         entries.removeAll { $0.media.id == hit.media.id }
         store(entries)
     }
@@ -354,14 +367,12 @@ final class SimklLibraryService {
     ///
     /// A `score` of 0 sends no rating, which leaves Simkl's untouched: clearing a score here does
     /// not clear it there.
-    func writeNow(malId: Int?, anilistId: Int?, status: MediaListStatus, progress: Int,
+    func writeNow(malId: Int?, anilistId: Int?, simklId: Int? = nil, status: MediaListStatus, progress: Int,
                   score: Double, format: ScoreFormat, title: String?) async {
-        var ids: [String: Int] = [:]
-        if let malId { ids["mal"] = malId }
-        if let anilistId { ids["anilist"] = anilistId }
+        let ids = Self.writeIDs(malId: malId, anilistId: anilistId, simklId: simklId)
         guard !ids.isEmpty else { return }
 
-        let current = cachedEntry(malId: malId, anilistId: anilistId)
+        let current = cachedEntry(malId: malId, anilistId: anilistId, simklId: simklId)
         let change = SimklPayloadBuilder.progressChange(
             previous: current?.progress, previousStatus: current?.status, to: progress)
         if !change.unmark.isEmpty {
@@ -371,10 +382,10 @@ final class SimklLibraryService {
                 Logger.shared.log("[Simkl] Un-marking \(change.unmark.count) episode(s) failed: \(error)", type: "Error")
             }
         }
-        rawUpdateEntry(malId: malId, anilistId: anilistId, status: status, progress: progress,
+        rawUpdateEntry(malId: malId, anilistId: anilistId, simklId: simklId, status: status, progress: progress,
                        previousProgress: change.markFrom, score: score, format: format, title: title)
         if await flush() == 0 {
-            noteWritten(malId: malId, anilistId: anilistId, status: status, progress: progress)
+            noteWritten(malId: malId, anilistId: anilistId, simklId: simklId, status: status, progress: progress)
         }
     }
 
@@ -475,8 +486,10 @@ final class SimklLibraryService {
             averageScore: nil, genres: nil, season: nil, seasonYear: nil,
             nextAiringEpisode: nil, relations: nil, type: nil, format: nil)
 
+        // The entry id is Simkl's own, so a show linked by Simkl id can be found in the cache;
+        // `media.id` stays the MyAnimeList id the pairing joins on.
         return LibraryEntry(
-            id: id, media: media, status: status, progress: progress,
+            id: ids.simkl?.value ?? id, media: media, status: status, progress: progress,
             score: SimklPayloadBuilder.score(fromRating: item.user_rating, format: .point10),
             timesRewatched: nil)
     }
@@ -519,12 +532,10 @@ final class SimklLibraryService {
     // MARK: - Writing
 
     /// Queues a status/progress/score write. Nothing leaves the app until `flush()`.
-    func rawUpdateEntry(malId: Int?, anilistId: Int?, status: MediaListStatus,
+    func rawUpdateEntry(malId: Int?, anilistId: Int?, simklId: Int? = nil, status: MediaListStatus,
                         progress: Int, previousProgress: Int?, score: Double,
                         format: ScoreFormat, title: String? = nil, year: Int? = nil) {
-        var ids: [String: Int] = [:]
-        if let malId { ids["mal"] = malId }
-        if let anilistId { ids["anilist"] = anilistId }
+        let ids = Self.writeIDs(malId: malId, anilistId: anilistId, simklId: simklId)
         guard !ids.isEmpty else { return }
 
         let episodes = SimklPayloadBuilder.episodeNumbers(from: previousProgress, to: progress)
