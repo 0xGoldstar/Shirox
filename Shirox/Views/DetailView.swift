@@ -908,8 +908,10 @@ struct DetailView: View {
         return ZStack(alignment: .bottom) {
             GeometryReader { proxy in
                 let scrollY = proxy.frame(in: .named("detailScroll")).minY
-                let isPullingDown = scrollY > 4
-                let stretchAmount = isPullingDown ? (scrollY - 4) : 0
+                // Stretch from the first point of the pull, by the whole distance: the content
+                // moves down by `scrollY`, so anything less leaves a gap above the artwork.
+                let isPullingDown = scrollY > 0
+                let stretchAmount = isPullingDown ? scrollY : 0
                 let scale = isPullingDown ? (1.0 + (stretchAmount / max(baseHeight, 1))) : 1.0
 
                 CachedAsyncImage(urlString: heroBannerURL)
