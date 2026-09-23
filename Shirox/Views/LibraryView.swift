@@ -837,20 +837,22 @@ struct LibraryView: View {
                     }
                     Task {
                         await vm.update(entry: entry, status: status, progress: progress, score: score)
-                        if !vm.isLocal && vm.mediaType != .manga && dualSync && anilistAuth.isLoggedIn && malAuth.isLoggedIn {
-                            if activeProviderType == .anilist, let idMal = entry.media.idMal {
-                                try? await MALProvider.shared.updateEntry(mediaId: idMal, status: status, progress: progress, score: score)
-                            } else if activeProviderType == .mal {
-                                if let aniListId = await IDMappingService.shared.anilistId(forMALId: entry.media.id) {
+                        if !vm.isLocal && vm.mediaType != .manga {
+                            // The other services' ids for this title, with the user's tracking links applied.
+                            let linked = await TrackingLinkResolver.resolve(
+                                aniListID: activeProviderType == .anilist ? entry.media.id : nil,
+                                malID: activeProviderType == .mal ? entry.media.id : entry.media.idMal,
+                                moduleKey: nil)
+                            if dualSync && anilistAuth.isLoggedIn && malAuth.isLoggedIn {
+                                if activeProviderType == .anilist, let idMal = linked.mal {
+                                    try? await MALProvider.shared.updateEntry(mediaId: idMal, status: status, progress: progress, score: score)
+                                } else if activeProviderType == .mal, let aniListId = linked.anilist {
                                     try? await AniListProvider.shared.updateEntry(mediaId: aniListId, status: status, progress: progress, score: score)
                                 }
                             }
-                        }
-                        if !vm.isLocal && vm.mediaType != .manga {
                             let editedOn: LibrarySide = activeProviderType == .mal ? .mal : .anilist
                             await SimklEditMirror.edit(
-                                malId: editedOn == .mal ? entry.media.id : entry.media.idMal,
-                                anilistId: editedOn == .anilist ? entry.media.id : nil,
+                                malId: linked.mal, anilistId: linked.anilist, simklId: linked.simkl,
                                 editedOn: editedOn, status: status, progress: progress, score: score,
                                 format: scoreFormat, title: entry.media.title.displayTitle)
                         }
@@ -859,21 +861,22 @@ struct LibraryView: View {
                 onDelete: {
                     Task {
                         await vm.delete(entry: entry)
-                        if !vm.isLocal && vm.mediaType != .manga && dualSync && anilistAuth.isLoggedIn && malAuth.isLoggedIn {
-                            if activeProviderType == .anilist, let idMal = entry.media.idMal {
-                                try? await MALProvider.shared.deleteEntry(entryId: idMal)
-                            } else if activeProviderType == .mal {
-                                if let aniListId = await IDMappingService.shared.anilistId(forMALId: entry.media.id),
-                                   let aniListEntry = try? await AniListProvider.shared.fetchEntry(mediaId: aniListId) {
+                        if !vm.isLocal && vm.mediaType != .manga {
+                            let linked = await TrackingLinkResolver.resolve(
+                                aniListID: activeProviderType == .anilist ? entry.media.id : nil,
+                                malID: activeProviderType == .mal ? entry.media.id : entry.media.idMal,
+                                moduleKey: nil)
+                            if dualSync && anilistAuth.isLoggedIn && malAuth.isLoggedIn {
+                                if activeProviderType == .anilist, let idMal = linked.mal {
+                                    try? await MALProvider.shared.deleteEntry(entryId: idMal)
+                                } else if activeProviderType == .mal, let aniListId = linked.anilist,
+                                          let aniListEntry = try? await AniListProvider.shared.fetchEntry(mediaId: aniListId) {
                                     try? await AniListProvider.shared.deleteEntry(entryId: aniListEntry.id)
                                 }
                             }
-                        }
-                        if !vm.isLocal && vm.mediaType != .manga {
                             let editedOn: LibrarySide = activeProviderType == .mal ? .mal : .anilist
                             await SimklEditMirror.delete(
-                                malId: editedOn == .mal ? entry.media.id : entry.media.idMal,
-                                anilistId: editedOn == .anilist ? entry.media.id : nil, editedOn: editedOn)
+                                malId: linked.mal, anilistId: linked.anilist, simklId: linked.simkl, editedOn: editedOn)
                         }
                     }
                 }
