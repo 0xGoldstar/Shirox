@@ -1,6 +1,12 @@
 import Foundation
 import Combine
 
+/// The write finishing an episode makes on Simkl.
+struct SimklTrackWrite: Equatable {
+    let status: MediaListStatus
+    let progress: Int
+}
+
 @MainActor final class ContinueWatchingManager: ObservableObject {
     static let shared = ContinueWatchingManager()
 
@@ -949,11 +955,30 @@ import Combine
         }
     }
 
+    /// `remoteTrackDecision`, less one case: a title Simkl has as completed is never touched.
+    /// Simkl stores completion without episode history — its developer: "Completed = always mean
+    /// all episodes were watched" — and a rewatch is a Pro-only session this app does not create.
+    nonisolated static func simklTrackDecision(
+        currentStatus: MediaListStatus?, currentProgress: Int,
+        watchedEpisode ep: Int, totalEpisodes: Int?, isCompleted: Bool,
+        skipRewatch: Bool) -> SimklTrackWrite? {
+        if currentStatus == .completed { return nil }
+        switch remoteTrackDecision(currentStatus: currentStatus, currentProgress: currentProgress,
+                                   watchedEpisode: ep, totalEpisodes: totalEpisodes,
+                                   isCompleted: isCompleted, skipRewatch: skipRewatch) {
+        case .skip:
+            return nil
+        case let .write(status, progress, _):
+            return SimklTrackWrite(status: status == .repeating ? .current : status, progress: progress)
+        }
+    }
+
     /// Pushes episode progress to AniList and MAL, replicating the player's full tracking logic.
     /// Handles .completed (rewatch), .repeating, and .current status correctly for both services.
     func pushRemoteProgress(ep rawEp: Int, context: MarkContext) async {
         let aniListEnabled = Self.trackingPref("aniListTrackingEnabled", default: true)
         let malEnabled     = Self.trackingPref("malTrackingEnabled", default: true)
+        let simklEnabled   = Self.trackingPref("simklTrackingEnabled", default: true)
         let skipRewatch    = Self.trackingPref("skipReWatchTracking", default: true)
 
         // Remap a module's global (absolute) episode number to the correct season entry
@@ -1048,6 +1073,32 @@ import Combine
                     } catch {
                         Logger.shared.log("[Tracking] MAL update failed: \(error)", type: "Error")
                     }
+                }
+            }
+        }
+
+        // --- Simkl ---
+        // Episodes only — manga is tracked through MangaTrackingCoordinator and never reaches here.
+        if simklEnabled, SimklAuthManager.shared.isLoggedIn {
+            // Simkl's cache is keyed by MyAnimeList id where there is one; resolve it the same way
+            // the MyAnimeList block does.
+            var simklMAL = malID
+            if simklMAL == nil, let aid = aniListID {
+                simklMAL = await IDMappingService.shared.malId(forAnilistId: aid)
+            }
+            if simklMAL != nil || aniListID != nil {
+                let current = SimklLibraryService.shared.cachedEntry(malId: simklMAL, anilistId: aniListID)
+                if let write = Self.simklTrackDecision(
+                    currentStatus: current?.status, currentProgress: current?.progress ?? 0,
+                    watchedEpisode: ep, totalEpisodes: totalEpisodes,
+                    isCompleted: isCompleted, skipRewatch: skipRewatch) {
+                    Logger.shared.log("[Tracking] Simkl update: \(write.status.rawValue) ep \(write.progress)", type: "Info")
+                    await SimklLibraryService.shared.writeNow(
+                        malId: simklMAL, anilistId: aniListID, status: write.status,
+                        progress: write.progress, score: 0, format: .point10,
+                        title: context.mediaTitle)
+                } else {
+                    Logger.shared.log("[Tracking] Simkl skip: ep \(ep) (status \(current?.status.rawValue ?? "none"), tracked \(current?.progress ?? 0))", type: "Info")
                 }
             }
         }
