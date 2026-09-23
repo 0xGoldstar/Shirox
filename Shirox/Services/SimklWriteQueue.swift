@@ -1,11 +1,12 @@
 import Foundation
 
-/// Batches Simkl writes and paces them.
+/// Batches Simkl writes, paces them, sends one drain at a time, and keeps them on disk until
+/// Simkl has them.
 ///
-/// Simkl allows **1 POST/sec** and its own guidance is "Send 50 items in one call rather than 50
-/// calls". Sustained write-hammering suspends the `client_id` — "no warning, no appeal" — and a
-/// single `client_id` serves every user of this app, so a careless backfill loop does not
-/// throttle one account, it removes Simkl support from everyone.
+/// Simkl allows **1 POST/sec**, and every write endpoint takes arrays: "Send 50 items in one call
+/// rather than 50 calls." Under AUTH V2 the daily allowance is the user's own — 500 requests on a
+/// free plan, shared with every other app they connect — so a backfill that costs 3 requests
+/// rather than 400 is the difference between a sync and a spent day.
 ///
 /// `send` and `sleep` are injected so the batching and pacing rules can be asserted instantly
 /// in tests, rather than against a live account in real time.
@@ -15,9 +16,14 @@ final class SimklWriteQueue {
     typealias Sleep = (TimeInterval) async -> Void
 
     private var pending: [SimklWrite] = []
+    /// The drain in progress. Kept on disk with `pending`, so a write mid-request when the app
+    /// dies is sent again next launch rather than lost.
+    private var inFlight: [SimklWrite] = []
+    private var draining: Task<Void, Never>?
     private let send: Send
     private let sleep: Sleep
     private let minInterval: TimeInterval
+    private let storeURL: URL?
 
     /// Queued writes not yet accepted by Simkl. A failed batch stays here rather than vanishing.
     var pendingCount: Int { pending.count }
@@ -34,33 +40,55 @@ final class SimklWriteQueue {
     private var loggedSample = false
     private var loggedOutgoing = false
 
+    /// - Parameter storeURL: where queued writes live across launches; nil keeps them in memory.
     init(minInterval: TimeInterval = 1.0,
+         storeURL: URL? = nil,
          send: @escaping Send,
          sleep: @escaping Sleep = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }) {
         self.minInterval = minInterval
+        self.storeURL = storeURL
         self.send = send
         self.sleep = sleep
+        if let storeURL, let data = try? Data(contentsOf: storeURL),
+           let saved = try? JSONDecoder().decode([SimklWrite].self, from: data) {
+            pending = saved
+        }
     }
 
     func enqueue(_ write: SimklWrite) {
         pending.append(write)
+        persist()
     }
 
-    /// Sends everything queued, in batches of at most 50, waiting `minInterval` between them.
+    /// Forgets every queued write. Only for writes that belong to a Simkl account that is no
+    /// longer the one signed in — never on sign-out, which keeps them for the next sign-in.
+    func discardAll() {
+        pending = []
+        persist()
+    }
+
+    /// Sends everything queued, in batches of at most 50, `minInterval` apart.
     ///
-    /// The wait goes *between* batches, never before the first — a single batch should not pay a
-    /// second of latency for a limit it cannot breach.
-    ///
-    /// A batch that fails is put back at the front of the queue and the drain stops. Dropping it
-    /// would silently lose somebody's progress; carrying on would spend the rate-limit budget on
-    /// requests likely to fail the same way.
+    /// One drain at a time: Simkl holds a per-user lock while a `/sync/history` write runs and
+    /// answers a second with `400 RATE_LIMIT`. A call arriving mid-drain waits for it, then
+    /// sends whatever was queued meanwhile. The drain clears `draining` itself, before it
+    /// completes, so a waiter never spins on a finished task.
     func flush() async {
+        while let current = draining { await current.value }
         guard !pending.isEmpty else {
             Logger.shared.log("[Simkl] flush: nothing queued", type: "Provider")
             return
         }
-        Logger.shared.log("[Simkl] flush: sending \(pending.count) queued write(s)", type: "Provider")
+        let task = Task { await self.drain(); self.draining = nil }
+        draining = task
+        await task.value
+    }
 
+    /// The wait goes *between* batches, never before the first. A batch that fails is put back
+    /// at the front and the drain stops: dropping it would lose somebody's progress, and
+    /// carrying on would spend requests likely to fail the same way.
+    private func drain() async {
+        Logger.shared.log("[Simkl] flush: sending \(pending.count) queued write(s)", type: "Provider")
         notFoundCount = 0
         acceptedShows = 0
         acceptedEpisodes = 0
@@ -68,6 +96,7 @@ final class SimklWriteQueue {
         loggedOutgoing = false
 
         let batches = SimklPayloadBuilder.batches(pending)
+        inFlight = pending
         pending = []
 
         for (index, batch) in batches.enumerated() {
@@ -75,20 +104,39 @@ final class SimklWriteQueue {
             do {
                 let body = SimklPayloadBuilder.historyBody(items: batch)
                 logOutgoing(body)
-                let data = try await send(body)
-                tally(data)
+                tally(try await send(body))
             } catch {
                 Logger.shared.log("[Simkl] Write batch failed, keeping it queued: \(error)", type: "Error")
-                pending = batch + batches[(index + 1)...].flatMap { $0 }
+                pending = batch + batches[(index + 1)...].flatMap { $0 } + pending
+                inFlight = []
+                persist()
                 return
             }
         }
 
+        inFlight = []
+        persist()
         // Unconditional: a silent flush is exactly what hid the last two bugs.
         Logger.shared.log(
             "[Simkl] flush done: \(acceptedShows) shows / \(acceptedEpisodes) episodes stored, "
             + "\(notFoundCount) not found, \(pending.count) still queued",
             type: "Provider")
+    }
+
+    private func persist() {
+        guard let storeURL else { return }
+        let all = inFlight + pending
+        do {
+            if all.isEmpty {
+                try? FileManager.default.removeItem(at: storeURL)
+            } else {
+                try FileManager.default.createDirectory(
+                    at: storeURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try JSONEncoder().encode(all).write(to: storeURL, options: .atomic)
+            }
+        } catch {
+            Logger.shared.log("[Simkl] Could not save the write queue: \(error)", type: "Error")
+        }
     }
 
     /// Logs the first item of the first batch **as this app serialises it**.

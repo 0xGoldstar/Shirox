@@ -32,6 +32,8 @@ final class SimklAuthManager: NSObject, ObservableObject {
     private let refreshTokenKey = "simkl_refresh_token"
     private let tokenExpiryKey = "simkl_token_expiry"
     private let profileKey = "simkl_user_profile"
+    /// The Simkl account the queued writes and cached library belong to.
+    private let queueOwnerKey = "simkl_queue_owner"
     private var codeVerifier: String?
     private var expectedState: String?
     private var authSession: ASWebAuthenticationSession?
@@ -345,6 +347,15 @@ final class SimklAuthManager: NSObject, ObservableObject {
             avatarURL = settings.user?.avatar
             userId = settings.account?.id
             accountType = settings.account?.type
+            // Queued writes belong to the account that made them. Signing in as somebody else
+            // must not deliver the previous account's edits into this one.
+            if let id = settings.account?.id {
+                if let previous = UserDefaults.standard.object(forKey: queueOwnerKey) as? Int, previous != id {
+                    Logger.shared.log("[Simkl] Different account than before — dropping its queue and cache", type: "Info")
+                    SimklLibraryService.shared.resetForAccountChange()
+                }
+                UserDefaults.standard.set(id, forKey: queueOwnerKey)
+            }
             cacheProfile()
         } catch {
             Logger.shared.log("[Simkl] Profile fetch failed: \(error)", type: "Error")

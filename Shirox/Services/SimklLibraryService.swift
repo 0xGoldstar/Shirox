@@ -33,7 +33,10 @@ final class SimklLibraryService {
     /// nothing has changed.
     private let lastActivityKey = "simkl_last_activity"
 
-    private lazy var queue = SimklWriteQueue { [weak self] body in
+    private lazy var queue = SimklWriteQueue(
+        storeURL: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("simkl-write-queue.json")
+    ) { [weak self] body in
         guard let self else { return Data() }
         return try await self.post("/sync/history", body: body)
     }
@@ -303,6 +306,14 @@ final class SimklLibraryService {
     func invalidateCache() {
         cached = nil
         UserDefaults.standard.removeObject(forKey: lastActivityKey)
+    }
+
+    /// For a sign-in as a different Simkl account than this device last held. Its queued writes,
+    /// cached library and activity stamp all describe the other account.
+    func resetForAccountChange() {
+        queue.discardAll()
+        LibraryCacheStore.shared.save(entries: [], provider: .simkl, mediaType: .anime)
+        invalidateCache()
     }
 
     private func fullRead() async throws -> [LibraryEntry] {

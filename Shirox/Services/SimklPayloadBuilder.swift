@@ -4,12 +4,12 @@ import Foundation
 ///
 /// It has no "rewatching": a rewatch is a separate session behind a Pro-only flag, so
 /// `repeating` degrades to `watching`. See the Simkl design doc §5.
-enum SimklStatus: String {
+enum SimklStatus: String, Codable {
     case watching, plantowatch, completed, dropped, hold
 }
 
 /// One title's worth of changes, ready to be batched into a request.
-struct SimklWrite {
+struct SimklWrite: Codable, Equatable {
     /// Every external id known for this title — Simkl picks the first that resolves and accepts
     /// the extras, so send all of them.
     let ids: [String: Int]
