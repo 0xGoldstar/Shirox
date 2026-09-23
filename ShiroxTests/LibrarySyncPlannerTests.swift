@@ -730,4 +730,22 @@ final class LibrarySyncPlannerTests: XCTestCase {
         XCTAssertTrue(message.contains("503"), message)
         XCTAssertFalse(message.lowercased().contains("sign in"), message)
     }
+
+    /// A Simkl overwrite can only lower progress by un-marking episodes, which needs to know
+    /// where the target was. The plan carries it.
+    func testOverwritePlanCarriesTheTargetsPreviousState() {
+        let pairing = LibrarySyncPlanner.pair(
+            entries: [.anilist: [entry(id: 100, status: .current, progress: 3)],
+                      .mal: [entry(id: 900, status: .completed, progress: 12)]],
+            ids: { side, entry in
+                side == .anilist ? [.anilist: entry.media.id, .mal: 900] : [.mal: entry.media.id]
+            })
+
+        let plan = LibrarySyncPlanner.overwritePlan(
+            from: pairing, writing: .mal, reading: .anilist, sourceMediaIds: [100], deletingExtras: false)
+
+        let write = plan.writes.first { $0.id == 900 }
+        XCTAssertEqual(write?.previousProgress, 12)
+        XCTAssertEqual(write?.previousStatus, .completed)
+    }
 }

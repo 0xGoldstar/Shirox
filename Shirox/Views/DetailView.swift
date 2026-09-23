@@ -839,6 +839,11 @@ struct DetailView: View {
                             try? await MALProvider.shared.updateEntry(mediaId: mid, status: status, progress: progress, score: score)
                             existingMALEntry = try? await MALProvider.shared.fetchEntry(mediaId: mid)
                         }
+                        await SimklEditMirror.edit(
+                            malId: mid, anilistId: aid, editedOn: aid != nil ? .anilist : .mal,
+                            status: status, progress: progress, score: score,
+                            format: aid != nil ? AniListAuthManager.shared.scoreFormat : .point10,
+                            title: detail.title)
                     }
                 },
                 onDelete: (existingEntry != nil || existingMALEntry != nil) ? {
@@ -850,6 +855,7 @@ struct DetailView: View {
                         existingMALEntry = nil
                         Task { try? await MALProvider.shared.deleteEntry(entryId: mid) }
                     }
+                    Task { await SimklEditMirror.delete(malId: mid, anilistId: aid, editedOn: aid != nil ? .anilist : .mal) }
                 } : nil
             )
             #if os(iOS)

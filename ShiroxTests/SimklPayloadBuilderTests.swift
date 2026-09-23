@@ -211,4 +211,33 @@ final class SimklPayloadBuilderTests: XCTestCase {
         ])
         XCTAssertNil(body["use_tvdb_anime_seasons"])
     }
+
+    // MARK: - Progress change
+
+    func testFirstWriteMarksFromTheStart() {
+        XCTAssertEqual(SimklPayloadBuilder.progressChange(previous: nil, previousStatus: nil, to: 5),
+                       SimklProgressChange(markFrom: nil, unmark: []))
+    }
+
+    func testMovingForwardMarksOnlyTheNewEpisodes() {
+        XCTAssertEqual(SimklPayloadBuilder.progressChange(previous: 4, previousStatus: .current, to: 7),
+                       SimklProgressChange(markFrom: 4, unmark: []))
+    }
+
+    /// THE GAP THIS CLOSES: /sync/history only adds, so a lower progress used to change nothing.
+    func testMovingBackUnmarksTheEpisodesAboveTheNewProgress() {
+        XCTAssertEqual(SimklPayloadBuilder.progressChange(previous: 8, previousStatus: .current, to: 5),
+                       SimklProgressChange(markFrom: 5, unmark: [6, 7, 8]))
+    }
+
+    func testMovingBackToZeroUnmarksEverything() {
+        XCTAssertEqual(SimklPayloadBuilder.progressChange(previous: 3, previousStatus: .paused, to: 0),
+                       SimklProgressChange(markFrom: 0, unmark: [1, 2, 3]))
+    }
+
+    /// Completed carries no per-episode history, so nothing to un-mark: re-mark from episode 1.
+    func testMovingBackFromCompletedRemarksFromTheStart() {
+        XCTAssertEqual(SimklPayloadBuilder.progressChange(previous: 12, previousStatus: .completed, to: 5),
+                       SimklProgressChange(markFrom: 0, unmark: []))
+    }
 }

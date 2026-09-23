@@ -54,6 +54,10 @@ struct PlannedWrite: Equatable {
     let progress: Int
     let score: Double
     let timesRewatched: Int?
+    /// Where the destination was before this write. Simkl can only lower progress by un-marking
+    /// episodes, which needs to know how many there were.
+    var previousProgress: Int? = nil
+    var previousStatus: MediaListStatus? = nil
 }
 
 /// One entry a mirror run intends to remove.
@@ -371,7 +375,8 @@ enum LibrarySyncPlanner {
                     title: sourceEntry.media.title.displayTitle,
                     isNew: existing == nil,
                     status: status, progress: progress,
-                    score: score, timesRewatched: timesRewatched))
+                    score: score, timesRewatched: timesRewatched,
+                    previousProgress: existing?.progress, previousStatus: existing?.status))
             }
         }
 

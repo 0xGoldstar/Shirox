@@ -411,6 +411,12 @@ struct AniListDetailView: View {
                             existingMALEntry = nil
                             Task { try? await MALProvider.shared.deleteEntry(entryId: idMal) }
                         }
+                        let editedOn: LibrarySide = provider.providerType == .mal ? .mal : .anilist
+                        Task {
+                            await SimklEditMirror.delete(
+                                malId: editedOn == .mal ? media.id : media.idMal,
+                                anilistId: editedOn == .anilist ? media.id : nil, editedOn: editedOn)
+                        }
                     } : nil
                 )
                 #if os(iOS)
@@ -443,11 +449,21 @@ struct AniListDetailView: View {
                             updated.score = score
                             existingMALEntry = updated
                         }
-                        Task { try? await MALProvider.shared.updateEntry(mediaId: idMal, status: status, progress: progress, score: score) }
+                        Task {
+                            try? await MALProvider.shared.updateEntry(mediaId: idMal, status: status, progress: progress, score: score)
+                            await SimklEditMirror.edit(
+                                malId: idMal, anilistId: media.provider == .anilist ? media.id : nil,
+                                editedOn: .mal, status: status, progress: progress, score: score,
+                                format: .point10, title: media.title.displayTitle)
+                        }
                     },
                     onDelete: existingMALEntry != nil ? {
                         existingMALEntry = nil
-                        Task { try? await MALProvider.shared.deleteEntry(entryId: idMal) }
+                        Task {
+                            try? await MALProvider.shared.deleteEntry(entryId: idMal)
+                            await SimklEditMirror.delete(
+                                malId: idMal, anilistId: media.provider == .anilist ? media.id : nil, editedOn: .mal)
+                        }
                     } : nil
                 )
                 #if os(iOS)
@@ -529,6 +545,13 @@ struct AniListDetailView: View {
                 }
                 try? await MALProvider.shared.updateEntry(mediaId: idMal, status: status, progress: progress, score: score)
             }
+            let editedOn: LibrarySide = provider.providerType == .mal ? .mal : .anilist
+            await SimklEditMirror.edit(
+                malId: editedOn == .mal ? media.id : media.idMal,
+                anilistId: editedOn == .anilist ? media.id : nil,
+                editedOn: editedOn, status: status, progress: progress, score: score,
+                format: editedOn == .anilist ? AniListAuthManager.shared.scoreFormat : .point10,
+                title: media.title.displayTitle)
         }
     }
 

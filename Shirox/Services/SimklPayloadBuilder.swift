@@ -24,6 +24,15 @@ struct SimklWrite: Codable, Equatable {
     var year: Int? = nil
 }
 
+/// What moving a title from one progress to another takes on Simkl.
+struct SimklProgressChange: Equatable {
+    /// Passed as `previousProgress` to `rawUpdateEntry`, which marks `markFrom+1…new`. nil marks
+    /// from episode 1.
+    let markFrom: Int?
+    /// Episodes to take off first, through `rawUnmarkEpisodes`.
+    let unmark: [Int]
+}
+
 /// Every Simkl mapping decision, with no network and no state.
 ///
 /// Deliberately pure. Two of these rules are expensive to get wrong: the removal radius can
@@ -75,6 +84,20 @@ enum SimklPayloadBuilder {
         let start = (previous ?? 0) + 1
         guard current >= start else { return [] }
         return Array(start...current)
+    }
+
+    /// `/sync/history` only ever adds, so lower progress means un-marking `new+1…old` first —
+    /// except on a completed title, which carries no per-episode history to un-mark, so the
+    /// episodes up to the new progress are marked afresh.
+    static func progressChange(previous: Int?, previousStatus: MediaListStatus?,
+                               to new: Int) -> SimklProgressChange {
+        guard let previous, new < previous else {
+            return SimklProgressChange(markFrom: previous, unmark: [])
+        }
+        if previousStatus == .completed {
+            return SimklProgressChange(markFrom: 0, unmark: [])
+        }
+        return SimklProgressChange(markFrom: new, unmark: Array((new + 1)...previous))
     }
 
     // MARK: - Bodies

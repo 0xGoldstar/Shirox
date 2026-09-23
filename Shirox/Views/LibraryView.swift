@@ -846,6 +846,14 @@ struct LibraryView: View {
                                 }
                             }
                         }
+                        if !vm.isLocal && vm.mediaType != .manga {
+                            let editedOn: LibrarySide = activeProviderType == .mal ? .mal : .anilist
+                            await SimklEditMirror.edit(
+                                malId: editedOn == .mal ? entry.media.id : entry.media.idMal,
+                                anilistId: editedOn == .anilist ? entry.media.id : nil,
+                                editedOn: editedOn, status: status, progress: progress, score: score,
+                                format: scoreFormat, title: entry.media.title.displayTitle)
+                        }
                     }
                 },
                 onDelete: {
@@ -860,6 +868,12 @@ struct LibraryView: View {
                                     try? await AniListProvider.shared.deleteEntry(entryId: aniListEntry.id)
                                 }
                             }
+                        }
+                        if !vm.isLocal && vm.mediaType != .manga {
+                            let editedOn: LibrarySide = activeProviderType == .mal ? .mal : .anilist
+                            await SimklEditMirror.delete(
+                                malId: editedOn == .mal ? entry.media.id : entry.media.idMal,
+                                anilistId: editedOn == .anilist ? entry.media.id : nil, editedOn: editedOn)
                         }
                     }
                 }

@@ -26,6 +26,10 @@ final class LibrarySyncService: ObservableObject {
     /// hammered back to back gets the account throttled — which mid-run looks exactly like
     /// data loss. (`Duration` would read better but is iOS 16+; this ships to iOS 15.)
     private static let writeIntervalNanos: UInt64 = 350_000_000
+    /// Simkl takes 1 POST/sec, and a burst of individual removals or un-marks at the 350 ms
+    /// the other services tolerate earns a throttling block. Queued writes are paced by
+    /// `SimklWriteQueue`; this is for the ones sent directly.
+    private static let simklDirectPostIntervalNanos: UInt64 = 1_100_000_000
 
     @Published private(set) var isRunning = false
     /// "Syncing 42 of 310" while a run is in flight, for the settings row.
@@ -276,6 +280,7 @@ final class LibrarySyncService: ObservableObject {
                 to: write.side, id: write.id, title: write.title, hadEntry: !write.isNew,
                 status: write.status, progress: write.progress,
                 score: write.score, timesRewatched: write.timesRewatched,
+                previousProgress: write.previousProgress, previousStatus: write.previousStatus,
                 sourceFormat: sourceFormat))
         }
 
@@ -298,13 +303,15 @@ final class LibrarySyncService: ObservableObject {
                 // the other, much narrower one — see SimklLibraryService.
                 try await SimklLibraryService.shared.rawDeleteEntry(ids: ["mal": deletion.id])
             }
-            try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
+            try? await Task.sleep(nanoseconds: deletion.side == .simkl
+                                  ? Self.simklDirectPostIntervalNanos : Self.writeIntervalNanos)
             return .deleted
         } catch {
             Logger.shared.log(
                 "[LibrarySync] Failed to delete \(deletion.title) from \(deletion.side.name): \(error)",
                 type: "Error")
-            try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
+            try? await Task.sleep(nanoseconds: deletion.side == .simkl
+                                  ? Self.simklDirectPostIntervalNanos : Self.writeIntervalNanos)
             return .failed
         }
     }
@@ -316,8 +323,8 @@ final class LibrarySyncService: ObservableObject {
     private func performWrite(
         to side: LibrarySide, id: Int, title: String, hadEntry: Bool,
         status: MediaListStatus, progress: Int, score: Double, timesRewatched: Int?,
-        previousProgress: Int? = nil, sourceFormat: ScoreFormat = .point10,
-        year: Int? = nil
+        previousProgress: Int? = nil, previousStatus: MediaListStatus? = nil,
+        sourceFormat: ScoreFormat = .point10, year: Int? = nil
     ) async -> Outcome {
         do {
             switch side {
@@ -330,12 +337,19 @@ final class LibrarySyncService: ObservableObject {
                     malId: id, status: status, progress: progress,
                     score: score, numTimesRewatched: timesRewatched)
             case .simkl:
+                let change = SimklPayloadBuilder.progressChange(
+                    previous: previousProgress, previousStatus: previousStatus, to: progress)
+                if !change.unmark.isEmpty {
+                    // Overwrite runs may go backwards, and /sync/history only ever adds.
+                    try await SimklLibraryService.shared.rawUnmarkEpisodes(ids: ["mal": id], episodes: change.unmark)
+                    try? await Task.sleep(nanoseconds: Self.simklDirectPostIntervalNanos)
+                }
                 // Queued rather than sent: Simkl allows 1 POST/sec and batches 50 items, so a
-                // per-title request here would be the exact pattern that gets a client_id
-                // suspended. `flush()` sends them after the run.
+                // per-title request here would be the exact pattern that gets throttled.
+                // `flush()` sends them after the run.
                 SimklLibraryService.shared.rawUpdateEntry(
                     malId: id, anilistId: nil, status: status,
-                    progress: progress, previousProgress: previousProgress,
+                    progress: progress, previousProgress: change.markFrom,
                     score: score, format: sourceFormat, title: title, year: year)
             }
             try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)

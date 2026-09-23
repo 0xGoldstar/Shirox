@@ -78,4 +78,28 @@ final class SimklSideIDTests: XCTestCase {
         XCTAssertNil(ids[.simkl])
         XCTAssertEqual(ids[.anilist], 100)
     }
+
+    private func cachedLibrary() throws -> [LibraryEntry] {
+        let json = """
+        {"anime":[
+          {"show":{"title":"A","ids":{"mal":900,"anilist":100}},"status":"watching","watched_episodes_count":3,"total_episodes_count":12},
+          {"show":{"title":"B","ids":{"anilist":200}},"status":"watching","watched_episodes_count":1,"total_episodes_count":12}
+        ]}
+        """
+        return try SimklLibraryService.decodeLibrary(from: Data(json.utf8))
+    }
+
+    func testCachedEntryIsFoundByMyAnimeListId() throws {
+        XCTAssertEqual(SimklLibraryService.entry(in: try cachedLibrary(), malId: 900, anilistId: nil)?.progress, 3)
+    }
+
+    func testAniListOnlyEntryIsFoundByAniListId() throws {
+        XCTAssertEqual(SimklLibraryService.entry(in: try cachedLibrary(), malId: 901, anilistId: 200)?.progress, 1)
+    }
+
+    /// Entries Simkl keyed by MyAnimeList id don't keep the AniList id, so callers resolve the
+    /// MyAnimeList id first. An AniList id alone must not match some other entry's number.
+    func testAnAniListIdDoesNotMatchAMyAnimeListKeyedEntry() throws {
+        XCTAssertNil(SimklLibraryService.entry(in: try cachedLibrary(), malId: nil, anilistId: 100))
+    }
 }

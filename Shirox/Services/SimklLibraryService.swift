@@ -316,6 +316,68 @@ final class SimklLibraryService {
         invalidateCache()
     }
 
+    // MARK: - Single-title writes
+
+    /// Entries are keyed by MyAnimeList id where Simkl gave one, otherwise by AniList id — and
+    /// an entry keyed by MyAnimeList id keeps no AniList id, so that lookup needs the MAL id.
+    nonisolated static func entry(in entries: [LibraryEntry], malId: Int?, anilistId: Int?) -> LibraryEntry? {
+        if let malId, let hit = entries.first(where: { $0.media.idMal == malId }) { return hit }
+        guard let anilistId else { return nil }
+        return entries.first { $0.media.idMal == nil && $0.media.id == anilistId }
+    }
+
+    func cachedEntry(malId: Int?, anilistId: Int?) -> LibraryEntry? {
+        cachedLibrary().flatMap { Self.entry(in: $0, malId: malId, anilistId: anilistId) }
+    }
+
+    /// Folds a write just delivered into the cache, so the next write's episode delta starts
+    /// from where Simkl now is. A title not cached yet arrives with the next activities read.
+    func noteWritten(malId: Int?, anilistId: Int?, status: MediaListStatus, progress: Int) {
+        guard var entries = cachedLibrary(),
+              let hit = Self.entry(in: entries, malId: malId, anilistId: anilistId),
+              let index = entries.firstIndex(where: { $0.media.id == hit.media.id }) else { return }
+        entries[index].status = status
+        entries[index].progress = progress
+        store(entries)
+    }
+
+    func noteDeleted(malId: Int?, anilistId: Int?) {
+        guard var entries = cachedLibrary(),
+              let hit = Self.entry(in: entries, malId: malId, anilistId: anilistId) else { return }
+        entries.removeAll { $0.media.id == hit.media.id }
+        store(entries)
+    }
+
+    /// Writes one title now — an edit made in the app, or an episode just watched — rather than
+    /// waiting for a sync run. Still goes through the queue, so it is serialised with any run in
+    /// progress and survives a failed request.
+    ///
+    /// A `score` of 0 sends no rating, which leaves Simkl's untouched: clearing a score here does
+    /// not clear it there.
+    func writeNow(malId: Int?, anilistId: Int?, status: MediaListStatus, progress: Int,
+                  score: Double, format: ScoreFormat, title: String?) async {
+        var ids: [String: Int] = [:]
+        if let malId { ids["mal"] = malId }
+        if let anilistId { ids["anilist"] = anilistId }
+        guard !ids.isEmpty else { return }
+
+        let current = cachedEntry(malId: malId, anilistId: anilistId)
+        let change = SimklPayloadBuilder.progressChange(
+            previous: current?.progress, previousStatus: current?.status, to: progress)
+        if !change.unmark.isEmpty {
+            do {
+                try await rawUnmarkEpisodes(ids: ids, episodes: change.unmark)
+            } catch {
+                Logger.shared.log("[Simkl] Un-marking \(change.unmark.count) episode(s) failed: \(error)", type: "Error")
+            }
+        }
+        rawUpdateEntry(malId: malId, anilistId: anilistId, status: status, progress: progress,
+                       previousProgress: change.markFrom, score: score, format: format, title: title)
+        if await flush() == 0 {
+            noteWritten(malId: malId, anilistId: anilistId, status: status, progress: progress)
+        }
+    }
+
     private func fullRead() async throws -> [LibraryEntry] {
         let data = try await get(Self.libraryPath,
                                  query: [URLQueryItem(name: "extended", value: Self.extendedMode)])
