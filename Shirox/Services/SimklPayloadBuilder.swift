@@ -187,10 +187,10 @@ enum SimklPayloadBuilder {
     /// writes — up to 100 body entries, since a write carrying both episodes and a status
     /// expands to two — turns a 400-title backfill into single figures rather than hundreds.
     ///
-    /// This was sized against a daily request cap, and that cap still exists — approval raised
-    /// it from 1,000/day to 10,000/day app-wide, across every user of the app, rather than
-    /// removing it. A backfill that spends 3 requests instead of 400 is the difference between
-    /// a ceiling nobody reaches and one a few hundred users could.
+    /// It was first sized against an app-wide daily cap. Under AUTH V2 the cap is per user
+    /// instead — 500 requests a day on a free plan, shared with every other app that user
+    /// connects — so a backfill that spends 3 requests rather than 400 still decides whether
+    /// the user has a day's allowance left afterwards.
     static func batches<T>(_ items: [T], size: Int = 50) -> [[T]] {
         guard !items.isEmpty, size > 0 else { return [] }
         return stride(from: 0, to: items.count, by: size).map {

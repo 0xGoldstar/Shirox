@@ -29,9 +29,9 @@ final class SimklBatchingTests: XCTestCase {
         SimklWrite(ids: ["mal": id], status: .watching, rating: nil, episodes: [1])
     }
 
-    /// 120 writes become 3 requests, not 120. An unapproved client_id is capped at 1,000
-    /// requests a day across the whole app, so request count is the scarce resource and batches
-    /// are large: 50 writes, up to 100 body entries once episode/status entries expand.
+    /// 120 writes become 3 requests, not 120. Each user has a daily allowance (500 on a free
+    /// plan, shared with their other connected apps), so request count is the scarce resource and
+    /// batches are large: 50 writes, up to 100 body entries once episode/status entries expand.
     func test120WritesBecomeThreeRequestsNotOneHundredAndTwenty() async {
         let recorder = Recorder()
         let queue = makeQueue(recorder)
