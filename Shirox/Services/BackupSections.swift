@@ -137,7 +137,7 @@ struct SettingsBackupSection: BackupSection {
     /// `lastLandscapeOrientation`, `orientation`, `drawsBackground` (device/window local).
     /// `localScoreFormat` and `localAutoTrackEnabled` belong to the localLibrary section.
     static let boolKeys = [
-        "aniListTrackingEnabled", "malTrackingEnabled", "dualSync",
+        "aniListTrackingEnabled", "malTrackingEnabled", "simklTrackingEnabled", "dualSync",
         "autoDeleteWatched", "autoNextEpisode", "autoPickLastSearchResult",
         "autoPickLastStream", "autoResumeDownloads", "autoSkipSegments",
         "backgroundDownloadsEnabled", "defaultReverseSort", "forceLandscape",
@@ -154,7 +154,7 @@ struct SettingsBackupSection: BackupSection {
 
     static let stringKeys = [
         "librarySortOrder", "libraryStatusOrder", "mangaReadingMode",
-        "preferredQuality", "titleLanguagePriority"
+        "preferredQuality", "titleLanguagePriority", SyncTargets.key
     ]
 
     private enum SubtitleKeys {
@@ -206,6 +206,13 @@ struct SettingsBackupSection: BackupSection {
         for (key, value) in payload.ints where Self.intKeys.contains(key) { d.set(value, forKey: key) }
         for (key, value) in payload.doubles where Self.doubleKeys.contains(key) { d.set(value, forKey: key) }
         for (key, value) in payload.strings where Self.stringKeys.contains(key) { d.set(value, forKey: key) }
+
+        // A backup from before `syncTargets` carries only `dualSync`. Re-seed from it, or the
+        // restored choice is ignored in favour of whatever set this device had.
+        if payload.strings[SyncTargets.key] == nil, payload.bools[SyncTargets.legacyKey] != nil {
+            d.removeObject(forKey: SyncTargets.key)
+            SyncTargets.migrateIfNeeded(d)
+        }
 
         // SubtitleSettingsManager persists through `didSet` on each published property, so
         // assigning the properties is both the refresh and the write. Writing its

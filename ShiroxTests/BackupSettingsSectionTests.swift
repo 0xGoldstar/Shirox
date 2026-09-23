@@ -115,4 +115,26 @@ final class BackupSettingsSectionTests: XCTestCase {
             + SettingsBackupSection.doubleKeys + SettingsBackupSection.stringKeys
         XCTAssertEqual(all.count, Set(all).count, "A key must appear in exactly one type list")
     }
+
+    func testSimklTrackingAndSyncTargetsAreBackedUp() {
+        XCTAssertTrue(SettingsBackupSection.boolKeys.contains("simklTrackingEnabled"))
+        XCTAssertTrue(SettingsBackupSection.stringKeys.contains(SyncTargets.key))
+    }
+
+    /// A backup from before `syncTargets` carries only `dualSync`. Restoring it must restore that
+    /// choice, not leave whatever set this device already had.
+    func testAnOldBackupReseedsSyncTargetsFromDualSync() async throws {
+        SyncTargets.save([.anilist, .simkl])
+        let payload = SettingsBackupPayload(bools: ["dualSync": true], ints: [:], doubles: [:],
+                                            strings: [:], subtitles: nil)
+        _ = try await SettingsBackupSection().apply(payload)
+        XCTAssertEqual(SyncTargets.load(), [.anilist, .mal])
+    }
+
+    func testANewBackupRestoresSyncTargetsAsIs() async throws {
+        let payload = SettingsBackupPayload(bools: ["dualSync": false], ints: [:], doubles: [:],
+                                            strings: [SyncTargets.key: "anilist,simkl"], subtitles: nil)
+        _ = try await SettingsBackupSection().apply(payload)
+        XCTAssertEqual(SyncTargets.load(), [.anilist, .simkl])
+    }
 }

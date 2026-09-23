@@ -329,7 +329,8 @@ struct AccountsSettingsView: View {
     @AppStorage("aniListTrackingEnabled") private var aniListTrackingEnabled = true
     @AppStorage("malTrackingEnabled") private var malTrackingEnabled = true
     @AppStorage("skipReWatchTracking") private var skipReWatchTracking = true
-    @AppStorage("dualSync") private var dualSync = false
+    @AppStorage("simklTrackingEnabled") private var simklTrackingEnabled = true
+    @AppStorage(SyncTargets.key) private var syncTargetsRaw = ""
     @AppStorage("rateOnFinish") private var rateOnFinish = true
 
     #if !os(tvOS)
@@ -352,7 +353,7 @@ struct AccountsSettingsView: View {
         List {
             ProvidersSettingsSection()
 
-            if aniListAuth.isLoggedIn || malAuth.isLoggedIn {
+            if aniListAuth.isLoggedIn || malAuth.isLoggedIn || simklAuth.isLoggedIn {
                 Section("Tracking") {
                     if aniListAuth.isLoggedIn {
                         Toggle("Track on AniList", isOn: $aniListTrackingEnabled)
@@ -362,8 +363,8 @@ struct AccountsSettingsView: View {
                         Toggle("Track on MyAnimeList", isOn: $malTrackingEnabled)
                             .tint(.secondary)
                     }
-                    if aniListAuth.isLoggedIn && malAuth.isLoggedIn {
-                        Toggle("Sync edits to both services", isOn: $dualSync)
+                    if simklAuth.isLoggedIn {
+                        Toggle("Track on Simkl", isOn: $simklTrackingEnabled)
                             .tint(.secondary)
                     }
                     Toggle("Never reduce progress", isOn: $skipReWatchTracking)
@@ -376,8 +377,8 @@ struct AccountsSettingsView: View {
                 }
             }
 
-            // Simkl is a write-side tracker, not a browsing source, so it sits here rather
-
+            // Simkl is a write-side tracker, not a browsing source, so it sits here rather than in
+            // the provider list above.
             Section("Simkl") {
                 HStack(spacing: 12) {
                     CachedAsyncImage(urlString: ProviderType.simkl.iconURL)
@@ -386,7 +387,9 @@ struct AccountsSettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(simklAuth.username ?? "Simkl")
                             .font(.headline)
-                        Text(simklAuth.isLoggedIn ? "Signed in" : "Not signed in")
+                        Text(simklAuth.isLoggedIn
+                             ? (simklAuth.needsReauthorization ? "Sign in again to allow syncing" : "Signed in")
+                             : "Not signed in")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -411,6 +414,19 @@ struct AccountsSettingsView: View {
                      + "Simkl has no manga, so manga tracking is unaffected.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if signedInSides.count >= 2 {
+                Section {
+                    ForEach(signedInSides, id: \.self) { side in
+                        Toggle(side.name, isOn: mirrorBinding(for: side))
+                            .tint(.secondary)
+                    }
+                } header: {
+                    Text("Mirror Edits")
+                } footer: {
+                    Text("An edit you make to a title — its status, progress, score, or removing it — is also written to every other service switched on here. Services left off change only through the sync runs below.")
+                }
             }
 
             if signedInSides.count >= 2 {
@@ -478,6 +494,16 @@ struct AccountsSettingsView: View {
                 }
             }
         }
+    }
+
+    private func mirrorBinding(for side: LibrarySide) -> Binding<Bool> {
+        Binding(
+            get: { SyncTargets.decode(syncTargetsRaw).contains(side) },
+            set: { isOn in
+                var sides = SyncTargets.decode(syncTargetsRaw)
+                if isOn { sides.insert(side) } else { sides.remove(side) }
+                SyncTargets.save(sides)
+            })
     }
 
     /// One row in the Sync / Overwrite / Mirror sections. Safe runs get a confirmation dialog;
@@ -1654,7 +1680,7 @@ private struct ProvidersSettingsSection: View {
         switch type {
         case .anilist: return aniListAuth.isLoggedIn
         case .mal:     return malAuth.isLoggedIn
-        case .simkl:   return false   // no Simkl auth manager yet
+        case .simkl:   return SimklAuthManager.shared.isLoggedIn   // listed in its own section
         case .local:   return false   // not a sign-in-able provider
         }
     }
@@ -1669,7 +1695,7 @@ private struct ProvidersSettingsSection: View {
             // part that left people with no idea what to do about it.
             return aniListAuth.needsReauthentication ? "Sign in again" : "Signed in"
         case .mal: return malAuth.isLoggedIn ? "Signed in" : "Not signed in"
-        case .simkl: return "Not signed in"
+        case .simkl: return SimklAuthManager.shared.isLoggedIn ? "Signed in" : "Not signed in"
         case .local: return "Not signed in"
         }
     }

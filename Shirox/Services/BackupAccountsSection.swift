@@ -6,6 +6,10 @@ import Foundation
 /// Accounts", because a backup containing it is a credential file — anyone who gets it
 /// gets those accounts. The envelope's `includesAccounts` flag lets the import screen warn
 /// before any of this is decoded.
+///
+/// Simkl is deliberately absent. Its AUTH V2 grant is per sign-in: restored onto a second device,
+/// the two would share one refresh token, and each device's refresh would cancel the access
+/// token the other holds. Signing in again on the new device gives it its own grant.
 struct AccountsBackupPayload: Codable {
     var anilistAccessToken: String?
     var anilistUserId: Int?
