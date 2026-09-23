@@ -4,7 +4,14 @@ import SwiftUI
 ///
 /// Lives in one place because which of the two reads correctly is a judgement about
 /// how the material behaves over video and artwork, not something the code can derive.
-private let mediaChromeAppearance: ColorScheme = .light
+///
+/// Dark. Glass also adapts to what is behind it, and resolved against light it turned
+/// milky white over bright frames — the round centre buttons went white over a pale wall
+/// while the bars over darker trees stayed dark, swallowing the white symbols on exactly
+/// the controls people tap most. Resolved against dark it stays a dark smoked glass over
+/// any frame. The reader's black-symbol buttons are tinted white, so they keep their own
+/// light wash either way.
+private let mediaChromeAppearance: ColorScheme = .dark
 
 extension View {
     /// Liquid Glass on iOS/macOS 26+ when `enabled`; otherwise the caller's
