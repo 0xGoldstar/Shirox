@@ -32,9 +32,11 @@ final class SimklWriteQueue {
     /// so nothing was written for them however cleanly the request succeeded.
     private(set) var notFoundCount = 0
 
-    /// What Simkl reported it actually stored in the last flush.
+    /// What Simkl reported it actually stored in the last flush. A status write lands under
+    /// `added.statuses`, not `shows` or `episodes` — so a sync of statuses alone stores zero shows.
     private(set) var acceptedShows = 0
     private(set) var acceptedEpisodes = 0
+    private(set) var acceptedStatuses = 0
 
     /// One raw response per flush is logged, to see the shape rather than assume it.
     private var loggedSample = false
@@ -92,6 +94,7 @@ final class SimklWriteQueue {
         notFoundCount = 0
         acceptedShows = 0
         acceptedEpisodes = 0
+        acceptedStatuses = 0
         loggedSample = false
         loggedOutgoing = false
 
@@ -118,7 +121,8 @@ final class SimklWriteQueue {
         persist()
         // Unconditional: a silent flush is exactly what hid the last two bugs.
         Logger.shared.log(
-            "[Simkl] flush done: \(acceptedShows) shows / \(acceptedEpisodes) episodes stored, "
+            "[Simkl] flush done: \(acceptedShows) shows / \(acceptedEpisodes) episodes / "
+            + "\(acceptedStatuses) statuses stored, "
             + "\(notFoundCount) not found, \(pending.count) still queued",
             type: "Provider")
     }
@@ -172,6 +176,10 @@ final class SimklWriteQueue {
         if let added = json["added"] as? [String: Any] {
             acceptedShows += (added["shows"] as? Int) ?? 0
             acceptedEpisodes += (added["episodes"] as? Int) ?? 0
+            // Each entry echoes the request and what Simkl now has; count the ones it answered
+            // with a status.
+            let statuses = added["statuses"] as? [[String: Any]] ?? []
+            acceptedStatuses += statuses.filter { ($0["response"] as? [String: Any])?["status"] is String }.count
         }
         if let notFound = json["not_found"] as? [String: Any] {
             for value in notFound.values {

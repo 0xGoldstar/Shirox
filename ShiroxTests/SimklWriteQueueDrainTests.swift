@@ -113,6 +113,26 @@ final class SimklWriteQueueDrainTests: XCTestCase {
         XCTAssertEqual(SimklWriteQueue(storeURL: storeURL, send: { _ in Data() }).pendingCount, 0)
     }
 
+    /// Simkl's reply to a status write, as a live sync returned it: nothing under `shows` or
+    /// `episodes`, the statuses under `added.statuses`. Counting only the first two logged a
+    /// delivered sync as "0 stored".
+    func testStatusesSimklStoredAreCounted() async {
+        let reply = #"""
+        {"added":{"movies":0,"shows":0,"episodes":0,"statuses":[
+          {"request":{"ids":{"mal":50360},"status":"completed"},"response":{"status":"completed","simkl_type":"anime"}},
+          {"request":{"ids":{"mal":49877},"status":"completed"},"response":{"status":"completed","simkl_type":"anime"}}]},
+         "not_found":{"shows":[{"ids":{"mal":1}}]}}
+        """#
+        let queue = SimklWriteQueue(send: { _ in Data(reply.utf8) }, sleep: { _ in })
+        queue.enqueue(write(1))
+        await queue.flush()
+
+        XCTAssertEqual(queue.acceptedStatuses, 2)
+        XCTAssertEqual(queue.acceptedShows, 0)
+        XCTAssertEqual(queue.acceptedEpisodes, 0)
+        XCTAssertEqual(queue.notFoundCount, 1)
+    }
+
     func testAWriteRoundTripsThroughDiskIntact() throws {
         let original = write(7)
         let decoded = try JSONDecoder().decode(SimklWrite.self, from: JSONEncoder().encode(original))
