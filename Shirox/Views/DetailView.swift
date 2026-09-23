@@ -41,6 +41,8 @@ struct DetailView: View {
     @ObservedObject private var malAuth = MALAuthManager.shared
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var malID: Int? = nil
+    /// This page's linked Simkl id, if the user set one in Tracking Links.
+    @State private var simklID: Int? = nil
     @State private var existingMALEntry: LibraryEntry? = nil
     @State private var isSynopsisExpanded = false
     @State private var selectedSeason = 0
@@ -189,17 +191,7 @@ struct DetailView: View {
                 }
             }
 
-            if malAuth.isLoggedIn {
-                let aid = vm.aniListID ?? aniListID
-                if let aid {
-                    Task {
-                        malID = await IDMappingService.shared.malId(forAnilistId: aid)
-                        if let mid = malID {
-                            existingMALEntry = try? await MALProvider.shared.fetchEntry(mediaId: mid)
-                        }
-                    }
-                }
-            }
+            Task { await reloadLinkedIDs() }
 
             if let mid = moduleId, ModuleManager.shared.activeModule?.id != mid,
                let module = ModuleManager.shared.modules.first(where: { $0.id == mid }) {
@@ -251,14 +243,8 @@ struct DetailView: View {
             autoPlayOnLoad = true
             vm.loadStreams(for: episode)
         }
-        .onChangeOf(vm.aniListID) { newAID in
-            guard malAuth.isLoggedIn, let aid = newAID, malID == nil else { return }
-            Task {
-                malID = await IDMappingService.shared.malId(forAnilistId: aid)
-                if let mid = malID {
-                    existingMALEntry = try? await MALProvider.shared.fetchEntry(mediaId: mid)
-                }
-            }
+        .onChangeOf(vm.aniListID) { _ in
+            Task { await reloadLinkedIDs() }
         }
         .tint(.primary)
         .adaptiveSheet(isPresented: $vm.showStreamPicker, onDismiss: {
@@ -386,16 +372,19 @@ struct DetailView: View {
         }
         #endif
         .adaptiveSheet(isPresented: $showMatchingSearch) {
-            AniListMatchingSearchView(initialTitle: item.title, isLinked: vm.aniListID != nil) { matchedMedia in
-                if let media = matchedMedia {
-                    vm.aniListID = media.id
-                    AniListMappingManager.shared.saveMapping(title: item.title, aniListID: media.id)
-                } else {
-                    vm.aniListID = nil
-                    AniListMappingManager.shared.removeMapping(title: item.title)
-                }
-                showMatchingSearch = false
-            }
+            TrackingLinksView(
+                page: .module(title: item.title, moduleKey: linkModuleKey, aniListID: vm.aniListID),
+                initialSide: .anilist,
+                onAniListMatch: { aid in
+                    if let aid {
+                        vm.aniListID = aid
+                        AniListMappingManager.shared.saveMapping(title: item.title, aniListID: aid)
+                    } else {
+                        vm.aniListID = nil
+                        AniListMappingManager.shared.removeMapping(title: item.title)
+                    }
+                },
+                onChange: { Task { await reloadLinkedIDs() } })
         }
     }
 
@@ -406,6 +395,23 @@ struct DetailView: View {
             .filter { $0.moduleId == moduleId && $0.mediaTitle == detail.title }
             .sorted { $0.lastWatchedAt > $1.lastWatchedAt }
             .first
+    }
+
+    private var linkModuleKey: String? {
+        TrackingLinkStore.moduleKey(moduleId: effectiveModuleId, detailHref: vm.detailHref ?? item.href)
+    }
+
+    /// MAL and Simkl for this page, with the user's tracking links applied.
+    private func reloadLinkedIDs() async {
+        let ids = await TrackingLinkResolver.resolve(
+            aniListID: vm.aniListID ?? aniListID, malID: nil, moduleKey: linkModuleKey)
+        malID = ids.mal
+        simklID = ids.simkl
+        if malAuth.isLoggedIn, let mid = malID {
+            existingMALEntry = try? await MALProvider.shared.fetchEntry(mediaId: mid)
+        } else {
+            existingMALEntry = nil
+        }
     }
 
     private func loadWatchOrder() async {
@@ -430,7 +436,7 @@ struct DetailView: View {
                 Button {
                     showMatchingSearch = true
                 } label: {
-                    Label("Change AniList Match", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Tracking Links…", systemImage: "link")
                 }
             } label: {
                 if isLoadingEntry {
@@ -778,7 +784,7 @@ struct DetailView: View {
                         }
                     }
                     Button { showMatchingSearch = true } label: {
-                        Label("Change AniList Match", systemImage: "arrow.triangle.2.circlepath")
+                        Label("Tracking Links…", systemImage: "link")
                     }
                 } label: { libraryEditButtonLabel }
                 .disabled(isLoadingEntry)
@@ -840,7 +846,7 @@ struct DetailView: View {
                             existingMALEntry = try? await MALProvider.shared.fetchEntry(mediaId: mid)
                         }
                         await SimklEditMirror.edit(
-                            malId: mid, anilistId: aid, editedOn: aid != nil ? .anilist : .mal,
+                            malId: mid, anilistId: aid, simklId: simklID, editedOn: aid != nil ? .anilist : .mal,
                             status: status, progress: progress, score: score,
                             format: aid != nil ? AniListAuthManager.shared.scoreFormat : .point10,
                             title: detail.title)
@@ -855,7 +861,7 @@ struct DetailView: View {
                         existingMALEntry = nil
                         Task { try? await MALProvider.shared.deleteEntry(entryId: mid) }
                     }
-                    Task { await SimklEditMirror.delete(malId: mid, anilistId: aid, editedOn: aid != nil ? .anilist : .mal) }
+                    Task { await SimklEditMirror.delete(malId: mid, anilistId: aid, simklId: simklID, editedOn: aid != nil ? .anilist : .mal) }
                 } : nil
             )
             #if os(iOS)
