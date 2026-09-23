@@ -150,6 +150,17 @@ final class SimklAuthManager: NSObject, ObservableObject {
 
     private nonisolated(unsafe) static var loggedSampleURL = false
 
+    /// For Simkl's cached catalog endpoints: the identification parameters and User-Agent, and
+    /// deliberately **no** Authorization — Simkl asks for it to be left off so the edge can serve
+    /// the response, and these calls don't count against the user's allowance.
+    func catalogRequest(path: String) -> URLRequest {
+        var components = URLComponents(string: "https://api.simkl.com\(path)")!
+        components.queryItems = identificationQuery
+        var request = URLRequest(url: components.url!)
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        return request
+    }
+
     /// Sends an authenticated API request, refreshing ahead of expiry and — once — on a 401.
     ///
     /// A V2 access token lasts seven days, so a 401 is nearly always plain expiry: refresh,
