@@ -1003,6 +1003,18 @@ struct SimklTrackWrite: Equatable {
             ep = rawEp - off
         }
 
+        // The user's tracking links win over the automatic ids. Applied after season mapping so
+        // a link set for one season's entry never absorbs another season's episodes.
+        let moduleKey = TrackingLinkResolver.moduleLinksApply(
+            anchorAniListID: context.aniListID, anchorMALID: context.malID,
+            mappedAniListID: aniListID, mappedMALID: malID)
+            ? TrackingLinkStore.moduleKey(moduleId: context.moduleId, detailHref: context.detailHref)
+            : nil
+        let linked = await TrackingLinkResolver.resolve(aniListID: aniListID, malID: malID, moduleKey: moduleKey)
+        aniListID = linked.anilist
+        malID = linked.mal
+        let simklID = linked.simkl
+
         // An airing show is never "completed": even if a stale module reports
         // totalEpisodes as the currently-aired count, more episodes are still coming.
         let isCompleted = context.isAiring != true && totalEpisodes != nil && totalEpisodes == ep
@@ -1089,15 +1101,15 @@ struct SimklTrackWrite: Equatable {
             if simklMAL == nil, let aid = aniListID {
                 simklMAL = await IDMappingService.shared.malId(forAnilistId: aid)
             }
-            if simklMAL != nil || aniListID != nil {
-                let current = SimklLibraryService.shared.cachedEntry(malId: simklMAL, anilistId: aniListID)
+            if simklMAL != nil || aniListID != nil || simklID != nil {
+                let current = SimklLibraryService.shared.cachedEntry(malId: simklMAL, anilistId: aniListID, simklId: simklID)
                 if let write = Self.simklTrackDecision(
                     currentStatus: current?.status, currentProgress: current?.progress ?? 0,
                     watchedEpisode: ep, totalEpisodes: totalEpisodes,
                     isCompleted: isCompleted, skipRewatch: skipRewatch) {
                     Logger.shared.log("[Tracking] Simkl update: \(write.status.rawValue) ep \(write.progress)", type: "Info")
                     await SimklLibraryService.shared.writeNow(
-                        malId: simklMAL, anilistId: aniListID, status: write.status,
+                        malId: simklMAL, anilistId: aniListID, simklId: simklID, status: write.status,
                         progress: write.progress, score: 0, format: .point10,
                         title: context.mediaTitle)
                 } else {
