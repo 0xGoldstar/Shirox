@@ -115,8 +115,24 @@ final class AniListLibraryService {
 
     // MARK: - Fetch single entry for a media id
 
+    /// Whether an error from a MediaList lookup means "this show isn't on your list".
+    ///
+    /// AniList answers that with a 404 "Not Found". Everything else — a rate limit, a timeout, a
+    /// refused token — is a failure to read, and must never be taken for absence: tracking used
+    /// to, and wrote a fresh Watching entry over a Rewatching or Completed one.
+    nonisolated static func isNotOnList(_ error: Error) -> Bool {
+        switch error as? AniListError {
+        case .httpError(404), .serviceMessage(code: 404, message: _): return true
+        default: return false
+        }
+    }
+
+    /// The user's entry for a title: nil when it isn't on their list, and a thrown error when the
+    /// list couldn't be read — the two must stay distinguishable.
     func fetchEntry(mediaId: Int, type: MediaListType = .anime) async throws -> AniListRawEntry? {
-        guard let userId = await AniListAuthManager.shared.authenticatedUserId else { return nil }
+        guard let userId = await AniListAuthManager.shared.authenticatedUserId else {
+            throw ProviderError.unauthenticated
+        }
         let query = """
         query ($userId: Int, $mediaId: Int) {
           MediaList(userId: $userId, mediaId: $mediaId, type: \(type.rawValue)) {
@@ -146,7 +162,12 @@ final class AniListLibraryService {
         }
         """
         let variables: [String: Any] = ["userId": userId, "mediaId": mediaId]
-        let data = try await post(query: query, variables: variables)
+        let data: Data
+        do {
+            data = try await post(query: query, variables: variables)
+        } catch where Self.isNotOnList(error) {
+            return nil
+        }
 
         struct Response: Decodable {
             struct ResponseData: Decodable {

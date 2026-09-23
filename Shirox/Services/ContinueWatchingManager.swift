@@ -921,6 +921,29 @@ struct SimklTrackWrite: Equatable {
 
     /// The write a remote (AniList/MAL) auto-track event should perform, or `.skip` to leave the
     /// entry untouched. `incrementRepeat` means: set the rewatch/repeat count to existing + 1.
+    /// A read of the current remote entry, as tracking needs it. `.found(nil)` means the show
+    /// isn't on the list, so tracking adds it; `.unreadable` means the list couldn't be read, so
+    /// tracking must leave it alone. They used to be one case, and a rate limit or a dropped
+    /// connection wrote a fresh Watching entry over a Rewatching or Completed one.
+    enum TrackingRead {
+        case found(LibraryEntry?)
+        case unreadable(Error)
+    }
+
+    static func readForTracking(logAs service: String? = nil,
+                                _ fetch: () async throws -> LibraryEntry?) async -> TrackingRead {
+        do {
+            return .found(try await fetch())
+        } catch {
+            if let service {
+                Logger.shared.log(
+                    "[Tracking] \(service) skip: couldn't read the current entry (\(error)) — left as it is rather than reset to Watching",
+                    type: "Error")
+            }
+            return .unreadable(error)
+        }
+    }
+
     enum RemoteTrackDecision: Equatable {
         case skip
         case write(status: MediaListStatus, progress: Int, incrementRepeat: Bool)
@@ -1029,8 +1052,10 @@ struct SimklTrackWrite: Equatable {
             } else {
                 resolvedAniListID = nil
             }
-            if let aid = resolvedAniListID {
-                let current = try? await AniListProvider.shared.fetchEntry(mediaId: aid)
+            if let aid = resolvedAniListID,
+               case .found(let current) = await Self.readForTracking(logAs: "AniList", {
+                   try await AniListProvider.shared.fetchEntry(mediaId: aid)
+               }) {
                 let decision = Self.remoteTrackDecision(
                     currentStatus: current?.status, currentProgress: current?.progress ?? 0,
                     watchedEpisode: ep, totalEpisodes: totalEpisodes,
@@ -1063,8 +1088,10 @@ struct SimklTrackWrite: Equatable {
             } else {
                 resolvedMALID = nil
             }
-            if let mid = resolvedMALID {
-                let current = try? await MALProvider.shared.fetchEntry(mediaId: mid)
+            if let mid = resolvedMALID,
+               case .found(let current) = await Self.readForTracking(logAs: "MAL", {
+                   try await MALProvider.shared.fetchEntry(mediaId: mid)
+               }) {
                 let decision = Self.remoteTrackDecision(
                     currentStatus: current?.status, currentProgress: current?.progress ?? 0,
                     watchedEpisode: ep, totalEpisodes: totalEpisodes,
