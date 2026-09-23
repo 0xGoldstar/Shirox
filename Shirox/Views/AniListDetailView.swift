@@ -29,6 +29,8 @@ struct AniListDetailView: View {
     @State private var existingEntry: LibraryEntry? = nil
     @State private var existingMALEntry: LibraryEntry? = nil
     @State private var showMALEdit = false
+    @State private var linkedIDs: TrackingIDs? = nil
+    @State private var showTrackingLinks = false
     @State private var showAniListEdit = false
     @State private var existingAniListCrossEntry: LibraryEntry? = nil
     @State private var isLoadingEntry = false
@@ -82,13 +84,23 @@ struct AniListDetailView: View {
 
     private var malMediaId: Int? {
         guard let media = vm.media, media.provider == .anilist else { return nil }
-        return media.idMal
+        return linkedIDs?.mal ?? media.idMal
     }
 
     /// The AniList id for a MAL-provider media (from the reverse mapping cache).
     private var anilistMediaId: Int? {
         guard let media = vm.media, media.provider == .mal else { return nil }
-        return IDMappingService.shared.cachedAnilistId(forMALId: media.id)
+        return linkedIDs?.anilist ?? IDMappingService.shared.cachedAnilistId(forMALId: media.id)
+    }
+
+    /// The other services' ids for this page, with the user's tracking links applied.
+    private func reloadLinkedIDs() async {
+        guard let media = vm.media else { return }
+        linkedIDs = media.provider == .mal
+            ? await TrackingLinkResolver.resolve(
+                aniListID: IDMappingService.shared.cachedAnilistId(forMALId: media.id),
+                malID: media.id, moduleKey: nil)
+            : await TrackingLinkResolver.resolve(aniListID: media.id, malID: media.idMal, moduleKey: nil)
     }
 
     /// True when viewing a MAL item while AniList is signed in and its AniList id
@@ -162,6 +174,9 @@ struct AniListDetailView: View {
                         showAniListEdit = true
                     }
                 } label: { Label("Edit on AniList", systemImage: "pencil") }
+                Button { showTrackingLinks = true } label: {
+                    Label("Tracking Links…", systemImage: "link")
+                }
             } label: {
                 if isLoadingEntry {
                     ProgressView().scaleEffect(0.8)
@@ -192,6 +207,9 @@ struct AniListDetailView: View {
                         showMALEdit = true
                     }
                 } label: { Label("Edit on MyAnimeList", systemImage: "pencil") }
+                Button { showTrackingLinks = true } label: {
+                    Label("Tracking Links…", systemImage: "link")
+                }
             } label: {
                 if isLoadingEntry {
                     ProgressView().scaleEffect(0.8)
@@ -203,15 +221,20 @@ struct AniListDetailView: View {
             }
             .disabled(isLoadingEntry)
         } else if auth.isLoggedIn || malAuth.isLoggedIn {
-            Button {
-                Task {
-                    isLoadingEntry = true
-                    existingEntry = try? await activeProvider.fetchEntry(mediaId: mediaId)
-                    if isDualAvailable && dualSync, let idMal = malMediaId {
-                        existingMALEntry = try? await MALProvider.shared.fetchEntry(mediaId: idMal)
+            Menu {
+                Button {
+                    Task {
+                        isLoadingEntry = true
+                        existingEntry = try? await activeProvider.fetchEntry(mediaId: mediaId)
+                        if isDualAvailable && dualSync, let idMal = malMediaId {
+                            existingMALEntry = try? await MALProvider.shared.fetchEntry(mediaId: idMal)
+                        }
+                        isLoadingEntry = false
+                        showLibraryEdit = true
                     }
-                    isLoadingEntry = false
-                    showLibraryEdit = true
+                } label: { Label("Edit Library Entry", systemImage: "pencil") }
+                Button { showTrackingLinks = true } label: {
+                    Label("Tracking Links…", systemImage: "link")
                 }
             } label: {
                 if isLoadingEntry {
@@ -245,6 +268,7 @@ struct AniListDetailView: View {
     var body: some View {
         navContent
         .observeSafeAreaLeading($leadingInset)
+        .task(id: vm.media?.id) { await reloadLinkedIDs() }
         .task(id: mediaId) {
             watchOrder = await TVDBMappingService.shared.fetchWatchOrder(id: mediaId)
         }
@@ -393,6 +417,16 @@ struct AniListDetailView: View {
             }
         }
         #endif
+        .adaptiveSheet(isPresented: $showTrackingLinks) {
+            if let media = vm.media {
+                TrackingLinksView(
+                    page: media.provider == .mal
+                        ? .mal(id: media.id, title: media.title.displayTitle, aniListID: anilistMediaId)
+                        : .anilist(id: media.id, title: media.title.displayTitle, idMal: media.idMal),
+                    initialSide: media.provider == .mal ? .anilist : .mal,
+                    onChange: { Task { await reloadLinkedIDs() } })
+            }
+        }
         .adaptiveSheet(isPresented: $showLibraryEdit) {
             if let media = vm.media {
                 let shouldSyncMAL = isDualAvailable && dualSync
@@ -414,8 +448,9 @@ struct AniListDetailView: View {
                         let editedOn: LibrarySide = provider.providerType == .mal ? .mal : .anilist
                         Task {
                             await SimklEditMirror.delete(
-                                malId: editedOn == .mal ? media.id : media.idMal,
-                                anilistId: editedOn == .anilist ? media.id : nil, editedOn: editedOn)
+                                malId: editedOn == .mal ? media.id : malMediaId,
+                                anilistId: editedOn == .anilist ? media.id : anilistMediaId,
+                                simklId: linkedIDs?.simkl, editedOn: editedOn)
                         }
                     } : nil
                 )
@@ -452,8 +487,8 @@ struct AniListDetailView: View {
                         Task {
                             try? await MALProvider.shared.updateEntry(mediaId: idMal, status: status, progress: progress, score: score)
                             await SimklEditMirror.edit(
-                                malId: idMal, anilistId: media.provider == .anilist ? media.id : nil,
-                                editedOn: .mal, status: status, progress: progress, score: score,
+                                malId: idMal, anilistId: media.provider == .anilist ? media.id : anilistMediaId,
+                                simklId: linkedIDs?.simkl, editedOn: .mal, status: status, progress: progress, score: score,
                                 format: .point10, title: media.title.displayTitle)
                         }
                     },
@@ -462,7 +497,8 @@ struct AniListDetailView: View {
                         Task {
                             try? await MALProvider.shared.deleteEntry(entryId: idMal)
                             await SimklEditMirror.delete(
-                                malId: idMal, anilistId: media.provider == .anilist ? media.id : nil, editedOn: .mal)
+                                malId: idMal, anilistId: media.provider == .anilist ? media.id : anilistMediaId,
+                                simklId: linkedIDs?.simkl, editedOn: .mal)
                         }
                     } : nil
                 )
@@ -547,8 +583,9 @@ struct AniListDetailView: View {
             }
             let editedOn: LibrarySide = provider.providerType == .mal ? .mal : .anilist
             await SimklEditMirror.edit(
-                malId: editedOn == .mal ? media.id : media.idMal,
-                anilistId: editedOn == .anilist ? media.id : nil,
+                malId: editedOn == .mal ? media.id : malMediaId,
+                anilistId: editedOn == .anilist ? media.id : anilistMediaId,
+                simklId: linkedIDs?.simkl,
                 editedOn: editedOn, status: status, progress: progress, score: score,
                 format: editedOn == .anilist ? AniListAuthManager.shared.scoreFormat : .point10,
                 title: media.title.displayTitle)
