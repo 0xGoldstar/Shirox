@@ -130,6 +130,8 @@ struct ShiroxApp: App {
            !ModuleManager.shared.modules.isEmpty {
             UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
         }
+        // Before any view reads `syncTargets`: seeds it from `dualSync` on the first launch after upgrade.
+        SyncTargets.migrateIfNeeded()
         PendingWriteQueue.shared.register(sink: LibraryWriteSink())
         LocalLibraryManager.shared.syncFromContinueWatching()
         HostBlocklist.shared.loadIfNeeded()

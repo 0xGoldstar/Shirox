@@ -32,7 +32,9 @@ struct LibraryView: View {
     private var sortOrder: LibrarySortOrder {
         LibrarySortOrder(rawValue: sortOrderRaw) ?? .score
     }
-    @AppStorage("dualSync") private var dualSync = false
+    @AppStorage(SyncTargets.key) private var syncTargetsRaw = ""
+    /// AniList ↔ MyAnimeList mirroring — now one pair within `SyncTargets`.
+    private var dualSync: Bool { SyncTargets.mirrors(.anilist, .mal, in: SyncTargets.decode(syncTargetsRaw)) }
     @State private var selectedGenres: Set<String> = []
     @State private var selectedEntry: LibraryEntry? = nil
     @State private var pendingEntry: LibraryEntry? = nil

@@ -22,7 +22,9 @@ struct AniListDetailView: View {
     @ObservedObject private var malAuth = MALAuthManager.shared
     @State private var showResetConfirmation = false
     @State private var autoPlayOnLoad = false
-    @AppStorage("dualSync") private var dualSync = false
+    @AppStorage(SyncTargets.key) private var syncTargetsRaw = ""
+    /// AniList ↔ MyAnimeList mirroring — now one pair within `SyncTargets`.
+    private var dualSync: Bool { SyncTargets.mirrors(.anilist, .mal, in: SyncTargets.decode(syncTargetsRaw)) }
     @State private var showLibraryEdit = false
     @State private var existingEntry: LibraryEntry? = nil
     @State private var existingMALEntry: LibraryEntry? = nil
