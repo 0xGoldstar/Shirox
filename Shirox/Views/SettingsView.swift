@@ -14,7 +14,8 @@ struct SettingsNavRow: View {
             ZStack {
                 Image(systemName: icon)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    // Adapts to the appearance: white vanished against light mode's pale glass.
+                    .foregroundStyle(.primary)
             }
             .frame(width: 28, height: 28)
             .glassChrome(
