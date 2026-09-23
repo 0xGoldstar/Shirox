@@ -185,7 +185,8 @@ final class MALProvider: MediaProvider {
 
     private func mapEntry(_ e: MALLibraryService.MALListEntry) -> LibraryEntry {
         let node = e.node
-        let status = MALLibraryService.shared.mapStatusFromMAL(e.list_status.status)
+        let status = MALLibraryService.listStatus(fromMAL: e.list_status.status,
+                                                  isRewatching: e.list_status.is_rewatching)
         let media = Media(
             id: node.id,
             idMal: node.id,

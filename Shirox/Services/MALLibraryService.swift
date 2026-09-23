@@ -44,6 +44,8 @@ final class MALLibraryService {
         let score: Int?
         let num_episodes_watched: Int?
         let num_times_rewatched: Int?
+        /// MyAnimeList's rewatch: a flag beside the status, not a status of its own.
+        let is_rewatching: Bool?
         let updated_at: String?
     }
 
@@ -84,10 +86,14 @@ final class MALLibraryService {
 
     // MARK: - Fetch single entry
 
+    /// Named field by field, unlike the library read's whole `list_status` — so `is_rewatching`
+    /// has to be asked for here, or tracking reads a rewatch as plain watching and clears it.
+    static let entryFields = "my_list_status{status,score,num_episodes_watched,num_times_rewatched,is_rewatching,updated_at},num_episodes,status,mean,genres,synopsis,start_season,media_type,main_picture"
+
     func fetchEntry(malId: Int) async throws -> MALListEntry? {
         var components = URLComponents(url: base.appendingPathComponent("anime/\(malId)"),
                                        resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "fields", value: "my_list_status{status,score,num_episodes_watched,num_times_rewatched,updated_at},num_episodes,status,mean,genres,synopsis,start_season,media_type,main_picture")]
+        components.queryItems = [URLQueryItem(name: "fields", value: Self.entryFields)]
         let (data, response) = try await MALAuthManager.shared.send(url: components.url!)
         if response.statusCode == 404 { return nil }
         try validateResponse(response)
@@ -124,10 +130,8 @@ final class MALLibraryService {
 
     func rawUpdateEntry(malId: Int, status: MediaListStatus, progress: Int, score: Double, numTimesRewatched: Int? = nil) async throws {
         let url = base.appendingPathComponent("anime/\(malId)/my_list_status")
-        let malStatus = mapStatusToMAL(status)
-        let scoreInt = Int(score)
-        var bodyString = "status=\(malStatus)&num_watched_episodes=\(progress)&score=\(scoreInt)"
-        if let numTimesRewatched { bodyString += "&num_times_rewatched=\(numTimesRewatched)" }
+        let bodyString = Self.updateBody(status: status, progress: progress, score: score,
+                                         numTimesRewatched: numTimesRewatched)
         let (_, response) = try await MALAuthManager.shared.send(
             url: url, method: "PATCH",
             body: bodyString.data(using: .utf8),
@@ -154,6 +158,25 @@ final class MALLibraryService {
     }
 
     // MARK: - Status mapping
+
+    /// A `my_list_status` update. MyAnimeList has no "rewatching" status — a rewatch is
+    /// `watching` plus `is_rewatching=true` — so the flag is sent on every update: set for a
+    /// rewatch, cleared for everything else, or a finished rewatch would stay flagged.
+    static func updateBody(status: MediaListStatus, progress: Int, score: Double,
+                           numTimesRewatched: Int?) -> String {
+        let malStatus = MALLibraryService.shared.mapStatusToMAL(status)
+        var body = "status=\(malStatus)&is_rewatching=\(status == .repeating)"
+            + "&num_watched_episodes=\(progress)&score=\(Int(score))"
+        if let numTimesRewatched { body += "&num_times_rewatched=\(numTimesRewatched)" }
+        return body
+    }
+
+    /// The app's status for a MyAnimeList entry. The flag wins over the status: whatever status
+    /// MyAnimeList pairs it with, a flagged entry is being rewatched.
+    static func listStatus(fromMAL status: String?, isRewatching: Bool?) -> MediaListStatus {
+        if isRewatching == true { return .repeating }
+        return MALLibraryService.shared.mapStatusFromMAL(status)
+    }
 
     func mapStatusToMAL(_ s: MediaListStatus) -> String {
         switch s {

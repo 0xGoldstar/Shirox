@@ -209,8 +209,9 @@ enum LibrarySyncPlanner {
 
     /// Whether two statuses genuinely disagree, as opposed to merely differing.
     ///
-    /// `current` vs `repeating` differs on paper but only because MyAnimeList cannot express a
-    /// rewatch; reporting it would mean flagging the same titles on every single run.
+    /// `current` vs `repeating` differs on paper but only because a side cannot express a rewatch
+    /// — Simkl can't on a free account, and MyAnimeList entries rewatched outside the app may lack
+    /// its `is_rewatching` flag. Reporting it would flag the same titles on every single run.
     private static func isConflict(_ a: MediaListStatus, _ b: MediaListStatus) -> Bool {
         guard a != b, rank(a) == rank(b) else { return false }
         let watching: Set<MediaListStatus> = [.current, .repeating]

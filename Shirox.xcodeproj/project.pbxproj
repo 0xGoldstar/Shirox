@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0009B9EE54C1A24376003735 /* MALRewatchingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 720374F0225B04CEE3306AB7 /* MALRewatchingTests.swift */; };
 		00C715F7D131B580D7ACA5E3 /* adult_hosts.txt in Resources */ = {isa = PBXBuildFile; fileRef = E1C750867F19DF886AA2D7E8 /* adult_hosts.txt */; };
 		01B98E834D51E54F3EEB9C99 /* FreshInstallKeychainPurgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EC3ED0C2D6F7589559C879E /* FreshInstallKeychainPurgeTests.swift */; };
 		0345A08DCF61CF5C647B7CD5 /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D9D985D9ED34BCD80E74692 /* SplashView.swift */; };
@@ -957,6 +958,7 @@
 		6CD7DB6AB4D4669A5E102076 /* BackupSettingsSectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackupSettingsSectionTests.swift; sourceTree = "<group>"; };
 		6EA13A2F15016892850F349E /* JellyfinAuthManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JellyfinAuthManager.swift; sourceTree = "<group>"; };
 		7067BDBACB2F7A173AA486EC /* ZoomableContainer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ZoomableContainer.swift; sourceTree = "<group>"; };
+		720374F0225B04CEE3306AB7 /* MALRewatchingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MALRewatchingTests.swift; sourceTree = "<group>"; };
 		72916D73A600FD77E3BA1BF2 /* JikanGenreMergeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JikanGenreMergeTests.swift; sourceTree = "<group>"; };
 		72CCB233D0B10220690D48E3 /* NSFWContentFilterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NSFWContentFilterTests.swift; sourceTree = "<group>"; };
 		78D4A37BF102E8773C0C1051 /* AniListThrottleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AniListThrottleTests.swift; sourceTree = "<group>"; };
@@ -1519,6 +1521,7 @@
 				5225D82F9D0889BA8C94D76A /* SimklWriteQueueDrainTests.swift */,
 				275B18EC2FACBE6FAC965485 /* SyncTargetsTests.swift */,
 				798AB494EC01E0CCE8CFB2D7 /* SimklLiveTrackingTests.swift */,
+				720374F0225B04CEE3306AB7 /* MALRewatchingTests.swift */,
 			);
 			path = ShiroxTests;
 			sourceTree = SOURCE_ROOT;
@@ -1831,6 +1834,7 @@
 				CA868C3A72F5631FF1BF5B60 /* SimklWriteQueueDrainTests.swift in Sources */,
 				79771522B1484270D649756E /* SyncTargetsTests.swift in Sources */,
 				D940DA551F6C3D8AD11F03A6 /* SimklLiveTrackingTests.swift in Sources */,
+				0009B9EE54C1A24376003735 /* MALRewatchingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
