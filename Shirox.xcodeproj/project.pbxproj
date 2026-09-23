@@ -448,6 +448,7 @@
 		34475ABA74F8DDA0600B3DFB /* ReaderPageMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2630DB71CDC98D422B49EC1A /* ReaderPageMapping.swift */; };
 		34FEC549807840C99DE4F688 /* RatingPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46A77C1128934BF5BD3A9047 /* RatingPromptView.swift */; };
 		36552AE2839ED8E98A8F611F /* HostBlocklist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 810CED9585EB8327C0CF0AE2 /* HostBlocklist.swift */; };
+		3895D9C271B8FA23CC1E57B7 /* TrackingLinksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8F4DB53F4EB28F86CD383A7 /* TrackingLinksView.swift */; };
 		3A42CE0D50F5B4711F556C97 /* ShiroxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BE8F22DF8EF4BBAC15BAB79 /* ShiroxApp.swift */; };
 		3B13C3604F0998907BC0F5A0 /* MALOfficialDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB699100F232CDB1648C513F /* MALOfficialDiscoveryService.swift */; };
 		3C6286077657F69CA8D73789 /* LoggerRedactionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA808C7CD73B2C87D9F989B /* LoggerRedactionTests.swift */; };
@@ -635,6 +636,7 @@
 		AB8F741F717C0AE76F351730 /* LibraryCollapsingHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D6742C550B97293CCFDC834 /* LibraryCollapsingHeader.swift */; };
 		AC4D6652CAC0742CFD0552CC /* JellyfinConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6AB4FB215071F688F19B394 /* JellyfinConnectView.swift */; };
 		AD7A6C00414CC2CEB81155D1 /* JellyfinPlaybackCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56C921630CAED5B7B10A681B /* JellyfinPlaybackCoordinator.swift */; };
+		AEA55770BB688617D3207161 /* TrackingLinksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8F4DB53F4EB28F86CD383A7 /* TrackingLinksView.swift */; };
 		AF16A368F3EF69CDB09A5E4E /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E87688CB577983F43E550D /* OnboardingView.swift */; };
 		AFCA3BDEEC6B69B38B8952A2 /* JellyfinEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF4C00BAA407FF400B069044 /* JellyfinEntryView.swift */; };
 		B00EA8C34F1FB569F0C32C96 /* MangaDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E23D7C4D4702884E3CDB683 /* MangaDetailViewModel.swift */; };
@@ -687,6 +689,7 @@
 		CCCC3A80F9896410E3FEC4A8 /* ProfileCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62D2F08E475CE2C530B479E /* ProfileCacheStore.swift */; };
 		CD69B77925B488C51A0D887E /* PendingWriteQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE39C4F1F663C90A50947045 /* PendingWriteQueue.swift */; };
 		CD6C2B2B6967FC19AC401DD4 /* PosterViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E3C8D23E3797E6BC0B5EF3A /* PosterViewer.swift */; };
+		CD89A922A7351ADBB82744E0 /* TrackingLinksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8F4DB53F4EB28F86CD383A7 /* TrackingLinksView.swift */; };
 		CE0238BACD10A8438C6FE87C /* ReaderPageMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65C401C99951287FBA8733B1 /* ReaderPageMappingTests.swift */; };
 		CE1C7A951941C9B15ABBF341 /* SimklOAuthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFC46805FE79CD18D6269BA /* SimklOAuthTests.swift */; };
 		CF01709DB843C722DB674C72 /* PendingWrite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A5A6BA34DDCEF8AFDF2E059 /* PendingWrite.swift */; };
@@ -1070,6 +1073,7 @@
 		E4055BF10088887224F97E64 /* CloudflareBypassClearanceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudflareBypassClearanceTests.swift; sourceTree = "<group>"; };
 		E548862288E04B9EA60BBCF3 /* LocalPlaybackCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPlaybackCoordinator.swift; sourceTree = "<group>"; };
 		E8D91E43B99205901655CDF0 /* Shirox.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Shirox.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E8F4DB53F4EB28F86CD383A7 /* TrackingLinksView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrackingLinksView.swift; sourceTree = "<group>"; };
 		EBAF45C71B3785D9592EA63E /* JellyfinAuthManagerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JellyfinAuthManagerTests.swift; sourceTree = "<group>"; };
 		EC154F4B51E6E8262096B6AE /* KingfisherImageCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KingfisherImageCacheTests.swift; sourceTree = "<group>"; };
 		EEFA93DA5617959381E10D85 /* BookmarkButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkButton.swift; sourceTree = "<group>"; };
@@ -1386,6 +1390,7 @@
 				35CD557D45FF0C6287F6783D /* View+GlassChrome.swift */,
 				7E3C8D23E3797E6BC0B5EF3A /* PosterViewer.swift */,
 				250387834E819E85E4CD966E /* CopyTitle.swift */,
+				E8F4DB53F4EB28F86CD383A7 /* TrackingLinksView.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -2093,6 +2098,7 @@
 				44E79E2AA719B8027838BA14 /* TrackingIDInput.swift in Sources */,
 				5A8751D8DA64618C6E3F9FB8 /* SimklCatalog.swift in Sources */,
 				A4D879010AA064AE6285DA53 /* BackupLinksSection.swift in Sources */,
+				CD89A922A7351ADBB82744E0 /* TrackingLinksView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2316,6 +2322,7 @@
 				4901D0B3725A729C1ACC215A /* TrackingIDInput.swift in Sources */,
 				09AAAB9CD59D89923CBF3ABF /* SimklCatalog.swift in Sources */,
 				B04C90F468232DE4FE2858BF /* BackupLinksSection.swift in Sources */,
+				3895D9C271B8FA23CC1E57B7 /* TrackingLinksView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2539,6 +2546,7 @@
 				A48A03EB68F6674514A6B029 /* TrackingIDInput.swift in Sources */,
 				2C2A0F4D1AB17D486ED8912C /* SimklCatalog.swift in Sources */,
 				DE95099113C0AF095A5F57B0 /* BackupLinksSection.swift in Sources */,
+				AEA55770BB688617D3207161 /* TrackingLinksView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
