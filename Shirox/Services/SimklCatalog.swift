@@ -9,8 +9,12 @@ struct SimklCatalogItem: Decodable, Equatable {
     let simklID: Int?
 
     /// Simkl's documented image pattern for a poster fragment.
+    static func posterURLString(_ fragment: String) -> String {
+        "https://wsrv.nl/?url=https://simkl.in/posters/\(fragment)_m.webp&q=90"
+    }
+
     var posterURL: URL? {
-        poster.flatMap { URL(string: "https://wsrv.nl/?url=https://simkl.in/posters/\($0)_m.webp&q=90") }
+        poster.flatMap { URL(string: Self.posterURLString($0)) }
     }
 
     private enum CodingKeys: String, CodingKey { case title, year, poster, type, ids }

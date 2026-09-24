@@ -15,6 +15,23 @@ enum SimklFailure: Equatable {
     case other(Int)
 }
 
+/// Simkl refusals the user can act on, in words that say what to do.
+enum SimklError: LocalizedError, Equatable {
+    /// `user_limit_exceeded` / `app_limit_exceeded`.
+    case dailyLimit
+    /// The sign-in lacks `media:write`; only a new sign-in widens it.
+    case readOnly
+
+    var errorDescription: String? {
+        switch self {
+        case .dailyLimit:
+            return "Simkl's daily limit for your account has been reached. It resets at midnight US Eastern time."
+        case .readOnly:
+            return "Sign in to Simkl again to allow edits."
+        }
+    }
+}
+
 /// Reads and writes a Simkl anime library.
 ///
 /// Two rules from Simkl's own documentation shape this file, and both protect a `client_id`
@@ -79,7 +96,7 @@ final class SimklLibraryService {
                 throw ProviderError.unauthenticated
             default:
                 Logger.shared.log("[Simkl] Request failed: \(failure)", type: "Error")
-                throw ProviderError.serverError(http.statusCode)
+                throw Self.thrownError(for: failure, status: http.statusCode)
             }
         }
     }
@@ -97,6 +114,13 @@ final class SimklLibraryService {
         default:
             return .other(status)
         }
+    }
+
+    /// What a refusal `perform` gives up on is thrown as. The daily limit gets its own error: it
+    /// is the one the user most needs explained, since no retry clears it before midnight.
+    nonisolated static func thrownError(for failure: SimklFailure, status: Int) -> Error {
+        if case .dailyLimit = failure { return SimklError.dailyLimit }
+        return ProviderError.serverError(status)
     }
 
     // MARK: - Reading
@@ -130,6 +154,11 @@ final class SimklLibraryService {
                     let anilist: FlexibleID?
                 }
                 let title: String?
+                /// An image fragment such as `74/74415673dcdc9cdd`; see `SimklCatalogItem.posterURLString`.
+                let poster: String?
+                /// A number in Simkl's docs — decoded as leniently as the ids, so one odd value
+                /// can't fail the whole library.
+                let year: FlexibleID?
                 let ids: IDs?
             }
             let show: Show?
@@ -137,6 +166,8 @@ final class SimklLibraryService {
             let watched_episodes_count: Int?
             let total_episodes_count: Int?
             let user_rating: Int?
+            /// `tv`, `movie`, `ova`, `ona`, `special` or `music video`.
+            let anime_type: String?
         }
         let anime: [Item]?
     }
@@ -199,6 +230,16 @@ final class SimklLibraryService {
         store(merged)
         UserDefaults.standard.set(stamp, forKey: lastActivityKey)
         return merged
+    }
+
+    /// The library for the Library tab to show: the cached copy whenever there is one.
+    ///
+    /// Opening the tab is not a reason to ask Simkl anything. Activity checks come out of the
+    /// user's own request budget, and Simkl asks apps to check on pull to refresh or after 30
+    /// minutes away — both of which have their own paths. Only a library never read is fetched.
+    func displayLibrary() async throws -> [LibraryEntry] {
+        if let cached = cachedLibrary() { return cached }
+        return try await fetchLibrary()
     }
 
     /// The one full download, taken when the user connects their account.
@@ -269,12 +310,18 @@ final class SimklLibraryService {
     /// because the user asked; the throttle exists for automatic checks only.
     func refreshNow(now: Date = Date()) async {
         guard auth.isLoggedIn else { return }
-        UserDefaults.standard.set(now, forKey: lastCheckKey)
         do {
-            _ = try await fetchLibrary()
+            _ = try await checkNow(now: now)
         } catch {
             Logger.shared.log("[Simkl] refresh failed: \(error)", type: "Error")
         }
+    }
+
+    /// The same check, for a caller that shows what went wrong — the Simkl list's own pull to
+    /// refresh.
+    func checkNow(now: Date = Date()) async throws -> [LibraryEntry] {
+        UserDefaults.standard.set(now, forKey: lastCheckKey)
+        return try await fetchLibrary()
     }
 
     /// Counts the per-write diagnostics emitted this run, so a 400-title sync logs three
@@ -292,6 +339,8 @@ final class SimklLibraryService {
     /// keeps per-provider snapshots on disk, and Simkl is a `ProviderType`, so it just works.
     private func cachedLibrary() -> [LibraryEntry]? {
         if let cached { return cached }
+        guard Self.cacheIsCurrent(storedVersion: UserDefaults.standard.integer(forKey: cacheVersionKey))
+        else { return nil }
         let snapshot = LibraryCacheStore.shared.snapshot(provider: .simkl, mediaType: .anime)
         cached = snapshot?.entries
         return cached
@@ -300,6 +349,18 @@ final class SimklLibraryService {
     private func store(_ entries: [LibraryEntry]) {
         cached = entries
         LibraryCacheStore.shared.save(entries: entries, provider: .simkl, mediaType: .anime)
+        UserDefaults.standard.set(Self.cacheVersion, forKey: cacheVersionKey)
+    }
+
+    private let cacheVersionKey = "simkl_cache_version"
+
+    /// Bumped when a read starts keeping a field it used to drop — 2: poster, year and type. A
+    /// cache written before has that field empty on every title, and a delta read only refreshes
+    /// titles that changed, so the one full read is taken again, once.
+    nonisolated static let cacheVersion = 2
+
+    nonisolated static func cacheIsCurrent(storedVersion: Int) -> Bool {
+        storedVersion >= cacheVersion
     }
 
     /// Drops the cache and the saved timestamp, forcing the next read back to Phase 1.
@@ -478,13 +539,15 @@ final class SimklLibraryService {
         let status = Self.status(from: item.status, progress: watched, total: total)
         let progress = Self.progress(watched: watched, total: total, status: status)
 
+        let poster = show.poster.map(SimklCatalogItem.posterURLString(_:))
         let media = Media(
             id: id, idMal: ids.mal?.value, provider: .simkl,
             title: MediaTitle(romaji: show.title, english: show.title, native: nil),
-            coverImage: MediaCoverImage(large: nil, extraLarge: nil),
+            coverImage: MediaCoverImage(large: poster, extraLarge: poster),
             bannerImage: nil, description: nil, episodes: total, status: nil,
-            averageScore: nil, genres: nil, season: nil, seasonYear: nil,
-            nextAiringEpisode: nil, relations: nil, type: nil, format: nil)
+            averageScore: nil, genres: nil, season: nil, seasonYear: show.year?.value,
+            nextAiringEpisode: nil, relations: nil, type: nil,
+            format: Self.format(fromAnimeType: item.anime_type))
 
         // The entry id is Simkl's own, so a show linked by Simkl id can be found in the cache;
         // `media.id` stays the MyAnimeList id the pairing joins on.
@@ -492,6 +555,12 @@ final class SimklLibraryService {
             id: ids.simkl?.value ?? id, media: media, status: status, progress: progress,
             score: SimklPayloadBuilder.score(fromRating: item.user_rating, format: .point10),
             timesRewatched: nil)
+    }
+
+    /// Simkl's `anime_type` in the uppercase form AniList uses for `format`.
+    nonisolated static func format(fromAnimeType raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        return raw == "music video" ? "MUSIC" : raw.uppercased()
     }
 
     /// How many episodes a Simkl entry represents as watched.
