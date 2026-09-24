@@ -70,6 +70,7 @@ final class LibraryViewModel: ObservableObject {
             // one provider for anime and another for manga, and collide their cache snapshots.
             source = .provider(primary)
         }
+        restoreList()
 
         // Cold start: show the last-saved list for the initial key instantly, before the first
         // network refresh. `autoRefreshIfNeeded` then refreshes silently (no spinner) and keeps
@@ -92,6 +93,7 @@ final class LibraryViewModel: ObservableObject {
                 guard let self, let providerType, case .provider = self.source else { return }
                 guard self.source != .provider(providerType) else { return }
                 self.source = .provider(providerType)
+                self.restoreList()
                 self.switchKey()
             }
             .store(in: &cancellables)
@@ -109,6 +111,7 @@ final class LibraryViewModel: ObservableObject {
             .sink { [weak self] _ in
                 guard let self, self.isLocal else { return }
                 self.customListNames = LocalLibraryManager.shared.collections.map(\.name).sorted()
+                self.dropMissingCustomList()
                 self.applyFilter()
             }
             .store(in: &cancellables)
@@ -131,12 +134,34 @@ final class LibraryViewModel: ObservableObject {
     func selectStatus(_ status: MediaListStatus) {
         selectedStatus = status
         selectedCustomList = nil
+        rememberList()
         applyFilter()
     }
 
     func selectCustomList(_ name: String?) {
         selectedCustomList = name
+        rememberList()
         applyFilter()
+    }
+
+    /// Lands on the list last used for this source and type, or the type's default.
+    private func restoreList() {
+        let place = LibraryListMemory.restorable(LibraryListMemory.load(for: source, mediaType),
+                                                 source: source, kind: mediaType)
+        selectedStatus = place?.status ?? LibrarySource.defaultStatus(for: mediaType)
+        selectedCustomList = place?.customList
+    }
+
+    private func rememberList() {
+        LibraryListMemory.save(LibraryListMemory.Place(status: selectedStatus, customList: selectedCustomList),
+                               for: source, mediaType)
+    }
+
+    /// A remembered custom list that no longer exists falls back to its status list.
+    private func dropMissingCustomList() {
+        guard let list = selectedCustomList, !customListNames.contains(list) else { return }
+        selectedCustomList = nil
+        rememberList()
     }
 
     func selectSource(_ source: LibrarySource) {
@@ -153,16 +178,14 @@ final class LibraryViewModel: ObservableObject {
         // Simkl has no manga, and AniList and MyAnimeList no TV or movies: arriving on a kind the
         // new source lacks would ask it for a list it doesn't have.
         if !source.mediaKinds.contains(mediaType) { mediaType = .anime }
-        selectedCustomList = nil
-        selectedStatus = LibrarySource.defaultStatus(for: mediaType)
+        restoreList()
         switchKey()
     }
 
     func selectMediaType(_ kind: MediaKind) {
         guard mediaType != kind else { return }
         mediaType = kind
-        selectedCustomList = nil
-        selectedStatus = LibrarySource.defaultStatus(for: kind)
+        restoreList()
         switchKey()
     }
 
@@ -368,6 +391,7 @@ final class LibraryViewModel: ObservableObject {
             customListNames = result.compactMap { $0.customListName }.filter { seen.insert($0).inserted }.sorted()
             UserDefaults.standard.set(customListNames, forKey: "libraryCustomListNames")
         }
+        dropMissingCustomList()
     }
 
     /// Fetches the manga library for the current source. Local reads the on-device
