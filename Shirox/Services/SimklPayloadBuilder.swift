@@ -22,6 +22,12 @@ struct SimklWrite: Codable, Equatable {
     /// this is context for the matcher rather than the primary key.
     var title: String? = nil
     var year: Int? = nil
+    /// nil for anime — every write before TV and movies was one, and a queue saved on disk has no
+    /// `kind`.
+    var kind: MediaKind? = nil
+    /// TV: the seasons to mark, a season with no `episodes` meaning all of it. Anime marks
+    /// `episodes` in its single season instead.
+    var seasons: [SimklSeasonMark]? = nil
 }
 
 /// What moving a title from one progress to another takes on Simkl.
@@ -133,24 +139,54 @@ enum SimklPayloadBuilder {
         // `simkl_type: anime`, and the read endpoint is `/sync/all-items/anime/all`, so the
         // anime catalog is keyed separately here too.
         var shows: [[String: Any]] = []
+        var movies: [[String: Any]] = []
 
         for item in items {
-            if let episodes = item.episodes, !episodes.isEmpty {
-                var entry: [String: Any] = [
-                    "ids": item.ids,
-                    "seasons": [["number": 1, "episodes": episodes.map { ["number": $0] }]],
-                ]
-                Self.addMetadata(from: item, to: &entry)
-                shows.append(entry)
+            var marks: [String: Any]?
+            if let seasons = item.seasons, !seasons.isEmpty {
+                marks = ["ids": item.ids, "seasons": seasons.map(Self.seasonObject)]
+            } else if let episodes = item.episodes, !episodes.isEmpty {
+                marks = ["ids": item.ids,
+                         "seasons": [["number": 1, "episodes": episodes.map { ["number": $0] }]]]
+            }
+            if var marks {
+                Self.addMetadata(from: item, to: &marks)
+                shows.append(marks)
             }
 
             var state: [String: Any] = ["ids": item.ids, "status": item.status.rawValue]
             if let rating = item.rating { state["rating"] = rating }
             Self.addMetadata(from: item, to: &state)
-            shows.append(state)
+            if item.kind == .movie { movies.append(state) } else { shows.append(state) }
         }
 
-        return [Self.animeKey: shows]
+        var body: [String: Any] = [:]
+        if !shows.isEmpty || movies.isEmpty { body[Self.animeKey] = shows }
+        if !movies.isEmpty { body[Self.moviesKey] = movies }
+        return body
+    }
+
+    /// The array movies are posted under.
+    static let moviesKey = "movies"
+
+    /// `{number, episodes?}` — a season with no `episodes` is all of it.
+    private static func seasonObject(_ mark: SimklSeasonMark) -> [String: Any] {
+        var season: [String: Any] = ["number": mark.number]
+        if let episodes = mark.episodes { season["episodes"] = episodes.map { ["number": $0] } }
+        return season
+    }
+
+    /// `/sync/history/remove` for a TV show or movie.
+    ///
+    /// - `seasons` nil: **removes the title from the library entirely** — history, list entry and
+    ///   rating. A movie is always removed whole: it has no episodes.
+    /// - `seasons` non-nil: un-marks just those seasons and episodes; the show stays in the library.
+    ///   An empty array stays partial, never becoming the destructive case.
+    static func titleRemovalBody(kind: MediaKind, ids: [String: Int],
+                                 seasons: [SimklSeasonMark]?) -> [String: Any] {
+        var item: [String: Any] = ["ids": ids]
+        if kind != .movie, let seasons { item["seasons"] = seasons.map(seasonObject) }
+        return [kind.simklWriteKey: [item]]
     }
 
     /// Attaches the title and year Simkl can fall back on when an id does not resolve.

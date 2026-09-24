@@ -464,6 +464,7 @@
 		3FB1DB2B887CC986A42431B2 /* JellyfinCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C372736CDF3DAFB6621F4326 /* JellyfinCore.swift */; };
 		3FCE9A2E8111478BC412C937 /* LibrarySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D4488D593D0B711FA06E32 /* LibrarySyncService.swift */; };
 		408862BA9DA473140FE66302 /* HomeCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F766E2B1601412A7B7D9F02 /* HomeCacheStore.swift */; };
+		409D07C4C0B2E6A5D4905655 /* SimklTitlePayloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20D11D840B9E8CFB4E28652 /* SimklTitlePayloadTests.swift */; };
 		42F7F6A06C1039A0472932B8 /* JavaScriptCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AE72458EFA629F4C7C996AA9 /* JavaScriptCore.framework */; };
 		43B2879B2F0E8F8951F228D6 /* ContinueReadingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 260EB4F88FB4092DF0B4EC76 /* ContinueReadingCard.swift */; };
 		4405364F748FFD176A906E38 /* UpcomingCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30AD37FF3D0361891996A82 /* UpcomingCalendarView.swift */; };
@@ -1106,6 +1107,7 @@
 		DF8A01C923F20C2A10CDDC33 /* ReaderPageView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ReaderPageView.swift; sourceTree = "<group>"; };
 		DF9A299B7B1F54AA1675478F /* FreshInstallKeychainPurge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FreshInstallKeychainPurge.swift; sourceTree = "<group>"; };
 		E1C750867F19DF886AA2D7E8 /* adult_hosts.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; path = adult_hosts.txt; sourceTree = "<group>"; };
+		E20D11D840B9E8CFB4E28652 /* SimklTitlePayloadTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklTitlePayloadTests.swift; sourceTree = "<group>"; };
 		E2724D13591401331A3D0EA0 /* SimklOAuth.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklOAuth.swift; sourceTree = "<group>"; };
 		E291C27758B26EC8AB9B812B /* PendingWriteQueueTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PendingWriteQueueTests.swift; sourceTree = "<group>"; };
 		E3800962BA82FB8E9A66BFEE /* SimklDecodingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklDecodingTests.swift; sourceTree = "<group>"; };
@@ -1617,6 +1619,7 @@
 				7799F7824536E9E54A2D6903 /* SimklTitleReadsTests.swift */,
 				D76D661EDB11E936A894C15B /* SimklSyncPlanTests.swift */,
 				FD7CC628C6AE93B4C0BEA616 /* SimklActivityStorageTests.swift */,
+				E20D11D840B9E8CFB4E28652 /* SimklTitlePayloadTests.swift */,
 			);
 			path = ShiroxTests;
 			sourceTree = SOURCE_ROOT;
@@ -1945,6 +1948,7 @@
 				3293B17DF9DEECB014C8C540 /* SimklTitleReadsTests.swift in Sources */,
 				49405686E3A7A09037D3891E /* SimklSyncPlanTests.swift in Sources */,
 				5BB802012A7D94DA181527C1 /* SimklActivityStorageTests.swift in Sources */,
+				409D07C4C0B2E6A5D4905655 /* SimklTitlePayloadTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
