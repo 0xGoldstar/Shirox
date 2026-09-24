@@ -143,7 +143,7 @@ struct SettingsBackupSection: BackupSection {
         "backgroundDownloadsEnabled", "defaultReverseSort", "forceLandscape",
         "librarySortAscending", "playerLiquidGlass", "rateOnFinish",
         "readerLiquidGlass", "readerPageCurl", "skipReWatchTracking", "useDefaultExtension",
-        "dataSaverEnabled"
+        "dataSaverEnabled", "gooeyRefresh"
     ]
 
     static let intKeys = [

@@ -849,7 +849,7 @@ struct LibraryView: View {
         }
         .softScrollEdges()
         .listStyle(.plain)
-        .refreshable {
+        .gooeyRefreshable {
             // An explicit user request, so it always checks — the away-time throttle is
             // for automatic checks only. On the Simkl list the reload below is that check, and
             // shows what went wrong; checking here as well would spend a second request.

@@ -768,6 +768,7 @@ struct LibrarySettingsView: View {
     @AppStorage("titleLanguagePriority") private var titlePriority = "english,romaji,native"
     @AppStorage("localAutoTrackEnabled") private var localAutoTrackEnabled = true
     @AppStorage("localScoreFormat") private var localScoreFormatRaw: String = ScoreFormat.point10Decimal.rawValue
+    @AppStorage(GooeyRefreshGeometry.settingKey) private var gooeyRefresh = true
     @State private var showClearLocalLibrary = false
 
     private var orderedLanguages: [String] {
@@ -783,6 +784,15 @@ struct LibrarySettingsView: View {
                     Label("List Order & Custom Lists", systemImage: "list.bullet.indent")
                 }
             }
+
+            #if os(iOS)
+            Section {
+                Toggle("Gooey Pull to Refresh", isOn: $gooeyRefresh)
+                    .tint(.secondary)
+            } footer: {
+                Text("Pulling to refresh stretches a drop out of the Dynamic Island that holds the spinner. Turn off for the standard spinner. Sheets always use the standard one.")
+            }
+            #endif
 
             Section("Matching") {
                 ForEach(orderedLanguages, id: \.self) { lang in

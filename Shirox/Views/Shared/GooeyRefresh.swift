@@ -1,0 +1,343 @@
+import SwiftUI
+
+extension View {
+    /// Pull to refresh with a drop that stretches out of the Dynamic Island — or the notch, or the
+    /// top edge — pinches off to hold the spinner, and melts back in when the refresh is done.
+    ///
+    /// Settings › Library › Gooey Pull to Refresh turns it off, leaving the standard `.refreshable`.
+    /// Only for full screens: in a sheet the island is nowhere near the top of the view, so sheets
+    /// keep `.refreshable`.
+    func gooeyRefreshable(action: @escaping @Sendable () async -> Void) -> some View {
+        modifier(GooeyRefreshModifier(action: action))
+    }
+}
+
+/// The drop's rules, apart from the views.
+enum GooeyRefreshGeometry {
+    static let settingKey = "gooeyRefresh"
+
+    /// What the drop grows out of.
+    enum Cutout: Equatable {
+        case dynamicIsland, notch, edge
+    }
+
+    /// Judged by the window's top inset: Dynamic Island phones report 59 pt or more in portrait,
+    /// notched ones 44–50. Landscape, older phones and iPad have nothing at the top centre.
+    static func cutout(topInset: CGFloat, isPhone: Bool, isPortrait: Bool) -> Cutout {
+        guard isPhone, isPortrait else { return .edge }
+        if topInset >= 59 { return .dynamicIsland }
+        if topInset >= 44 { return .notch }
+        return .edge
+    }
+
+    /// The shape the drop grows from, drawn a little inside the hardware (or above the screen) so
+    /// its black never shows around it.
+    static func anchorRect(for cutout: Cutout, width: CGFloat) -> CGRect {
+        switch cutout {
+        case .dynamicIsland: return CGRect(x: (width - 110) / 2, y: 14, width: 110, height: 30)
+        case .notch:         return CGRect(x: (width - 140) / 2, y: -6, width: 140, height: 30)
+        case .edge:          return CGRect(x: (width - 120) / 2, y: -34, width: 120, height: 30)
+        }
+    }
+
+    /// How far to pull before letting go refreshes.
+    static let threshold: CGFloat = 90
+
+    static func progress(pull: CGFloat) -> CGFloat {
+        max(0, pull) / threshold
+    }
+
+    static func shouldRefresh(pull: CGFloat, released: Bool, refreshing: Bool) -> Bool {
+        released && !refreshing && pull >= threshold
+    }
+
+    /// The drop's radius: small while it's still inside the anchor, full size once it hangs free.
+    static func dropRadius(progress: CGFloat, refreshing: Bool) -> CGFloat {
+        refreshing ? 18 : 8 + 10 * min(progress, 1)
+    }
+
+    /// Where the drop's centre sits: under the anchor at rest, lower as the pull grows, and — once
+    /// fully pulled, and all through the refresh — far enough below to have pinched off.
+    static func dropCenterY(anchor: CGRect, progress: CGFloat, refreshing: Bool) -> CGFloat {
+        let rest = anchor.midY
+        let hanging = anchor.maxY + 18 + 14
+        if refreshing { return hanging }
+        return rest + (hanging - rest) * min(progress, 1)
+    }
+}
+
+struct GooeyRefreshModifier: ViewModifier {
+    let action: @Sendable () async -> Void
+    @AppStorage(GooeyRefreshGeometry.settingKey) private var enabled = true
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if enabled {
+            content.background(GooeyScrollHook(action: action))
+        } else {
+            content.refreshable(action: action)
+        }
+        #else
+        content.refreshable(action: action)
+        #endif
+    }
+}
+
+#if os(iOS)
+import UIKit
+
+/// Finds the scroll view the modifier sits on and drives the drop from its pull.
+private struct GooeyScrollHook: UIViewRepresentable {
+    let action: @Sendable () async -> Void
+
+    func makeCoordinator() -> GooeyRefreshController { GooeyRefreshController(action: action) }
+
+    func makeUIView(context: Context) -> HookView {
+        let view = HookView()
+        view.onScrollView = { [weak controller = context.coordinator] scrollView in
+            controller?.attach(scrollView)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: HookView, context: Context) {
+        context.coordinator.action = action
+    }
+
+    static func dismantleUIView(_ uiView: HookView, coordinator: GooeyRefreshController) {
+        coordinator.detach()
+    }
+
+    /// A zero-size view beside the scroll view. It looks up through its ancestors for the nearest
+    /// one holding a scroll view, and takes the shallowest — the list itself, not a scroller
+    /// inside one of its rows.
+    final class HookView: UIView {
+        var onScrollView: ((UIScrollView) -> Void)?
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+        }
+
+        required init?(coder: NSCoder) { fatalError("unused") }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard window != nil else { return }
+            resolve()
+            // A List's collection view can join the hierarchy a moment after this view.
+            DispatchQueue.main.async { [weak self] in self?.resolve() }
+        }
+
+        private func resolve() {
+            var ancestor = superview
+            for _ in 0..<8 {
+                guard let current = ancestor else { return }
+                if let scrollView = Self.shallowestScrollView(in: current) {
+                    onScrollView?(scrollView)
+                    return
+                }
+                ancestor = current.superview
+            }
+        }
+
+        private static func shallowestScrollView(in root: UIView) -> UIScrollView? {
+            var queue = root.subviews
+            while !queue.isEmpty {
+                let view = queue.removeFirst()
+                if let scrollView = view as? UIScrollView, !(scrollView is UITextView) { return scrollView }
+                queue.append(contentsOf: view.subviews)
+            }
+            return nil
+        }
+    }
+}
+
+/// Watches one scroll view's pull and turns a release past the threshold into a refresh.
+@MainActor
+final class GooeyRefreshController: NSObject {
+    var action: @Sendable () async -> Void
+    private weak var scrollView: UIScrollView?
+    private var observation: NSKeyValueObservation?
+    private var crossedThreshold = false
+    private let haptic = UIImpactFeedbackGenerator(style: .medium)
+
+    init(action: @escaping @Sendable () async -> Void) {
+        self.action = action
+    }
+
+    func attach(_ scrollView: UIScrollView) {
+        guard self.scrollView !== scrollView else { return }
+        detach()
+        self.scrollView = scrollView
+        // The drop replaces the standard spinner; the two would show at once.
+        scrollView.refreshControl = nil
+        observation = scrollView.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.scrolled() }
+        }
+        scrollView.panGestureRecognizer.addTarget(self, action: #selector(panned(_:)))
+    }
+
+    func detach() {
+        observation?.invalidate()
+        observation = nil
+        scrollView?.panGestureRecognizer.removeTarget(self, action: #selector(panned(_:)))
+        scrollView = nil
+    }
+
+    /// How far past its top the content has been pulled.
+    private var pull: CGFloat {
+        guard let scrollView else { return 0 }
+        return max(0, -(scrollView.contentOffset.y + scrollView.adjustedContentInset.top))
+    }
+
+    private func scrolled() {
+        guard let scrollView, scrollView.window != nil else { return }
+        let center = GooeyRefreshCenter.shared
+        guard !center.refreshing else { return }
+        let pull = self.pull
+        if scrollView.isTracking {
+            let past = pull >= GooeyRefreshGeometry.threshold
+            if past, !crossedThreshold { haptic.impactOccurred() }
+            crossedThreshold = past
+        }
+        center.update(pull: pull, in: scrollView.window)
+    }
+
+    @objc private func panned(_ gesture: UIPanGestureRecognizer) {
+        guard gesture.state == .ended || gesture.state == .cancelled else { return }
+        crossedThreshold = false
+        let center = GooeyRefreshCenter.shared
+        guard GooeyRefreshGeometry.shouldRefresh(pull: pull, released: true, refreshing: center.refreshing) else { return }
+        center.beginRefreshing()
+        let action = self.action
+        Task { @MainActor in
+            await action()
+            center.endRefreshing()
+        }
+    }
+}
+
+/// The one drop on screen, in its own see-through window above the navigation bar — the only
+/// layer that can reach the island.
+@MainActor
+final class GooeyRefreshCenter: ObservableObject {
+    static let shared = GooeyRefreshCenter()
+
+    @Published private(set) var pull: CGFloat = 0
+    @Published private(set) var refreshing = false
+    @Published private(set) var cutout: GooeyRefreshGeometry.Cutout = .dynamicIsland
+    @Published private(set) var width: CGFloat = 0
+
+    private var window: UIWindow?
+    private var hideWork: DispatchWorkItem?
+
+    private init() {}
+
+    func update(pull: CGFloat, in hostWindow: UIWindow?) {
+        guard !refreshing else { return }
+        if pull > 0 { show(in: hostWindow) }
+        if self.pull != pull { self.pull = pull }
+        if pull == 0 { hideSoon() }
+    }
+
+    func beginRefreshing() {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { refreshing = true }
+    }
+
+    func endRefreshing() {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) {
+            refreshing = false
+            pull = 0
+        }
+        hideSoon()
+    }
+
+    private func show(in hostWindow: UIWindow?) {
+        hideWork?.cancel()
+        guard let hostWindow, let scene = hostWindow.windowScene else { return }
+        width = hostWindow.bounds.width
+        cutout = GooeyRefreshGeometry.cutout(
+            topInset: hostWindow.safeAreaInsets.top,
+            isPhone: UIDevice.current.userInterfaceIdiom == .phone,
+            isPortrait: hostWindow.bounds.height > hostWindow.bounds.width)
+        if window?.windowScene !== scene {
+            let overlay = PassthroughWindow(windowScene: scene)
+            overlay.windowLevel = .statusBar + 1
+            overlay.backgroundColor = .clear
+            let host = UIHostingController(rootView: GooeyDropOverlay(center: self))
+            host.view.backgroundColor = .clear
+            overlay.rootViewController = host
+            window = overlay
+        }
+        window?.isHidden = false
+    }
+
+    /// Hidden once the drop has melted back in, so the window never lingers over the app.
+    private func hideSoon() {
+        hideWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.pull == 0, !self.refreshing else { return }
+            self.window?.isHidden = true
+        }
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+}
+
+/// Lets every touch through to the app beneath.
+private final class PassthroughWindow: UIWindow {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
+}
+
+private struct GooeyDropOverlay: View {
+    @ObservedObject var center: GooeyRefreshCenter
+
+    var body: some View {
+        let anchor = GooeyRefreshGeometry.anchorRect(for: center.cutout, width: center.width)
+        let progress = GooeyRefreshGeometry.progress(pull: center.pull)
+        let dropY = GooeyRefreshGeometry.dropCenterY(anchor: anchor, progress: progress, refreshing: center.refreshing)
+        let radius = GooeyRefreshGeometry.dropRadius(progress: progress, refreshing: center.refreshing)
+        ZStack(alignment: .topLeading) {
+            GooeyBlob(anchor: anchor, dropY: dropY, radius: radius)
+            ProgressView()
+                .tint(.white)
+                .scaleEffect(0.7)
+                .position(x: anchor.midX, y: dropY)
+                .opacity(center.refreshing ? 1 : max(0, min(1, (progress - 0.6) / 0.4)))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+}
+
+/// The metaball: the anchor and the drop blurred together and cut at half opacity, so they join
+/// in a neck while close and part cleanly once far enough apart.
+struct GooeyBlob: View, Animatable {
+    let anchor: CGRect
+    var dropY: CGFloat
+    var radius: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(dropY, radius) }
+        set {
+            dropY = newValue.first
+            radius = newValue.second
+        }
+    }
+
+    var body: some View {
+        Canvas { context, _ in
+            context.addFilter(.alphaThreshold(min: 0.5, color: .black))
+            context.addFilter(.blur(radius: 9))
+            context.drawLayer { layer in
+                layer.fill(Path(roundedRect: anchor, cornerRadius: anchor.height / 2), with: .color(.black))
+                layer.fill(Path(ellipseIn: CGRect(x: anchor.midX - radius, y: dropY - radius,
+                                                  width: radius * 2, height: radius * 2)),
+                           with: .color(.black))
+            }
+        }
+    }
+}
+#endif
