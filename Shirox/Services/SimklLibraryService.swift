@@ -46,9 +46,30 @@ final class SimklLibraryService {
 
     private let auth = SimklAuthManager.shared
 
-    /// Last `all` timestamp seen from `/sync/activities`, so a read can be skipped entirely when
-    /// nothing has changed.
-    private let lastActivityKey = "simkl_last_activity"
+    /// Before TV and movies, anime saved Simkl's top-level `all` stamp under this key.
+    nonisolated static let legacyActivityKey = "simkl_last_activity"
+
+    nonisolated static func stampsKey(_ kind: MediaKind) -> String { "simkl_activity_\(kind.rawValue)" }
+
+    /// A kind's saved `/sync/activities` stamps.
+    nonisolated static func savedStamps(for kind: MediaKind,
+                                        in defaults: UserDefaults = .standard) -> SimklActivityStamps? {
+        if let data = defaults.data(forKey: stampsKey(kind)),
+           let stamps = try? JSONDecoder().decode(SimklActivityStamps.self, from: data) {
+            return stamps
+        }
+        // It was saved when the anime copy was last brought up to date, so a delta from it misses
+        // nothing — the first check after the update is one small read, not a full one.
+        if kind == .anime, let legacy = defaults.string(forKey: legacyActivityKey) {
+            return SimklActivityStamps(all: legacy, removed: nil)
+        }
+        return nil
+    }
+
+    nonisolated static func saveStamps(_ stamps: SimklActivityStamps, for kind: MediaKind,
+                                       in defaults: UserDefaults = .standard) {
+        defaults.set(try? JSONEncoder().encode(stamps), forKey: stampsKey(kind))
+    }
 
     private lazy var queue = SimklWriteQueue(
         storeURL: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -178,68 +199,90 @@ final class SimklLibraryService {
         return (decoded.anime ?? []).compactMap(entry(from:))
     }
 
-    /// The user's anime library, following Simkl's two-phase sync policy.
+    /// The user's library of one kind, following Simkl's two-phase sync policy.
     ///
     /// Their rules are explicit, and the penalty is not a throttle: *"Ensure you always use
     /// `date_from` to avoid overloading the API server. If you don't follow these rules, your
     /// `client_id` will be suspended."* One `client_id` serves every user of this app.
     ///
-    /// - **Phase 1** — no saved timestamp, or no cache to merge into: one full read, no
-    ///   `date_from`. Anime only, never in parallel with other types.
-    /// - **Phase 2** — everything after: `/sync/activities` first, and if it has moved, a
-    ///   `date_from` delta merged into the cached library.
+    /// One `/sync/activities` call, then — for the kind asked for and every kind already read once —
+    /// a full read the first time, a `date_from` delta when its stamp moved, and an ids-only diff
+    /// when its removals stamp moved. A kind never opened is never read.
     ///
-    /// The cache is what makes Phase 2 safe. A delta is *not* a library: returning one to a sync
+    /// The copy is what makes a delta safe. A delta is *not* a library: returning one to a sync
     /// run would look like the user had only the handful of titles that changed, and a mirror run
     /// would delete the rest.
-    func fetchLibrary() async throws -> [LibraryEntry] {
+    func fetchLibrary(_ kind: MediaKind = .anime) async throws -> [LibraryEntry] {
         guard auth.isLoggedIn else { throw ProviderError.unauthenticated }
 
-        let savedTimestamp = UserDefaults.standard.string(forKey: lastActivityKey)
+        let current = SimklTitleReads.activityStamps(from: try await get("/sync/activities"))
+        if current.isEmpty {
+            Logger.shared.log("[Simkl] /sync/activities had no anime, tv_shows or movies group", type: "Error")
+        }
 
-        // Phase 1: nothing to build on, so take the full library once.
-        guard let cached = cachedLibrary(), let savedTimestamp else {
-            Logger.shared.log(
-                "[Simkl] sync phase 1: full read, no date_from (no saved timestamp or cache yet)",
-                type: "Provider")
-            let entries = try await fullRead()
-            store(entries)
-            if let stamp = try await currentActivityStamp() {
-                UserDefaults.standard.set(stamp, forKey: lastActivityKey)
-                Logger.shared.log("[Simkl] saved activities timestamp \(stamp)", type: "Provider")
+        var failure: Error?
+        for other in MediaKind.simklKinds where other == kind || cachedLibrary(other) != nil {
+            do {
+                try await bringUpToDate(other, current: current[other])
+            } catch {
+                Logger.shared.log("[Simkl] \(other.rawValue) read failed: \(error)", type: "Error")
+                if other == kind { failure = error }
             }
-            return entries
         }
-
-        // Phase 2: ask whether anything moved before asking for anything else.
-        let stamp = try await currentActivityStamp()
-        Logger.shared.log(
-            "[Simkl] sync phase 2: /sync/activities checked — saved=\(savedTimestamp) "
-            + "current=\(stamp ?? "nil")",
-            type: "Provider")
-
-        guard let stamp, stamp != savedTimestamp else {
-            Logger.shared.log(
-                "[Simkl] nothing changed — skipping the library request entirely",
-                type: "Provider")
-            return cached
-        }
-
-        let delta = try await deltaRead(since: savedTimestamp)
-        let merged = Self.merge(delta, into: cached)
-        store(merged)
-        UserDefaults.standard.set(stamp, forKey: lastActivityKey)
-        return merged
+        if let failure { throw failure }
+        return cachedLibrary(kind) ?? []
     }
 
-    /// The library for the Library tab to show: the cached copy whenever there is one.
+    /// Brings one kind's copy up to date. Its saved stamps move only once every read it needed
+    /// has succeeded — a kind whose read fails keeps its old ones, so the next check tries again.
+    private func bringUpToDate(_ kind: MediaKind, current: SimklActivityStamps?) async throws {
+        let saved = Self.savedStamps(for: kind)
+        let copy = cachedLibrary(kind)
+        let read = SimklSyncPlan.read(saved: saved?.all, current: current?.all, hasCache: copy != nil)
+        Logger.shared.log(
+            "[Simkl] \(kind.rawValue): /sync/activities checked — saved=\(saved?.all ?? "nil") "
+            + "current=\(current?.all ?? "nil") → \(read)",
+            type: "Provider")
+
+        var entries = copy ?? []
+        switch read {
+        case .upToDate:
+            break
+        case .full:
+            entries = try await readLibrary(kind, since: nil)
+        case .delta(let since):
+            entries = Self.merge(try await readLibrary(kind, since: since), into: entries)
+        }
+
+        let checkRemovals = SimklSyncPlan.checkRemovals(saved: saved?.removed, current: current?.removed, read: read)
+        if checkRemovals {
+            let present = try await readSimklIDs(kind)
+            let kept = SimklSyncPlan.applyRemovals(keeping: present, to: entries,
+                                                   simklID: { Self.removalID(of: $0, kind: kind) })
+            Logger.shared.log("[Simkl] \(kind.rawValue): removals check dropped \(entries.count - kept.count)",
+                              type: "Provider")
+            entries = kept
+        }
+
+        if read != .upToDate || checkRemovals { store(entries, kind: kind) }
+        if let current { Self.saveStamps(current, for: kind) }
+    }
+
+    /// The id an ids-only read lists a copy entry under. A show or movie is keyed by its Simkl id;
+    /// an anime entry carries it as `LibraryEntry.id` only when Simkl sent one.
+    private static func removalID(of entry: LibraryEntry, kind: MediaKind) -> Int? {
+        kind == .anime ? simklID(of: entry) : entry.id
+    }
+
+    /// The library for the Library tab to show: the copy, once its kind has been checked.
     ///
     /// Opening the tab is not a reason to ask Simkl anything. Activity checks come out of the
     /// user's own request budget, and Simkl asks apps to check on pull to refresh or after 30
-    /// minutes away — both of which have their own paths. Only a library never read is fetched.
-    func displayLibrary() async throws -> [LibraryEntry] {
-        if let cached = cachedLibrary() { return cached }
-        return try await fetchLibrary()
+    /// minutes away — both of which have their own paths. A kind never checked is read now: a copy
+    /// holding only a title added from search is not the user's library.
+    func displayLibrary(_ kind: MediaKind = .anime) async throws -> [LibraryEntry] {
+        if let copy = cachedLibrary(kind), Self.savedStamps(for: kind) != nil { return copy }
+        return try await fetchLibrary(kind)
     }
 
     /// The one full download, taken when the user connects their account.
@@ -318,41 +361,45 @@ final class SimklLibraryService {
     }
 
     /// The same check, for a caller that shows what went wrong — the Simkl list's own pull to
-    /// refresh.
-    func checkNow(now: Date = Date()) async throws -> [LibraryEntry] {
+    /// refresh, for the kind on screen.
+    func checkNow(_ kind: MediaKind = .anime, now: Date = Date()) async throws -> [LibraryEntry] {
         UserDefaults.standard.set(now, forKey: lastCheckKey)
-        return try await fetchLibrary()
+        return try await fetchLibrary(kind)
     }
 
     /// Counts the per-write diagnostics emitted this run, so a 400-title sync logs three
     /// lines rather than four hundred.
     private var loggedWriteSamples = 0
 
-    /// Last library read, in memory for this session.
-    private var cached: [LibraryEntry]?
+    /// Last library read per kind, in memory for this session.
+    private var cached: [MediaKind: [LibraryEntry]] = [:]
 
-    /// The cached library, falling back to the on-disk snapshot.
+    /// A kind's cached library, falling back to the on-disk snapshot.
     ///
     /// Persisting matters for more than speed. `cached` alone is empty on every launch, so the
     /// Phase 1 branch was taken every single time and `date_from` was never actually used —
     /// exactly the behaviour Simkl's sync policy exists to prevent. `LibraryCacheStore` already
     /// keeps per-provider snapshots on disk, and Simkl is a `ProviderType`, so it just works.
-    private func cachedLibrary() -> [LibraryEntry]? {
-        if let cached { return cached }
-        guard Self.cacheIsCurrent(storedVersion: UserDefaults.standard.integer(forKey: cacheVersionKey))
+    func cachedLibrary(_ kind: MediaKind = .anime) -> [LibraryEntry]? {
+        if let hit = cached[kind] { return hit }
+        guard Self.cacheIsCurrent(storedVersion: UserDefaults.standard.integer(forKey: Self.cacheVersionKey(kind)))
         else { return nil }
-        let snapshot = LibraryCacheStore.shared.snapshot(provider: .simkl, mediaType: .anime)
-        cached = snapshot?.entries
-        return cached
+        let entries = LibraryCacheStore.shared.snapshot(provider: .simkl, mediaType: kind)?.entries
+        cached[kind] = entries
+        return entries
     }
 
-    private func store(_ entries: [LibraryEntry]) {
-        cached = entries
-        LibraryCacheStore.shared.save(entries: entries, provider: .simkl, mediaType: .anime)
-        UserDefaults.standard.set(Self.cacheVersion, forKey: cacheVersionKey)
+    func store(_ entries: [LibraryEntry], kind: MediaKind = .anime) {
+        cached[kind] = entries
+        LibraryCacheStore.shared.save(entries: entries, provider: .simkl, mediaType: kind)
+        UserDefaults.standard.set(Self.cacheVersion, forKey: Self.cacheVersionKey(kind))
     }
 
-    private let cacheVersionKey = "simkl_cache_version"
+    /// Per kind: a Shows copy saved at the current version must not vouch for an anime copy saved
+    /// before posters were kept.
+    nonisolated static func cacheVersionKey(_ kind: MediaKind) -> String {
+        kind == .anime ? "simkl_cache_version" : "simkl_cache_version_\(kind.rawValue)"
+    }
 
     /// Bumped when a read starts keeping a field it used to drop — 2: poster, year and type. A
     /// cache written before has that field empty on every title, and a delta read only refreshes
@@ -365,15 +412,20 @@ final class SimklLibraryService {
 
     /// Drops the cache and the saved timestamp, forcing the next read back to Phase 1.
     func invalidateCache() {
-        cached = nil
-        UserDefaults.standard.removeObject(forKey: lastActivityKey)
+        cached = [:]
+        UserDefaults.standard.removeObject(forKey: Self.legacyActivityKey)
+        for kind in MediaKind.simklKinds {
+            UserDefaults.standard.removeObject(forKey: Self.stampsKey(kind))
+        }
     }
 
     /// For a sign-in as a different Simkl account than this device last held. Its queued writes,
     /// cached library and activity stamp all describe the other account.
     func resetForAccountChange() {
         queue.discardAll()
-        LibraryCacheStore.shared.save(entries: [], provider: .simkl, mediaType: .anime)
+        for kind in MediaKind.simklKinds {
+            LibraryCacheStore.shared.save(entries: [], provider: .simkl, mediaType: kind)
+        }
         invalidateCache()
     }
 
@@ -468,25 +520,36 @@ final class SimklLibraryService {
         return true
     }
 
-    private func fullRead() async throws -> [LibraryEntry] {
-        let data = try await get(Self.libraryPath,
-                                 query: [URLQueryItem(name: "extended", value: Self.extendedMode)])
-        let entries = try Self.decodeLibrary(from: data)
-        logRead(entries, phase: "full")
+    /// One kind's list. TV asks for every show's recorded episodes, completed and dropped included:
+    /// the watched ticks come from them.
+    private func readLibrary(_ kind: MediaKind, since: String?) async throws -> [LibraryEntry] {
+        var query = [URLQueryItem(name: "extended", value: Self.extendedMode)]
+        if kind == .tv { query.append(URLQueryItem(name: "include_all_episodes", value: "original")) }
+        // Passed back exactly as returned, which Simkl's guide calls out specifically.
+        if let since { query.insert(URLQueryItem(name: "date_from", value: since), at: 0) }
+        let data = try await get(Self.listPath(for: kind), query: query)
+        let entries: [LibraryEntry]
+        switch kind {
+        case .tv:    entries = try SimklTitleReads.decodeShows(from: data)
+        case .movie: entries = try SimklTitleReads.decodeMovies(from: data)
+        default:     entries = try Self.decodeLibrary(from: data)
+        }
+        logRead(entries, phase: "\(kind.rawValue) \(since == nil ? "full" : "delta")")
         return entries
     }
 
-    /// The anime category, not the combined `/sync/all-items/` endpoint.
-    ///
-    /// Simkl's Phase 2 guidance points at the combined endpoint, and their developer added the
-    /// qualifier: *"if you have only anime, you can add sync /anime/ category … whatever you
-    /// support, if both shows and movies then it's correct."*
-    ///
-    /// Only anime reaches Simkl from here. The library comes from AniList and MyAnimeList, which
-    /// are anime trackers — what the app can *play* is a separate matter and none of it syncs.
-    /// The delta read used the combined endpoint and then discarded every shows and movies entry
-    /// it had just downloaded.
-    static let libraryPath = "/sync/all-items/anime/all"
+    /// Just the Simkl ids of one kind — the cheapest read, for spotting deletions.
+    private func readSimklIDs(_ kind: MediaKind) async throws -> Set<Int> {
+        let data = try await get(Self.listPath(for: kind),
+                                 query: [URLQueryItem(name: "extended", value: "simkl_ids_only")])
+        return try SimklTitleReads.decodeSimklIDs(from: data)
+    }
+
+    /// One kind's category, not the combined `/sync/all-items/` endpoint: a check reads only the
+    /// kinds that moved, and only the kinds the Library shows.
+    nonisolated static func listPath(for kind: MediaKind) -> String {
+        "/sync/all-items/\(kind.simklListPath)/all"
+    }
 
     /// `ids_only` looked like the lightweight choice and is a trap: it returns **only** ids,
     /// stripping `status`, `watched_episodes_count` and `user_rating`. Every entry then read back
@@ -511,27 +574,6 @@ final class SimklLibraryService {
         Logger.shared.log(
             "[Simkl] \(phase) read: \(entries.count) entries, \(withProgress) with progress > 0 — \(byStatus)",
             type: "Provider")
-    }
-
-    /// Only what changed, per Simkl's Phase 2 rule. The timestamp is passed back exactly as it
-    /// was returned, which their guide calls out specifically.
-    private func deltaRead(since timestamp: String) async throws -> [LibraryEntry] {
-        Logger.shared.log("[Simkl] delta read using date_from=\(timestamp)", type: "Provider")
-        let data = try await get(Self.libraryPath, query: [
-            URLQueryItem(name: "date_from", value: timestamp),
-            URLQueryItem(name: "extended", value: Self.extendedMode),
-        ])
-        let entries = try Self.decodeLibrary(from: data)
-        logRead(entries, phase: "delta")
-        return entries
-    }
-
-    /// The `all` timestamp from `/sync/activities`, or nil when it cannot be read.
-    private func currentActivityStamp() async throws -> String? {
-        let data = try await get("/sync/activities")
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        // Simkl nests the anime timestamps; `all` is the cheap top-level "anything moved" check.
-        return json["all"] as? String
     }
 
     /// Applies a delta over a cached library: changed titles replace their previous entry, new
