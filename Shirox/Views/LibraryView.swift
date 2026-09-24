@@ -38,6 +38,7 @@ struct LibraryView: View {
     private var dualSync: Bool { SyncTargets.mirrors(.anilist, .mal, in: SyncTargets.decode(syncTargetsRaw)) }
     @State private var selectedGenres: Set<String> = []
     @State private var selectedEntry: LibraryEntry? = nil
+    @State private var simklSearch: SimklSearchRequest?
     @State private var pendingEntry: LibraryEntry? = nil
     @State private var showProviderPicker = false
     @State private var showManageCollections = false
@@ -119,7 +120,7 @@ struct LibraryView: View {
     private var orderedStatuses: [MediaListStatus] {
         let saved = statusOrderRaw.components(separatedBy: ",").compactMap(MediaListStatus.init(rawValue:))
         let missing = MediaListStatus.allCases.filter { !saved.contains($0) }
-        return vm.source.statuses(in: saved + missing)
+        return vm.source.statuses(in: saved + missing, for: vm.mediaType)
     }
 
     private var availableGenres: [String] {
@@ -278,6 +279,13 @@ struct LibraryView: View {
         if malAuth.isLoggedIn { signedIn.insert(.mal) }
         if simklAuth.isLoggedIn { signedIn.insert(.simkl) }
         return .afterSignOut(primary: providerManager.primary?.providerType, signedIn: signedIn)
+    }
+
+    /// The Simkl search the Shows and Movies views offer for what's in the search bar.
+    private var simklSearchRequest: SimklSearchRequest? {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard vm.source == .simkl, vm.mediaType == .tv || vm.mediaType == .movie, !query.isEmpty else { return nil }
+        return SimklSearchRequest(query: query, kind: vm.mediaType)
     }
 
     private func signIn(to type: ProviderType) {
@@ -464,13 +472,12 @@ struct LibraryView: View {
         }
     }
 
-    /// Anime | Manga capsule pills, matching `LibrarySourceSwitcher`'s pill style.
+    /// The source's kinds as capsule pills — Anime | Manga, or Anime | Shows | Movies on Simkl —
+    /// matching `LibrarySourceSwitcher`'s pill style.
     @ViewBuilder private var mediaTypeSegment: some View {
         HStack(spacing: 8) {
-            mediaTypePill(title: "Anime", systemImage: "tv", kind: .anime)
-            // Simkl's library here is anime only.
-            if vm.source.mediaKinds.contains(.manga) {
-                mediaTypePill(title: "Manga", systemImage: "book", kind: .manga)
+            ForEach(vm.source.mediaKinds, id: \.self) { kind in
+                mediaTypePill(title: kind.pillTitle, systemImage: kind.pillIcon, kind: kind)
             }
             Spacer()
         }
@@ -622,7 +629,7 @@ struct LibraryView: View {
     }
 
     private var emptyStateDescription: String {
-        let noun = vm.mediaType == .manga ? "manga" : "anime"
+        let noun = vm.mediaType.noun
         if !searchText.isEmpty {
             return "No \(noun) matching \"\(searchText)\"."
         }
@@ -657,21 +664,42 @@ struct LibraryView: View {
         .listRowBackground(Color.clear)
         #if !os(tvOS)
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            Button {
-                Task {
-                    await vm.update(
-                        entry: entry,
-                        status: entry.status,
-                        progress: entry.progress + 1,
-                        // Pass the score in the active format so the canonical
-                        // value is preserved (not reinterpreted in a new scale).
-                        score: entry.displayScore(in: scoreFormat)
-                    )
+            if entry.media.simklTitleKind == .movie {
+                if entry.status != .completed {
+                    Button {
+                        Task {
+                            await vm.update(entry: entry, status: .completed, progress: entry.progress,
+                                            score: entry.score)
+                        }
+                    } label: {
+                        Label("Watched", systemImage: "checkmark.circle.fill")
+                    }
+                    .tint(.green)
                 }
-            } label: {
-                Label(entry.media.isManga ? "+1 CH" : "+1 EP", systemImage: "plus.circle.fill")
+            } else if entry.media.simklTitleKind == .tv {
+                Button {
+                    Task { await markNextEpisode(entry) }
+                } label: {
+                    Label("+1 EP", systemImage: "plus.circle.fill")
+                }
+                .tint(.green)
+            } else {
+                Button {
+                    Task {
+                        await vm.update(
+                            entry: entry,
+                            status: entry.status,
+                            progress: entry.progress + 1,
+                            // Pass the score in the active format so the canonical
+                            // value is preserved (not reinterpreted in a new scale).
+                            score: entry.displayScore(in: scoreFormat)
+                        )
+                    }
+                } label: {
+                    Label(entry.media.isManga ? "+1 CH" : "+1 EP", systemImage: "plus.circle.fill")
+                }
+                .tint(.green)
             }
-            .tint(.green)
         }
         #endif
     }
@@ -708,6 +736,9 @@ struct LibraryView: View {
                 ),
                 moduleId: source.moduleId
             )
+        } else if let kind = entry.media.simklTitleKind {
+            SimklTitlePage(simklID: entry.id, kind: kind, seedTitle: entry.media.title.displayTitle,
+                           seedPosterURL: entry.media.coverImage.large)
         } else if entry.media.provider == .simkl {
             SimklLibraryEntryPage(entry: entry)
         } else {
@@ -734,6 +765,35 @@ struct LibraryView: View {
             ToastManager.shared.show(message: "File moved or unavailable — remove this item", type: .error)
         }
         #endif
+    }
+
+    /// A show's swipe: the episode after the furthest one watched, rolling into the next season.
+    private func markNextEpisode(_ entry: LibraryEntry) async {
+        guard !SimklAuthManager.shared.needsReauthorization else {
+            SimklNotice.failed(SimklError.readOnly)
+            return
+        }
+        do {
+            let episodes = try await SimklCatalog.loadEpisodes(simklID: entry.id)
+            let watched = SimklEpisodePlanner.watched(status: entry.status, recorded: entry.watchedEpisodes,
+                                                      episodes: episodes)
+            guard let next = SimklEpisodePlanner.next(after: watched, in: episodes) else {
+                SimklNotice.info("No aired episode after the last one watched.")
+                return
+            }
+            var newWatched = watched
+            newWatched.insert(next)
+            let delivered = try await SimklLibraryService.shared.saveTitle(
+                entry.id, kind: .tv,
+                status: SimklEpisodePlanner.statusAfterTick(current: entry.status, marking: true),
+                score: entry.score,
+                episodes: SimklEpisodePlan(marks: [SimklSeasonMark(number: next.season, episodes: [next.episode])],
+                                           unmarks: [], watched: newWatched))
+            if !delivered { SimklNotice.queued() }
+        } catch {
+            SimklNotice.failed(error)
+        }
+        await vm.load()
     }
 
     private var entriesList: some View {
@@ -767,8 +827,24 @@ struct LibraryView: View {
                     // into a tap target for the whole row.
                     .buttonStyle(.borderless)
             }
+            if let request = simklSearchRequest {
+                Button {
+                    simklSearch = request
+                } label: {
+                    Label("Search Simkl for “\(request.query)”", systemImage: "magnifyingglass")
+                }
+                .listRowSeparator(.hidden)
+            }
             #else
             entryRows
+            if let request = simklSearchRequest {
+                Button {
+                    simklSearch = request
+                } label: {
+                    Label("Search Simkl for “\(request.query)”", systemImage: "magnifyingglass")
+                }
+                .listRowSeparator(.hidden)
+            }
             #endif
         }
         .softScrollEdges()
@@ -831,6 +907,10 @@ struct LibraryView: View {
             if vm.isLoading || vm.error != nil || displayedEntries.isEmpty {
                 statusContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if let request = simklSearchRequest {
+                    Button("Search Simkl for “\(request.query)”") { simklSearch = request }
+                        .padding(.bottom, 16)
+                }
             } else {
                 entriesList
             }
@@ -880,68 +960,75 @@ struct LibraryView: View {
     private var libraryContent: some View {
         libraryContentBase
         .adaptiveSheet(item: $selectedEntry) { entry in
-            LibraryEntryEditSheet(
-                entry: entry,
-                media: entry.media,
-                scoreFormatOverride: vm.isLocal ? scoreFormat : nil,
-                onSave: { status, progress, score in
-                    let onSimkl = vm.source == .simkl
-                    if status == .completed {
-                        ContinueWatchingManager.shared.resetProgress(
-                            aniListID: entry.media.id, moduleId: nil, mediaTitle: entry.media.title.searchTitle
-                        )
-                    }
-                    Task {
-                        await vm.update(entry: entry, status: status, progress: progress, score: score)
-                        if onSimkl {
-                            await SimklLibraryMirror.edit(entry, status: status, progress: progress, score: score)
-                        } else if !vm.isLocal && vm.mediaType != .manga {
-                            // The other services' ids for this title, with the user's tracking links applied.
-                            let linked = await TrackingLinkResolver.resolve(
-                                aniListID: activeProviderType == .anilist ? entry.media.id : nil,
-                                malID: activeProviderType == .mal ? entry.media.id : entry.media.idMal,
-                                moduleKey: nil)
-                            if dualSync && anilistAuth.isLoggedIn && malAuth.isLoggedIn {
-                                if activeProviderType == .anilist, let idMal = linked.mal {
-                                    try? await MALProvider.shared.updateEntry(mediaId: idMal, status: status, progress: progress, score: score)
-                                } else if activeProviderType == .mal, let aniListId = linked.anilist {
-                                    try? await AniListProvider.shared.updateEntry(mediaId: aniListId, status: status, progress: progress, score: score)
+            if let kind = entry.media.simklTitleKind {
+                SimklTitleEditSheet(entry: entry, kind: kind) { Task { await vm.load() } }
+            } else {
+                LibraryEntryEditSheet(
+                    entry: entry,
+                    media: entry.media,
+                    scoreFormatOverride: vm.isLocal ? scoreFormat : nil,
+                    onSave: { status, progress, score in
+                        let onSimkl = vm.source == .simkl
+                        if status == .completed {
+                            ContinueWatchingManager.shared.resetProgress(
+                                aniListID: entry.media.id, moduleId: nil, mediaTitle: entry.media.title.searchTitle
+                            )
+                        }
+                        Task {
+                            await vm.update(entry: entry, status: status, progress: progress, score: score)
+                            if onSimkl {
+                                await SimklLibraryMirror.edit(entry, status: status, progress: progress, score: score)
+                            } else if !vm.isLocal && vm.mediaType != .manga {
+                                // The other services' ids for this title, with the user's tracking links applied.
+                                let linked = await TrackingLinkResolver.resolve(
+                                    aniListID: activeProviderType == .anilist ? entry.media.id : nil,
+                                    malID: activeProviderType == .mal ? entry.media.id : entry.media.idMal,
+                                    moduleKey: nil)
+                                if dualSync && anilistAuth.isLoggedIn && malAuth.isLoggedIn {
+                                    if activeProviderType == .anilist, let idMal = linked.mal {
+                                        try? await MALProvider.shared.updateEntry(mediaId: idMal, status: status, progress: progress, score: score)
+                                    } else if activeProviderType == .mal, let aniListId = linked.anilist {
+                                        try? await AniListProvider.shared.updateEntry(mediaId: aniListId, status: status, progress: progress, score: score)
+                                    }
                                 }
+                                let editedOn: LibrarySide = activeProviderType == .mal ? .mal : .anilist
+                                await SimklEditMirror.edit(
+                                    malId: linked.mal, anilistId: linked.anilist, simklId: linked.simkl,
+                                    editedOn: editedOn, status: status, progress: progress, score: score,
+                                    format: scoreFormat, title: entry.media.title.displayTitle)
                             }
-                            let editedOn: LibrarySide = activeProviderType == .mal ? .mal : .anilist
-                            await SimklEditMirror.edit(
-                                malId: linked.mal, anilistId: linked.anilist, simklId: linked.simkl,
-                                editedOn: editedOn, status: status, progress: progress, score: score,
-                                format: scoreFormat, title: entry.media.title.displayTitle)
+                        }
+                    },
+                    onDelete: {
+                        let onSimkl = vm.source == .simkl
+                        Task {
+                            await vm.delete(entry: entry)
+                            if onSimkl {
+                                await SimklLibraryMirror.delete(entry)
+                            } else if !vm.isLocal && vm.mediaType != .manga {
+                                let linked = await TrackingLinkResolver.resolve(
+                                    aniListID: activeProviderType == .anilist ? entry.media.id : nil,
+                                    malID: activeProviderType == .mal ? entry.media.id : entry.media.idMal,
+                                    moduleKey: nil)
+                                if dualSync && anilistAuth.isLoggedIn && malAuth.isLoggedIn {
+                                    if activeProviderType == .anilist, let idMal = linked.mal {
+                                        try? await MALProvider.shared.deleteEntry(entryId: idMal)
+                                    } else if activeProviderType == .mal, let aniListId = linked.anilist,
+                                              let aniListEntry = try? await AniListProvider.shared.fetchEntry(mediaId: aniListId) {
+                                        try? await AniListProvider.shared.deleteEntry(entryId: aniListEntry.id)
+                                    }
+                                }
+                                let editedOn: LibrarySide = activeProviderType == .mal ? .mal : .anilist
+                                await SimklEditMirror.delete(
+                                    malId: linked.mal, anilistId: linked.anilist, simklId: linked.simkl, editedOn: editedOn)
+                            }
                         }
                     }
-                },
-                onDelete: {
-                    let onSimkl = vm.source == .simkl
-                    Task {
-                        await vm.delete(entry: entry)
-                        if onSimkl {
-                            await SimklLibraryMirror.delete(entry)
-                        } else if !vm.isLocal && vm.mediaType != .manga {
-                            let linked = await TrackingLinkResolver.resolve(
-                                aniListID: activeProviderType == .anilist ? entry.media.id : nil,
-                                malID: activeProviderType == .mal ? entry.media.id : entry.media.idMal,
-                                moduleKey: nil)
-                            if dualSync && anilistAuth.isLoggedIn && malAuth.isLoggedIn {
-                                if activeProviderType == .anilist, let idMal = linked.mal {
-                                    try? await MALProvider.shared.deleteEntry(entryId: idMal)
-                                } else if activeProviderType == .mal, let aniListId = linked.anilist,
-                                          let aniListEntry = try? await AniListProvider.shared.fetchEntry(mediaId: aniListId) {
-                                    try? await AniListProvider.shared.deleteEntry(entryId: aniListEntry.id)
-                                }
-                            }
-                            let editedOn: LibrarySide = activeProviderType == .mal ? .mal : .anilist
-                            await SimklEditMirror.delete(
-                                malId: linked.mal, anilistId: linked.anilist, simklId: linked.simkl, editedOn: editedOn)
-                        }
-                    }
-                }
-            )
+                )
+            }
+        }
+        .adaptiveSheet(item: $simklSearch) { request in
+            SimklSearchSheet(kind: request.kind, query: request.query) { Task { await vm.load() } }
         }
         .confirmationDialog("Edit on which service?", isPresented: $showProviderPicker, titleVisibility: .visible) {
             Button("Edit on AniList") {
@@ -1037,6 +1124,43 @@ struct LibraryView: View {
         }
         .adaptiveSheet(isPresented: $showManageCollections) {
             ManageCollectionsView()
+        }
+    }
+}
+
+/// A Simkl search the user asked for from the Library's search bar.
+private struct SimklSearchRequest: Identifiable {
+    let query: String
+    let kind: MediaKind
+    var id: String { "\(kind.rawValue)|\(query)" }
+}
+
+private extension MediaKind {
+    var pillTitle: String {
+        switch self {
+        case .anime: return "Anime"
+        case .manga: return "Manga"
+        case .tv:    return "Shows"
+        case .movie: return "Movies"
+        }
+    }
+
+    var pillIcon: String {
+        switch self {
+        case .anime: return "tv"
+        case .manga: return "book"
+        case .tv:    return "play.tv"
+        case .movie: return "film"
+        }
+    }
+
+    /// "Add shows to Watching on Simkl."
+    var noun: String {
+        switch self {
+        case .anime: return "anime"
+        case .manga: return "manga"
+        case .tv:    return "shows"
+        case .movie: return "movies"
         }
     }
 }
@@ -1151,6 +1275,9 @@ private struct LibraryRowView: View {
     }
 
     private var progressLabel: String {
+        if let kind = entry.media.simklTitleKind {
+            return kind == .movie ? SimklTitleLabels.movieLine(entry.media) : SimklTitleLabels.showProgress(entry)
+        }
         if entry.media.isManga {
             if let total = entry.media.episodes {
                 return "\(entry.progress) / \(total) ch"
