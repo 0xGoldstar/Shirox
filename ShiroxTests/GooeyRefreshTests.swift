@@ -32,6 +32,16 @@ final class GooeyRefreshTests: XCTestCase {
         XCTAssertNil(Geometry.rim(for: .light))
     }
 
+    /// Only what hangs out of the island is outlined; round the anchor the glow showed over the
+    /// island's top edge.
+    func testTheRimStartsBelowTheAnchor() {
+        let anchor = Geometry.anchorRect(for: .dynamicIsland, width: 402)
+        XCTAssertGreaterThan(Geometry.rimTop(anchor: anchor), anchor.maxY + Geometry.rimRadius)
+        let hanging = Geometry.dropCenterY(anchor: anchor, progress: 1, refreshing: true)
+        XCTAssertLessThan(Geometry.rimTop(anchor: anchor), hanging - Geometry.dropRadius(progress: 1, refreshing: true),
+                          "The hanging drop is outlined all the way round")
+    }
+
     func testTheDropHangsFurtherAsThePullGrows() {
         let anchor = Geometry.anchorRect(for: .dynamicIsland, width: 402)
         let rest = Geometry.dropCenterY(anchor: anchor, progress: 0, refreshing: false)

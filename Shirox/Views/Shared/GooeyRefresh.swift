@@ -55,8 +55,14 @@ enum GooeyRefreshGeometry {
     /// In dark mode the black drop vanishes into a black screen, so it gets a grey rim, as iOS
     /// gives the Dynamic Island when it opens over black — a glow around the finished shape, so
     /// it follows the neck and parts with the drop.
-    static let rimColor = Color(white: 0.9)
+    static let rimColor = Color(white: 0.5)
     static let rimRadius: CGFloat = 1.5
+
+    /// The rim starts this far below the anchor, so it only outlines what hangs out of the
+    /// island: drawn round the anchor too, its glow showed over the island's top edge.
+    static func rimTop(anchor: CGRect) -> CGFloat {
+        anchor.maxY + rimRadius * 2
+    }
 
     /// Light mode needs none: black on a light screen shows by itself.
     static func rim(for scheme: ColorScheme) -> Color? {
@@ -362,17 +368,28 @@ struct GooeyBlob: View, Animatable {
     }
 
     var body: some View {
-        Canvas { context, _ in
-            // Filters run last-added first: blur, then the cut, then the rim around what's left.
-            if let rim { context.addFilter(.shadow(color: rim, radius: GooeyRefreshGeometry.rimRadius)) }
-            context.addFilter(.alphaThreshold(min: 0.5, color: .black))
-            context.addFilter(.blur(radius: 9))
-            context.drawLayer { layer in
-                layer.fill(Path(roundedRect: anchor, cornerRadius: anchor.height / 2), with: .color(.black))
-                layer.fill(Path(ellipseIn: CGRect(x: anchor.midX - radius, y: dropY - radius,
-                                                  width: radius * 2, height: radius * 2)),
-                           with: .color(.black))
+        Canvas { context, size in
+            if let rim {
+                var rimmed = context
+                let top = GooeyRefreshGeometry.rimTop(anchor: anchor)
+                rimmed.clip(to: Path(CGRect(x: 0, y: top, width: size.width, height: max(0, size.height - top))))
+                // Filters run last-added first: blur, then the cut, then the rim around what's left.
+                rimmed.addFilter(.shadow(color: rim, radius: GooeyRefreshGeometry.rimRadius))
+                metaball(in: rimmed)
             }
+            metaball(in: context)
+        }
+    }
+
+    private func metaball(in context: GraphicsContext) {
+        var context = context
+        context.addFilter(.alphaThreshold(min: 0.5, color: .black))
+        context.addFilter(.blur(radius: 9))
+        context.drawLayer { layer in
+            layer.fill(Path(roundedRect: anchor, cornerRadius: anchor.height / 2), with: .color(.black))
+            layer.fill(Path(ellipseIn: CGRect(x: anchor.midX - radius, y: dropY - radius,
+                                              width: radius * 2, height: radius * 2)),
+                       with: .color(.black))
         }
     }
 }
