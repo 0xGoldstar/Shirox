@@ -7,9 +7,11 @@ import Combine
 private final class ModuleStreamVMStore: ObservableObject {
     var viewModels: [String: ModuleStreamRowViewModel] = [:]
 
-    func get(for module: ModuleDefinition, mediaId: Int?, animeTitle: String, episodeNumber: Int) -> ModuleStreamRowViewModel {
+    func get(for module: ModuleDefinition, mediaId: Int?, animeTitle: String, episodeNumber: Int,
+             seasonNumbering: ModuleSeasonNumbering? = nil) -> ModuleStreamRowViewModel {
         if let vm = viewModels[module.id] { return vm }
-        let vm = ModuleStreamRowViewModel(module: module, mediaId: mediaId, animeTitle: animeTitle, targetEpisodeNumber: episodeNumber)
+        let vm = ModuleStreamRowViewModel(module: module, mediaId: mediaId, animeTitle: animeTitle,
+                                          targetEpisodeNumber: episodeNumber, seasonNumbering: seasonNumbering)
         viewModels[module.id] = vm
         return vm
     }
@@ -21,6 +23,8 @@ struct ModuleStreamPickerView: View {
     let mediaId: Int?
     let animeTitle: String
     let episodeNumber: Int
+    /// A Simkl season's numbering. Nil everywhere else, which leaves the picker exactly as it was.
+    var seasonNumbering: ModuleSeasonNumbering? = nil
     let onDismiss: () -> Void
     let onStreamsLoaded: ([StreamResult], StreamResult?, String?, Int?, String?) -> Void  // allStreams, selectedStream, showHref, availableCount, episodeHref
 
@@ -44,7 +48,8 @@ struct ModuleStreamPickerView: View {
                         mediaId: mediaId,
                         animeTitle: animeTitle,
                         episodeNumber: episodeNumber,
-                        rowVm: vmStore.get(for: module, mediaId: mediaId, animeTitle: animeTitle, episodeNumber: episodeNumber)
+                        rowVm: vmStore.get(for: module, mediaId: mediaId, animeTitle: animeTitle,
+                                           episodeNumber: episodeNumber, seasonNumbering: seasonNumbering)
                     ) { streams, selectedStream, showHref, availableCount, episodeHref in
                         moduleManager.selectModule(module)
                         onDismiss()
@@ -114,16 +119,19 @@ private final class ModuleStreamRowViewModel: ObservableObject {
     let mediaId: Int?
     let originalAnimeTitle: String
     let targetEpisodeNumber: Int
+    let seasonNumbering: ModuleSeasonNumbering?
 
     private var runner: ModuleJSRunner?
     private var currentTask: Task<Void, Never>?
     private var currentSearchResultHref: String?  // Track active search result for manual episode selection
 
-    init(module: ModuleDefinition, mediaId: Int?, animeTitle: String, targetEpisodeNumber: Int) {
+    init(module: ModuleDefinition, mediaId: Int?, animeTitle: String, targetEpisodeNumber: Int,
+         seasonNumbering: ModuleSeasonNumbering? = nil) {
         self.module = module
         self.mediaId = mediaId
         self.originalAnimeTitle = animeTitle
         self.targetEpisodeNumber = targetEpisodeNumber
+        self.seasonNumbering = seasonNumbering
         
         // Load custom alias if available, otherwise fallback to original title
         if let alias = ModuleSearchAliasManager.shared.getAlias(mediaId: mediaId, animeTitle: animeTitle, moduleId: module.id) {
@@ -192,6 +200,13 @@ private final class ModuleStreamRowViewModel: ObservableObject {
         return await SeasonChainMapper.shared.resolveOffset(anchorAniListID: mediaId, anchorMALID: nil) ?? 0
     }
 
+    /// The offset `matchEpisode` looks episodes up by. A Simkl season supplies its own, used only
+    /// on a page listing every season; everything else keeps the AniList season chain's.
+    private func episodeOffset(listCount: Int) async -> Int {
+        if let seasonNumbering { return seasonNumbering.offset(forListCount: listCount) }
+        return await seasonOffset()
+    }
+
     // Fast path: skip search entirely, go straight to episodes using the saved href.
     // Falls back to full search if the href no longer works.
     func findFast(savedHref: String) async {
@@ -212,7 +227,7 @@ private final class ModuleStreamRowViewModel: ObservableObject {
             availableCount = episodes.count
             currentSearchResultHref = savedHref
 
-            if let matched = matchEpisode(from: episodes, target: targetEpisodeNumber, seasonOffset: await seasonOffset()) {
+            if let matched = matchEpisode(from: episodes, target: targetEpisodeNumber, seasonOffset: await episodeOffset(listCount: episodes.count)) {
                 state = .loadingStreams
                 selectedEpisodeHref = savedHref
                 selectedEpisodeActualHref = matched.href
@@ -286,7 +301,7 @@ private final class ModuleStreamRowViewModel: ObservableObject {
             }
             availableCount = episodes.count
 
-            if let matched = matchEpisode(from: episodes, target: targetEpisodeNumber, seasonOffset: await seasonOffset()) {
+            if let matched = matchEpisode(from: episodes, target: targetEpisodeNumber, seasonOffset: await episodeOffset(listCount: episodes.count)) {
                 state = .loadingStreams
                 selectedEpisodeHref = item.href
                 selectedEpisodeActualHref = matched.href
