@@ -108,7 +108,7 @@ struct ProfileSocialView: View {
         }
         .softScrollEdges()
         .listStyle(.plain)
-        .refreshable { await vm.loadSocial(userId: userId, type: selectedSocial) }
+        .circleRefreshable { await vm.loadSocial(userId: userId, type: selectedSocial) }
         .task { await vm.loadSocial(userId: userId, type: selectedSocial) }
         .adaptiveSheet(item: $targetUserId) { uid in
             ProfileView(userId: uid, username: targetUsername ?? "Profile", avatarURL: nil)

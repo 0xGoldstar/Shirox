@@ -145,7 +145,7 @@ struct NotificationsView: View {
                 .padding(.vertical, 10)
             }
             .softScrollEdges()
-            .refreshable { await vm.loadNotifications() }
+            .circleRefreshable { await vm.loadNotifications() }
         }
     }
 

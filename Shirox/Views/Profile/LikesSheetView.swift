@@ -65,7 +65,7 @@ struct LikesSheetView: View {
                     }
                     .softScrollEdges()
                     .listStyle(.plain)
-                    .refreshable { await load() }
+                    .circleRefreshable { await load() }
                 }
             }
         }

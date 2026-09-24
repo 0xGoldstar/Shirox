@@ -189,7 +189,7 @@ struct ProfileActivityView: View {
             }
             .softScrollEdges()
             .listStyle(.plain)
-            .refreshable { await vm.loadActivity(userId: userId) }
+            .circleRefreshable { await vm.loadActivity(userId: userId) }
         }
     }
 

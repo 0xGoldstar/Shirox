@@ -790,7 +790,7 @@ struct LibrarySettingsView: View {
                 Toggle("Gooey Pull to Refresh", isOn: $gooeyRefresh)
                     .tint(.secondary)
             } footer: {
-                Text("Pulling to refresh stretches a drop out of the Dynamic Island that holds the spinner. Turn off for the standard spinner. Sheets always use the standard one.")
+                Text("Pulling to refresh stretches a drop out of the Dynamic Island that holds the spinner. Turn off for a frosted circle instead, as sheets always use.")
             }
             #endif
 

@@ -32,6 +32,7 @@ struct HomeView: View {
 
     @State private var isRefreshing = false
     @State private var leadingInset: CGFloat = 0
+    @AppStorage(GooeyRefreshGeometry.settingKey) private var gooeyRefresh = true
 
     private func performRefresh() async {
         guard !isRefreshing else { return }
@@ -73,7 +74,8 @@ struct HomeView: View {
                                 FeaturedCarousel(
                                     items: vm.trending,
                                     isRefreshing: isRefreshing,
-                                    onRefresh: performRefresh,
+                                    // With the drop off, the hero's own circle refreshes.
+                                    onRefresh: gooeyRefresh ? nil : performRefresh,
                                     leadingInset: leadingInset
                                 )
                             }
@@ -109,6 +111,7 @@ struct HomeView: View {
                     .softScrollEdges(vm.trending.isEmpty ? .all : [.bottom, .leading, .trailing])
                     .hideScrollEdgeEffect(vm.trending.isEmpty ? [] : .top)
                     .coordinateSpace(name: "homeScroll")
+                    .gooeyRefreshable(fallback: .custom) { await performRefresh() }
                     // Only the hero is allowed under the status bar — bleeding its banner up
                     // there is the point of it. Without one, this same modifier slid whatever
                     // row happened to be first up under the clock, which is what a title row
@@ -225,7 +228,7 @@ private struct FeaturedCarousel: View {
                 let scale = isPullingDown ? (1.0 + (stretchAmount / max(baseHeight, 1))) : 1.0
 
                 let threshold: CGFloat = 70
-                let progress = min(1.0, max(0.0, (minY - 10) / threshold))
+                let progress = RefreshCircleGeometry.progress(pull: minY)
 
                 let isWideCard = isIPad && geo.size.width > baseHeight
 
@@ -307,38 +310,17 @@ private struct FeaturedCarousel: View {
                 }
                 .frame(width: geo.size.width, height: baseHeight)
                 .overlay(alignment: .top) {
-                    // Minimalistic Pull to Refresh Indicator
-                    if isPullingDown || isRefreshing {
+                    // Pull to refresh with the gooey drop off; the drop, when on, comes from the
+                    // island instead.
+                    if onRefresh != nil, isPullingDown || isRefreshing {
                         let topPadding: CGFloat = 52
                         let slideOffset = isRefreshing ? (topPadding + 12) : (topPadding + min(minY * 0.42, 36))
-
-                        ZStack {
-                            Circle()
-                                .fill(.ultraThinMaterial)
-                                .frame(width: 36, height: 36)
-                                .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
-                                .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
-
-                            if isRefreshing {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "arrow.down")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .rotationEffect(.degrees(progress >= 1.0 ? 180 : progress * 180))
-                                    .scaleEffect(0.7 + progress * 0.3)
-                                    .opacity(Double(progress))
-                                    .animation(.spring(response: 0.25, dampingFraction: 0.7), value: progress >= 1.0)
-                            }
-                        }
-                        .offset(x: leadingInset / 2, y: slideOffset)
-                        .opacity(isRefreshing ? 1.0 : Double(progress))
-                        .allowsHitTesting(false)
+                        RefreshCircle(progress: progress, refreshing: isRefreshing, tint: .white)
+                            .offset(x: leadingInset / 2, y: slideOffset)
                     }
                 }
                 .onChange(of: minY) { newY in
+                    guard onRefresh != nil else { return }
                     if newY >= threshold && !hasTriggeredThreshold && !isRefreshing {
                         hasTriggeredThreshold = true
                         #if os(iOS)

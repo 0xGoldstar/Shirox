@@ -4,12 +4,21 @@ extension View {
     /// Pull to refresh with a drop that stretches out of the Dynamic Island — or the notch, or the
     /// top edge — pinches off to hold the spinner, and melts back in when the refresh is done.
     ///
-    /// Settings › Library › Gooey Pull to Refresh turns it off, leaving the standard `.refreshable`.
-    /// Only for full screens: in a sheet the island is nowhere near the top of the view, so sheets
-    /// keep `.refreshable`.
-    func gooeyRefreshable(action: @escaping @Sendable () async -> Void) -> some View {
-        modifier(GooeyRefreshModifier(action: action))
+    /// Settings › Library › Gooey Pull to Refresh turns it off, leaving `fallback`: the frosted
+    /// circle, or nothing for a screen that draws its own. Only for full screens: in a sheet the
+    /// island is nowhere near the top of the view, so sheets use `circleRefreshable`.
+    func gooeyRefreshable(fallback: GooeyRefreshFallback = .circle,
+                          action: @escaping @Sendable () async -> Void) -> some View {
+        modifier(GooeyRefreshModifier(fallback: fallback, action: action))
     }
+}
+
+/// What a full screen shows with the drop turned off.
+enum GooeyRefreshFallback {
+    /// `circleRefreshable`.
+    case circle
+    /// Nothing from the modifier: the screen draws its own — Home, whose hero holds the circle.
+    case custom
 }
 
 /// The drop's rules, apart from the views.
@@ -67,6 +76,7 @@ enum GooeyRefreshGeometry {
 }
 
 struct GooeyRefreshModifier: ViewModifier {
+    let fallback: GooeyRefreshFallback
     let action: @Sendable () async -> Void
     @AppStorage(GooeyRefreshGeometry.settingKey) private var enabled = true
 
@@ -75,11 +85,19 @@ struct GooeyRefreshModifier: ViewModifier {
         if enabled {
             content.background(GooeyScrollHook(action: action))
         } else {
-            content.refreshable(action: action)
+            fallbackContent(content)
         }
         #else
-        content.refreshable(action: action)
+        fallbackContent(content)
         #endif
+    }
+
+    @ViewBuilder
+    private func fallbackContent(_ content: Content) -> some View {
+        switch fallback {
+        case .circle: content.circleRefreshable(action: action)
+        case .custom: content
+        }
     }
 }
 
@@ -92,64 +110,64 @@ private struct GooeyScrollHook: UIViewRepresentable {
 
     func makeCoordinator() -> GooeyRefreshController { GooeyRefreshController(action: action) }
 
-    func makeUIView(context: Context) -> HookView {
-        let view = HookView()
+    func makeUIView(context: Context) -> ScrollViewHookView {
+        let view = ScrollViewHookView()
         view.onScrollView = { [weak controller = context.coordinator] scrollView in
             controller?.attach(scrollView)
         }
         return view
     }
 
-    func updateUIView(_ uiView: HookView, context: Context) {
+    func updateUIView(_ uiView: ScrollViewHookView, context: Context) {
         context.coordinator.action = action
     }
 
-    static func dismantleUIView(_ uiView: HookView, coordinator: GooeyRefreshController) {
+    static func dismantleUIView(_ uiView: ScrollViewHookView, coordinator: GooeyRefreshController) {
         coordinator.detach()
     }
+}
 
-    /// A zero-size view beside the scroll view. It looks up through its ancestors for the nearest
-    /// one holding a scroll view, and takes the shallowest — the list itself, not a scroller
-    /// inside one of its rows.
-    final class HookView: UIView {
-        var onScrollView: ((UIScrollView) -> Void)?
+/// A zero-size view beside a scroll view. It looks up through its ancestors for the nearest
+/// one holding a scroll view, and takes the shallowest — the list itself, not a scroller
+/// inside one of its rows.
+final class ScrollViewHookView: UIView {
+    var onScrollView: ((UIScrollView) -> Void)?
 
-        override init(frame: CGRect) {
-            super.init(frame: frame)
-            isUserInteractionEnabled = false
-        }
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+    }
 
-        required init?(coder: NSCoder) { fatalError("unused") }
+    required init?(coder: NSCoder) { fatalError("unused") }
 
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            guard window != nil else { return }
-            resolve()
-            // A List's collection view can join the hierarchy a moment after this view.
-            DispatchQueue.main.async { [weak self] in self?.resolve() }
-        }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else { return }
+        resolve()
+        // A List's collection view can join the hierarchy a moment after this view.
+        DispatchQueue.main.async { [weak self] in self?.resolve() }
+    }
 
-        private func resolve() {
-            var ancestor = superview
-            for _ in 0..<8 {
-                guard let current = ancestor else { return }
-                if let scrollView = Self.shallowestScrollView(in: current) {
-                    onScrollView?(scrollView)
-                    return
-                }
-                ancestor = current.superview
+    private func resolve() {
+        var ancestor = superview
+        for _ in 0..<8 {
+            guard let current = ancestor else { return }
+            if let scrollView = Self.shallowestScrollView(in: current) {
+                onScrollView?(scrollView)
+                return
             }
+            ancestor = current.superview
         }
+    }
 
-        private static func shallowestScrollView(in root: UIView) -> UIScrollView? {
-            var queue = root.subviews
-            while !queue.isEmpty {
-                let view = queue.removeFirst()
-                if let scrollView = view as? UIScrollView, !(scrollView is UITextView) { return scrollView }
-                queue.append(contentsOf: view.subviews)
-            }
-            return nil
+    private static func shallowestScrollView(in root: UIView) -> UIScrollView? {
+        var queue = root.subviews
+        while !queue.isEmpty {
+            let view = queue.removeFirst()
+            if let scrollView = view as? UIScrollView, !(scrollView is UITextView) { return scrollView }
+            queue.append(contentsOf: view.subviews)
         }
+        return nil
     }
 }
 
