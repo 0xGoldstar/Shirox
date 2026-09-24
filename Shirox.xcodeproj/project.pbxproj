@@ -439,6 +439,7 @@
 		2A442ADBDBF00A760BDB4365 /* MALOfficialDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33E435703AA1308538E7D59 /* MALOfficialDiscoveryTests.swift */; };
 		2A5EFBD5833968BCAEBEB8A4 /* JellyfinModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C4A4D717CED7197DBAD4A83 /* JellyfinModels.swift */; };
 		2AE9E410446C9E4A5F30A2E0 /* SimklTitleModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 080270C92CD4F5C8FFFE6AA5 /* SimklTitleModelTests.swift */; };
+		2B8164C8411D6CB3555272E4 /* SimklSearchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE1772827514FDF2A90E5B8 /* SimklSearchSheet.swift */; };
 		2C2A0F4D1AB17D486ED8912C /* SimklCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39077FFB4866E4944852E363 /* SimklCatalog.swift */; };
 		2CA077BFBEF4FD580FF4A2FE /* JellyfinLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5844D8774F9B1B6C5A7A3C3E /* JellyfinLibraryView.swift */; };
 		2E5933FB94F60E0C92018191 /* SimklResponseClassTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABBDC873D9F2269010B28586 /* SimklResponseClassTests.swift */; };
@@ -604,6 +605,7 @@
 		81956D3CC3143A3C1EBD6C0D /* AniListMangaDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 411CE099883B23D8BFF554F8 /* AniListMangaDetailView.swift */; };
 		819E19615C97015436A0D005 /* HLSManifestParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7A8A35299253F63C43AAE9 /* HLSManifestParserTests.swift */; };
 		81EBD987209651DE3429B894 /* CopyTitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 250387834E819E85E4CD966E /* CopyTitle.swift */; };
+		825491049E2D63AADC330980 /* SimklSearchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE1772827514FDF2A90E5B8 /* SimklSearchSheet.swift */; };
 		8380F6E14AA00090A2E9F35F /* SimklLibraryService+Titles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1424D4F2FFA81CC26F8F4795 /* SimklLibraryService+Titles.swift */; };
 		83D181EC651FE51A5DAFBAC8 /* NSFWContentFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB32994B31FB72D2DAA8327A /* NSFWContentFilter.swift */; };
 		8530E21E3ED79809A04B7B69 /* SimklTitlePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA8BBD389DB40AD3F56F5BCE /* SimklTitlePage.swift */; };
@@ -613,6 +615,7 @@
 		87B0C3C9ED13CF0F55704EEF /* SimklTitlePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA8BBD389DB40AD3F56F5BCE /* SimklTitlePage.swift */; };
 		8A38ECB64A6717CEED682DF0 /* HLSManifestParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 434062BAE638F3D33467EBCF /* HLSManifestParser.swift */; };
 		8A3B1A010F48F8614C2559F0 /* LibraryDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1659CAEADDD8118DA5FF4FFF /* LibraryDataSource.swift */; };
+		8AB0F9A8277AA76976456D47 /* SimklSearchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE1772827514FDF2A90E5B8 /* SimklSearchSheet.swift */; };
 		8AD75A8F2E9A405637827D49 /* JellyfinAuthManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBAF45C71B3785D9592EA63E /* JellyfinAuthManagerTests.swift */; };
 		8AF3BC67487BF80966F5D8C9 /* ProfileCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62D2F08E475CE2C530B479E /* ProfileCacheStore.swift */; };
 		8BD8E901FE5D4CF199886175 /* ScoreInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21201D48C8E94395977F4564 /* ScoreInputView.swift */; };
@@ -1160,6 +1163,7 @@
 		FB32994B31FB72D2DAA8327A /* NSFWContentFilter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NSFWContentFilter.swift; sourceTree = "<group>"; };
 		FC1DF7D44E93B5DA2DDAD152 /* SimklLibraryEntryPage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklLibraryEntryPage.swift; sourceTree = "<group>"; };
 		FD7CC628C6AE93B4C0BEA616 /* SimklActivityStorageTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklActivityStorageTests.swift; sourceTree = "<group>"; };
+		FDE1772827514FDF2A90E5B8 /* SimklSearchSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklSearchSheet.swift; sourceTree = "<group>"; };
 		FF4C00BAA407FF400B069044 /* JellyfinEntryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JellyfinEntryView.swift; sourceTree = "<group>"; };
 		FFFC46805FE79CD18D6269BA /* SimklOAuthTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklOAuthTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -1417,6 +1421,7 @@
 				2EEEE6BC436B400EC32EFB21 /* SimklTitleLabels.swift */,
 				301F5C306717CC5992FDB32A /* SimklTitleEditSheet.swift */,
 				DA8BBD389DB40AD3F56F5BCE /* SimklTitlePage.swift */,
+				FDE1772827514FDF2A90E5B8 /* SimklSearchSheet.swift */,
 			);
 			path = Library;
 			sourceTree = "<group>";
@@ -2233,6 +2238,7 @@
 				F5E70692522D64E3E8D95328 /* SimklTitleLabels.swift in Sources */,
 				6161772B279BFA0B6DFF982C /* SimklTitleEditSheet.swift in Sources */,
 				02E5A7C8E15B870B3A548D97 /* SimklTitlePage.swift in Sources */,
+				8AB0F9A8277AA76976456D47 /* SimklSearchSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2468,6 +2474,7 @@
 				B797F20B17109BF26E677263 /* SimklTitleLabels.swift in Sources */,
 				36A3C3C2A8D3B8D144A22113 /* SimklTitleEditSheet.swift in Sources */,
 				87B0C3C9ED13CF0F55704EEF /* SimklTitlePage.swift in Sources */,
+				825491049E2D63AADC330980 /* SimklSearchSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2703,6 +2710,7 @@
 				4BB64B0EE47ABDC0D6F4C1C5 /* SimklTitleLabels.swift in Sources */,
 				A2F08929BC653D6A90CA88DB /* SimklTitleEditSheet.swift in Sources */,
 				8530E21E3ED79809A04B7B69 /* SimklTitlePage.swift in Sources */,
+				2B8164C8411D6CB3555272E4 /* SimklSearchSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
