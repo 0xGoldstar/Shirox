@@ -16,15 +16,24 @@ extension LibrarySource {
         return nil
     }
 
-    /// What this source lists. Simkl's library here is anime only.
+    /// What this source lists. The Simkl list has anime, TV and movies.
     var mediaKinds: [MediaKind] {
-        self == .simkl ? [.anime] : [.anime, .manga]
+        self == .simkl ? MediaKind.simklKinds : [.anime, .manga]
     }
 
-    /// The status lists this source can hold, in the user's order. A free Simkl account cannot
-    /// record a rewatch, so Simkl has no Rewatching list.
-    func statuses(in order: [MediaListStatus]) -> [MediaListStatus] {
-        self == .simkl ? order.filter { $0 != .repeating } : order
+    /// The status lists this source can hold for `kind`, in the user's order. On Simkl a free
+    /// account records no rewatch, and movies have no Watching or On Hold.
+    func statuses(in order: [MediaListStatus], for kind: MediaKind = .anime) -> [MediaListStatus] {
+        guard self == .simkl else { return order }
+        let allowed: Set<MediaListStatus> = kind == .movie
+            ? [.planning, .completed, .dropped]
+            : Set(MediaListStatus.allCases).subtracting([.repeating])
+        return order.filter { allowed.contains($0) }
+    }
+
+    /// The list a kind opens on: Plan to Watch for movies, which have no Watching.
+    static func defaultStatus(for kind: MediaKind) -> MediaListStatus {
+        kind == .movie ? .planning : .current
     }
 
     /// Where the Library goes when the list on screen signs out: the primary provider if it is
@@ -78,20 +87,31 @@ extension LibrarySource {
 /// The user's Simkl list, through `SimklLibraryService` — its cache, its activity-gated reads and
 /// its durable write queue.
 @MainActor struct SimklLibraryDataSource: LibraryDataSource {
+    /// Which of the Simkl list's three kinds.
+    var kind: MediaKind = .anime
+
     private var service: SimklLibraryService { .shared }
 
-    /// The cached copy; only an account never read before is fetched.
+    /// The copy; only a kind never checked is read.
     func fetchLibrary() async throws -> [LibraryEntry] {
-        try await service.displayLibrary()
+        try await service.displayLibrary(kind)
     }
 
     /// Pull to refresh: the one activity check, whose failure the Library shows.
     func checkForChanges() async throws -> [LibraryEntry] {
-        try await service.checkNow()
+        try await service.checkNow(kind)
     }
 
     func updateEntry(media: Media, status: MediaListStatus, progress: Int, score: Double) async throws {
         try Self.requireWriteAccess()
+        // A show's episodes are edited in `SimklTitleEditSheet`; this path carries status and score —
+        // a movie's swipe to Watched.
+        if kind != .anime {
+            let delivered = try await service.saveTitle(media.id, kind: kind, status: status, score: score)
+            try Self.requireWriteAccess()
+            if !delivered { SimklNotice.queued() }
+            return
+        }
         let ids = SimklLibraryService.pairingIDs(of: media)
         let simklId = service.cachedEntry(malId: ids.mal, anilistId: ids.anilist)
             .flatMap(SimklLibraryService.simklID(of:))
@@ -105,16 +125,21 @@ extension LibrarySource {
         // otherwise a reload before the next flush would put the old values back on screen.
         service.noteWritten(malId: ids.mal, anilistId: ids.anilist, simklId: simklId,
                             status: status, progress: progress)
-        #if os(iOS)
-        ToastManager.shared.show(
-            message: "Simkl couldn't be reached — your change is saved and will be sent later.",
-            type: .warning)
-        #endif
+        SimklNotice.queued()
     }
 
     /// The edit sheet's Remove: the whole entry, never an episode un-mark.
     func deleteEntry(_ entry: LibraryEntry) async throws {
         try Self.requireWriteAccess()
+        if kind != .anime {
+            do {
+                try await service.removeTitle(entry.id, kind: kind)
+            } catch {
+                try Self.requireWriteAccess()
+                throw error
+            }
+            return
+        }
         let ids = SimklLibraryService.pairingIDs(of: entry.media)
         let simklId = SimklLibraryService.simklID(of: entry)
         do {
@@ -130,9 +155,25 @@ extension LibrarySource {
     /// A sign-in that can't write fails every edit the same way, so it says how to fix it.
     private static func requireWriteAccess() throws {
         guard SimklAuthManager.shared.needsReauthorization else { return }
-        #if os(iOS)
-        ToastManager.shared.show(message: SimklError.readOnly.localizedDescription, type: .error)
-        #endif
+        SimklNotice.failed(SimklError.readOnly)
         throw SimklError.readOnly
+    }
+}
+
+/// Short notices about Simkl writes. Toasts exist on iOS only; elsewhere the change simply shows
+/// in the list.
+enum SimklNotice {
+    @MainActor static func queued() {
+        info("Simkl couldn't be reached — your change is saved and will be sent later.", warning: true)
+    }
+
+    @MainActor static func failed(_ error: Error) {
+        info(error.localizedDescription, warning: false)
+    }
+
+    @MainActor static func info(_ message: String, warning: Bool = true) {
+        #if os(iOS)
+        ToastManager.shared.show(message: message, type: warning ? .warning : .error)
+        #endif
     }
 }

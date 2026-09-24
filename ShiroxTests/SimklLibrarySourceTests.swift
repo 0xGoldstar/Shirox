@@ -27,8 +27,8 @@ final class SimklLibrarySourceTests: XCTestCase {
         XCTAssertEqual(LibrarySource.provider(.mal).providerToSelect, .mal)
     }
 
-    func testSimklListsAnimeOnly() {
-        XCTAssertEqual(LibrarySource.simkl.mediaKinds, [.anime])
+    func testSimklListsAnimeShowsAndMovies() {
+        XCTAssertEqual(LibrarySource.simkl.mediaKinds, [.anime, .tv, .movie])
         XCTAssertEqual(LibrarySource.provider(.anilist).mediaKinds, [.anime, .manga])
         XCTAssertEqual(LibrarySource.local.mediaKinds, [.anime, .manga])
     }

@@ -20,7 +20,7 @@ final class LibraryViewModel: ObservableObject {
         switch source {
         case .local:    return LocalLibraryDataSource()
         case .provider: return RemoteLibraryDataSource()
-        case .simkl:    return SimklLibraryDataSource()
+        case .simkl:    return SimklLibraryDataSource(kind: mediaType)
         }
     }
 
@@ -150,10 +150,11 @@ final class LibraryViewModel: ObservableObject {
         }
         guard self.source != source else { return }
         self.source = source
-        // Simkl lists anime only; arriving from the Manga tab would ask it for a list it lacks.
+        // Simkl has no manga, and AniList and MyAnimeList no TV or movies: arriving on a kind the
+        // new source lacks would ask it for a list it doesn't have.
         if !source.mediaKinds.contains(mediaType) { mediaType = .anime }
         selectedCustomList = nil
-        selectedStatus = .current
+        selectedStatus = LibrarySource.defaultStatus(for: mediaType)
         switchKey()
     }
 
@@ -161,7 +162,7 @@ final class LibraryViewModel: ObservableObject {
         guard mediaType != kind else { return }
         mediaType = kind
         selectedCustomList = nil
-        selectedStatus = .current
+        selectedStatus = LibrarySource.defaultStatus(for: kind)
         switchKey()
     }
 
@@ -201,9 +202,9 @@ final class LibraryViewModel: ObservableObject {
            let snap = LibraryCacheStore.shared.snapshot(provider: type, mediaType: key.mediaType) {
             return (snap.entries, snap.syncedAt)
         }
-        // `SimklLibraryService` keeps the Simkl list's snapshot under the same store.
-        if key.source == .simkl, key.mediaType == .anime,
-           let snap = LibraryCacheStore.shared.snapshot(provider: .simkl, mediaType: .anime) {
+        // `SimklLibraryService` keeps the Simkl list's snapshots under the same store, per kind.
+        if key.source == .simkl,
+           let snap = LibraryCacheStore.shared.snapshot(provider: .simkl, mediaType: key.mediaType) {
             return (snap.entries, snap.syncedAt)
         }
         return nil
@@ -310,7 +311,7 @@ final class LibraryViewModel: ObservableObject {
             } else if key.source == .simkl, userRequested {
                 // Pull to refresh and Retry are the only times the Simkl list asks Simkl whether
                 // anything changed; every other load shows its cached copy.
-                result = try await SimklLibraryDataSource().checkForChanges()
+                result = try await SimklLibraryDataSource(kind: key.mediaType).checkForChanges()
             } else {
                 result = try await dataSource.fetchLibrary()   // local, or Simkl's cached list
             }
