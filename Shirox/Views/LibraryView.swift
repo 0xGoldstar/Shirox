@@ -739,8 +739,12 @@ struct LibraryView: View {
     private var entriesList: some View {
         List {
             #if os(iOS)
+            // The header rows live in the List in every state — loading, empty and error too —
+            // so the List is always the first scroll view on screen. The source switcher scrolls
+            // sideways, and a horizontal scroll view ahead of the List takes over the
+            // `.searchable` bar, which opening a show then tears down (b49f014).
             LibrarySourceSwitcher(selected: vm.source) { vm.selectSource($0) }
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 6, trailing: 16))
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 6, trailing: 0))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
             mediaTypeSegment
@@ -751,10 +755,21 @@ struct LibraryView: View {
                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
-            #endif
-            ForEach(displayedEntries, id: \.media.id) { entry in
-                entryRow(entry)
+            if showsLibraryList {
+                entryRows
+            } else {
+                statusContent
+                    .frame(maxWidth: .infinity, minHeight: 320)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    // Only Retry itself responds; a List otherwise turns a row's lone button
+                    // into a tap target for the whole row.
+                    .buttonStyle(.borderless)
             }
+            #else
+            entryRows
+            #endif
         }
         .softScrollEdges()
         .listStyle(.plain)
@@ -769,13 +784,43 @@ struct LibraryView: View {
         }
     }
 
+    private var entryRows: some View {
+        ForEach(displayedEntries, id: \.media.id) { entry in
+            entryRow(entry)
+        }
+    }
+
+    /// What shows in place of the entries while loading, after an error, or when the list is empty.
+    @ViewBuilder
+    private var statusContent: some View {
+        if vm.isLoading {
+            ProgressView()
+        } else if let error = vm.error {
+            ContentUnavailableView {
+                Label("Couldn't Load", systemImage: "wifi.slash")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("Retry") { Task { await vm.refresh() } }
+            }
+        } else {
+            ContentUnavailableView(
+                emptyStateTitle,
+                systemImage: emptyStateIcon,
+                description: Text(emptyStateDescription)
+            )
+        }
+    }
+
     // MARK: - Library content
 
     private var libraryContentBase: some View {
         VStack(spacing: 0) {
-            #if !os(iOS)
+            #if os(iOS)
+            // One List in every state, the header rows included — see `entriesList`.
+            entriesList
+            #else
             LibrarySourceSwitcher(selected: vm.source) { vm.selectSource($0) }
-                .padding(.horizontal, 16)
             mediaTypeSegment
                 .padding(.horizontal, 16)
                 .padding(.top, 6)
@@ -783,44 +828,13 @@ struct LibraryView: View {
             filterCapsuleRow
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-            #else
-            // The source switcher + filter row scroll away as the list's first rows; for the
-            // non-list states (loading / empty / error) they're pinned here so the source and
-            // filters stay usable.
-            if !showsLibraryList {
-                LibrarySourceSwitcher(selected: vm.source) { vm.selectSource($0) }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
-                mediaTypeSegment
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6)
-                filterCapsuleRow
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-            }
-            #endif
-
-            if vm.isLoading {
-                Spacer()
-                ProgressView()
-                Spacer()
-            } else if let error = vm.error {
-                ContentUnavailableView {
-                    Label("Couldn't Load", systemImage: "wifi.slash")
-                } description: {
-                    Text(error)
-                } actions: {
-                    Button("Retry") { Task { await vm.refresh() } }
-                }
-            } else if displayedEntries.isEmpty {
-                ContentUnavailableView(
-                    emptyStateTitle,
-                    systemImage: emptyStateIcon,
-                    description: Text(emptyStateDescription)
-                )
+            if vm.isLoading || vm.error != nil || displayedEntries.isEmpty {
+                statusContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 entriesList
             }
+            #endif
         }
         .background { mangaNavLink }
         .background { aniListMangaNavLink }

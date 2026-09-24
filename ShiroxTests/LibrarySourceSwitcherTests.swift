@@ -17,17 +17,4 @@ final class LibrarySourceSwitcherTests: XCTestCase {
     func testSignedOutOfEverythingIsOnlyMyLibrary() {
         XCTAssertEqual(LibrarySourceSwitcher.sources(anilist: false, mal: false, simkl: false), [.local])
     }
-
-    func testUpToThreePillsAllShowNames() {
-        XCTAssertTrue(LibrarySourceSwitcher.showsName(of: .provider(.mal), selected: false, pillCount: 3))
-        XCTAssertTrue(LibrarySourceSwitcher.showsName(of: .simkl, selected: false, pillCount: 2))
-    }
-
-    /// Four named pills are 407 pt; a 375-pt iPhone has 343 pt for the row.
-    func testWithFourOnlyMyLibraryAndTheSelectedServiceShowNames() {
-        XCTAssertTrue(LibrarySourceSwitcher.showsName(of: .local, selected: false, pillCount: 4))
-        XCTAssertTrue(LibrarySourceSwitcher.showsName(of: .simkl, selected: true, pillCount: 4))
-        XCTAssertFalse(LibrarySourceSwitcher.showsName(of: .simkl, selected: false, pillCount: 4))
-        XCTAssertFalse(LibrarySourceSwitcher.showsName(of: .provider(.anilist), selected: false, pillCount: 4))
-    }
 }

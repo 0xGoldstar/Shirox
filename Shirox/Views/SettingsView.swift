@@ -384,6 +384,9 @@ struct AccountsSettingsView: View {
                 HStack(spacing: 12) {
                     CachedAsyncImage(urlString: ProviderType.simkl.iconURL)
                         .frame(width: 28, height: 28)
+                        // A dark tile with a see-through "S" — invisible on a dark background
+                        // without something light behind it.
+                        .background(Color.white)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(simklAuth.username ?? "Simkl")

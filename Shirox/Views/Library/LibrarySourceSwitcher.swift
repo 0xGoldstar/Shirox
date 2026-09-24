@@ -21,15 +21,6 @@ struct LibrarySourceSwitcher: View {
         return result
     }
 
-    /// Whether a pill shows its name beside its icon.
-    ///
-    /// Four named pills measure 407 pt, and a 375-pt iPhone has 343 pt for the row — which can't
-    /// scroll (see `body`). So with four, a service's pill shows only its icon unless it is the
-    /// one selected; the widest case, AniList selected, is 322 pt.
-    static func showsName(of source: LibrarySource, selected: Bool, pillCount: Int) -> Bool {
-        source == .local || selected || pillCount < 4
-    }
-
     private var sources: [LibrarySource] {
         Self.sources(anilist: anilistAuth.isLoggedIn, mal: malAuth.isLoggedIn, simkl: simklAuth.isLoggedIn)
     }
@@ -49,32 +40,33 @@ struct LibrarySourceSwitcher: View {
 
     var body: some View {
         // Only render when there's a real choice.
-        // NOTE: a plain HStack (not a horizontal ScrollView) — a horizontal ScrollView above the
-        // Library's List would steal the `.searchable` bar's scroll-view association and break it
-        // across navigation. `showsName` keeps four pills inside the narrowest iPhone instead.
+        // Scrolls sideways so every pill keeps its name. It must never be the first scroll view on
+        // screen: iOS then attaches the Library's `.searchable` bar to it instead of the List, and
+        // opening a show tears the bar down (b49f014). On iOS `LibraryView` keeps this row inside
+        // its List in every state for that reason.
         let sources = self.sources
         if sources.count > 1 {
-            HStack(spacing: 8) {
-                ForEach(sources, id: \.self) { source in
-                    let active = isSelected(source)
-                    pill(source, selected: active,
-                         showsName: Self.showsName(of: source, selected: active, pillCount: sources.count)) {
-                        if let type = source.providerToSelect {
-                            ProviderManager.shared.selectProvider(type)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(sources, id: \.self) { source in
+                        pill(source, selected: isSelected(source)) {
+                            if let type = source.providerToSelect {
+                                ProviderManager.shared.selectProvider(type)
+                            }
+                            onSelect(source)
                         }
-                        onSelect(source)
                     }
                 }
-                Spacer()
+                // The 16pt inset lives inside the scroll view, so the first pill lines up with
+                // `filterCapsuleRow` and the row still scrolls to the screen's edges. Call sites
+                // add no horizontal padding.
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             }
-            // No internal horizontal padding — call sites supply the 16pt inset (matching
-            // `filterCapsuleRow`) so the pills sit flush-left with the List button + search bar.
-            .padding(.vertical, 8)
         }
     }
 
-    /// Short labels keep the row on one line; the icon identifies the service. "MyAnimeList" is
-    /// the only name wide enough to force a wrap.
+    /// Short labels keep the pills compact; the icon identifies the service.
     private func title(for source: LibrarySource) -> String {
         switch source {
         case .local:              return "My Library"
@@ -92,29 +84,30 @@ struct LibrarySourceSwitcher: View {
                 .font(.system(size: 13, weight: .semibold))
                 .frame(width: 16, height: 16)
         case .simkl:
-            serviceIcon(ProviderType.simkl.iconURL)
+            // Simkl's icon is a dark tile with a see-through "S": on a dark background both
+            // vanish, so it sits on white.
+            serviceIcon(ProviderType.simkl.iconURL, backing: .white)
         case .provider(let type):
             serviceIcon(type.iconURL)
         }
     }
 
-    private func serviceIcon(_ url: String) -> some View {
+    private func serviceIcon(_ url: String, backing: Color = .clear) -> some View {
         CachedAsyncImage(urlString: url)
             .frame(width: 16, height: 16)
+            .background(backing)
             .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     @ViewBuilder
-    private func pill(_ source: LibrarySource, selected: Bool, showsName: Bool,
+    private func pill(_ source: LibrarySource, selected: Bool,
                       action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 icon(for: source)
-                if showsName {
-                    Text(title(for: source))
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                }
+                Text(title(for: source))
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
             }
             .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 12).padding(.vertical, 7)
@@ -123,7 +116,5 @@ struct LibrarySourceSwitcher: View {
             .foregroundStyle(selected ? Color.primary : .secondary)
         }
         .buttonStyle(.plain)
-        // An icon-only pill still has a name for VoiceOver.
-        .accessibilityLabel(Text(title(for: source)))
     }
 }
