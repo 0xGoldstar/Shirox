@@ -85,7 +85,11 @@ enum ScoreFormat: String, Codable {
 }
 
 /// Distinguishes anime vs manga for library/UI branching (progress unit, labels).
-enum MediaKind: String, Codable { case anime, manga }
+enum MediaKind: String, Codable {
+    case anime, manga
+    /// Simkl's TV shows and movies — only the Simkl list has them.
+    case tv, movie
+}
 
 enum MediaListStatus: String, Codable, CaseIterable, Identifiable {
     case current   = "CURRENT"
@@ -142,6 +146,9 @@ struct LibraryEntry: Identifiable, Codable, Sendable {
     /// not worth risking the whole library fetch on untested. Defaulted so existing persisted
     /// JSON still decodes.
     var notes: String? = nil
+    /// Simkl TV shows only: the episodes watched, by season. Optional, so saved JSON without it
+    /// still decodes.
+    var watchedEpisodes: [SimklSeasonWatch]? = nil
 
     /// The score to show/edit in `format`. Local entries convert from their
     /// canonical value; provider entries fall back to `score` (their account

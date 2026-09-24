@@ -49,8 +49,15 @@ struct Media: Identifiable, Codable, Equatable, Hashable, Sendable {
     let relations: MediaRelations?
     let type: String?
     let format: String?
+    /// Minutes. Simkl shows and movies only.
+    var runtime: Int? = nil
 
-    var uniqueId: String { "\(provider.rawValue)-\(id)" }
+    var uniqueId: String {
+        // A Simkl show or movie is keyed by Simkl id, and "simkl-52991" is already a Simkl anime
+        // entry keyed by MyAnimeList id — so the kind goes in too.
+        if let kind = simklTitleKind { return "simkl-\(kind.rawValue)-\(id)" }
+        return "\(provider.rawValue)-\(id)"
+    }
 
     var isManga: Bool { type == "MANGA" }
 
@@ -89,6 +96,22 @@ struct Media: Identifiable, Codable, Equatable, Hashable, Sendable {
     var airedOrAnnouncedEpisodes: Int? {
         if let aired = nextAiringEpisode.map({ $0.episode - 1 }), aired > 0 { return aired }
         return episodes
+    }
+}
+
+extension Media {
+    /// `type` of a Simkl TV show or movie, whose `id` is its Simkl id.
+    static let simklTVType = "TV"
+    static let simklMovieType = "MOVIE"
+
+    /// A Simkl show's or movie's kind; nil for everything else, Simkl anime included.
+    var simklTitleKind: MediaKind? {
+        guard provider == .simkl else { return nil }
+        switch type {
+        case Self.simklTVType:    return .tv
+        case Self.simklMovieType: return .movie
+        default:                  return nil
+        }
     }
 }
 
