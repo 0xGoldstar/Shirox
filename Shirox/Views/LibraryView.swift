@@ -13,6 +13,7 @@ struct LibraryView: View {
     @StateObject private var vm = LibraryViewModel()
     @ObservedObject private var anilistAuth = AniListAuthManager.shared
     @ObservedObject private var malAuth = MALAuthManager.shared
+    @ObservedObject private var simklAuth = SimklAuthManager.shared
     @ObservedObject private var providerManager = ProviderManager.shared
     @State private var showProfile = false
     @State private var showNotifications = false
@@ -60,6 +61,9 @@ struct LibraryView: View {
     /// The account the library UI should present right now: the provider whose list is on
     /// screen, or — when that one isn't signed in — whichever one is.
     private var activeProviderType: ProviderType {
+        // The Simkl list is Simkl's account, whichever provider is primary.
+        if vm.source == .simkl { return .simkl }
+
         // Follows the library actually on screen, which is `vm.source` — deliberately fetched
         // provider-direct, so it never falls back to the other service the way content
         // elsewhere does.
@@ -86,7 +90,7 @@ struct LibraryView: View {
     }
 
     private var isActiveProviderAuthenticated: Bool {
-        activeProviderType == .mal ? malAuth.isLoggedIn : anilistAuth.isLoggedIn
+        isSignedIn(activeProviderType)
     }
 
     private var scoreFormat: ScoreFormat {
@@ -95,20 +99,27 @@ struct LibraryView: View {
     }
 
     private var displayUsername: String {
-        let name = activeProviderType == .mal
-            ? (malAuth.username ?? "Profile")
-            : (anilistAuth.username ?? "Profile")
+        let name: String
+        switch activeProviderType {
+        case .mal:   name = malAuth.username ?? "Profile"
+        case .simkl: name = simklAuth.username ?? "Simkl"
+        default:     name = anilistAuth.username ?? "Profile"
+        }
         return name.count > 15 ? String(name.prefix(15)) + "…" : name
     }
 
     private var activeAvatarURL: String? {
-        activeProviderType == .mal ? malAuth.avatarURL : anilistAuth.avatarURL
+        switch activeProviderType {
+        case .mal:   return malAuth.avatarURL
+        case .simkl: return simklAuth.avatarURL
+        default:     return anilistAuth.avatarURL
+        }
     }
 
     private var orderedStatuses: [MediaListStatus] {
         let saved = statusOrderRaw.components(separatedBy: ",").compactMap(MediaListStatus.init(rawValue:))
         let missing = MediaListStatus.allCases.filter { !saved.contains($0) }
-        return saved + missing
+        return vm.source.statuses(in: saved + missing)
     }
 
     private var availableGenres: [String] {
@@ -252,7 +263,21 @@ struct LibraryView: View {
     }
 
     private func isSignedIn(_ type: ProviderType) -> Bool {
-        type == .mal ? malAuth.isLoggedIn : anilistAuth.isLoggedIn
+        switch type {
+        case .anilist: return anilistAuth.isLoggedIn
+        case .mal:     return malAuth.isLoggedIn
+        case .simkl:   return simklAuth.isLoggedIn
+        case .local:   return false
+        }
+    }
+
+    /// Where the Library goes when the list on screen signs out.
+    private var sourceAfterSignOut: LibrarySource {
+        var signedIn: Set<ProviderType> = []
+        if anilistAuth.isLoggedIn { signedIn.insert(.anilist) }
+        if malAuth.isLoggedIn { signedIn.insert(.mal) }
+        if simklAuth.isLoggedIn { signedIn.insert(.simkl) }
+        return .afterSignOut(primary: providerManager.primary?.providerType, signedIn: signedIn)
     }
 
     private func signIn(to type: ProviderType) {
@@ -443,7 +468,10 @@ struct LibraryView: View {
     @ViewBuilder private var mediaTypeSegment: some View {
         HStack(spacing: 8) {
             mediaTypePill(title: "Anime", systemImage: "tv", kind: .anime)
-            mediaTypePill(title: "Manga", systemImage: "book", kind: .manga)
+            // Simkl's library here is anime only.
+            if vm.source.mediaKinds.contains(.manga) {
+                mediaTypePill(title: "Manga", systemImage: "book", kind: .manga)
+            }
             Spacer()
         }
         .padding(.vertical, 8)
@@ -568,6 +596,8 @@ struct LibraryView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    // There is no Simkl profile; on the Simkl list the chip only says whose it is.
+                    .allowsHitTesting(activeProviderType != .simkl)
                 }
                 .padding(.horizontal, 8)
             } else {
@@ -600,7 +630,7 @@ struct LibraryView: View {
         if vm.isLocal {
             return "Add \(noun) to \(listName) from any title's detail screen."
         }
-        return "Add \(noun) to \(listName) on \(activeProviderType == .mal ? "MyAnimeList" : "AniList")."
+        return "Add \(noun) to \(listName) on \(activeProviderType.displayName)."
     }
 
     // MARK: - Entries list
@@ -656,7 +686,8 @@ struct LibraryView: View {
             .opacity(0)
 
             LibraryRowView(entry: entry, scoreFormat: scoreFormat) {
-                if !vm.isLocal && anilistAuth.isLoggedIn && malAuth.isLoggedIn && !dualSync {
+                // "Edit on which service?" is about the AniList and MyAnimeList lists; a Simkl row edits Simkl.
+                if case .provider = vm.source, anilistAuth.isLoggedIn, malAuth.isLoggedIn, !dualSync {
                     pendingEntry = entry
                     showProviderPicker = true
                 } else {
@@ -677,6 +708,8 @@ struct LibraryView: View {
                 ),
                 moduleId: source.moduleId
             )
+        } else if entry.media.provider == .simkl {
+            SimklLibraryEntryPage(entry: entry)
         } else {
             AniListDetailView(mediaId: entry.media.id, preloadedMedia: entry.media)
         }
@@ -727,8 +760,9 @@ struct LibraryView: View {
         .listStyle(.plain)
         .refreshable {
             // An explicit user request, so it always checks — the away-time throttle is
-            // for automatic checks only.
-            await SimklLibraryService.shared.refreshNow()
+            // for automatic checks only. On the Simkl list the reload below is that check, and
+            // shows what went wrong; checking here as well would spend a second request.
+            if vm.source != .simkl { await SimklLibraryService.shared.refreshNow() }
             async let count: Void = refreshUnreadCountIfNeeded()
             await vm.refresh()
             await count
@@ -803,13 +837,20 @@ struct LibraryView: View {
         #endif
         .onChangeOf(anilistAuth.isLoggedIn) { newValue in
             if newValue { vm.selectSource(.provider(.anilist)) }
-            else if !malAuth.isLoggedIn { vm.selectSource(.local) }
+            else if !malAuth.isLoggedIn, case .provider = vm.source { vm.selectSource(sourceAfterSignOut) }
         }
         .onChangeOf(malAuth.isLoggedIn) { newValue in
             if newValue { vm.selectSource(.provider(.mal)) }
-            else if !anilistAuth.isLoggedIn { vm.selectSource(.local) }
+            else if !anilistAuth.isLoggedIn, case .provider = vm.source { vm.selectSource(sourceAfterSignOut) }
+        }
+        .onChangeOf(simklAuth.isLoggedIn) { newValue in
+            // Signing in adds Simkl's pill without taking over the Library — it's a tracker.
+            if !newValue, vm.source == .simkl { vm.selectSource(sourceAfterSignOut) }
         }
         .onChangeOf(providerManager.fallbackActive) {
+            // The Simkl list doesn't come through the provider chain, and reloading it for this
+            // would spend a Simkl request.
+            guard vm.source != .simkl else { return }
             Task { await vm.refresh() }
         }
         #if os(iOS)
@@ -830,6 +871,7 @@ struct LibraryView: View {
                 media: entry.media,
                 scoreFormatOverride: vm.isLocal ? scoreFormat : nil,
                 onSave: { status, progress, score in
+                    let onSimkl = vm.source == .simkl
                     if status == .completed {
                         ContinueWatchingManager.shared.resetProgress(
                             aniListID: entry.media.id, moduleId: nil, mediaTitle: entry.media.title.searchTitle
@@ -837,7 +879,9 @@ struct LibraryView: View {
                     }
                     Task {
                         await vm.update(entry: entry, status: status, progress: progress, score: score)
-                        if !vm.isLocal && vm.mediaType != .manga {
+                        if onSimkl {
+                            await SimklLibraryMirror.edit(entry, status: status, progress: progress, score: score)
+                        } else if !vm.isLocal && vm.mediaType != .manga {
                             // The other services' ids for this title, with the user's tracking links applied.
                             let linked = await TrackingLinkResolver.resolve(
                                 aniListID: activeProviderType == .anilist ? entry.media.id : nil,
@@ -859,9 +903,12 @@ struct LibraryView: View {
                     }
                 },
                 onDelete: {
+                    let onSimkl = vm.source == .simkl
                     Task {
                         await vm.delete(entry: entry)
-                        if !vm.isLocal && vm.mediaType != .manga {
+                        if onSimkl {
+                            await SimklLibraryMirror.delete(entry)
+                        } else if !vm.isLocal && vm.mediaType != .manga {
                             let linked = await TrackingLinkResolver.resolve(
                                 aniListID: activeProviderType == .anilist ? entry.media.id : nil,
                                 malID: activeProviderType == .mal ? entry.media.id : entry.media.idMal,
