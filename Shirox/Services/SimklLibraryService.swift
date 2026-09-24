@@ -389,6 +389,19 @@ final class SimklLibraryService {
         return ids
     }
 
+    /// The MyAnimeList and AniList ids a Simkl entry's media carries. `entry(from:)` keys it by
+    /// MyAnimeList id where Simkl gave one — keeping no AniList id then — and by AniList id
+    /// otherwise.
+    nonisolated static func pairingIDs(of media: Media) -> (mal: Int?, anilist: Int?) {
+        media.idMal != nil ? (media.idMal, nil) : (nil, media.id)
+    }
+
+    /// The entry's Simkl id. `entry(from:)` falls back to the pairing id when Simkl sent none, and
+    /// that number must never be written as a Simkl id.
+    nonisolated static func simklID(of entry: LibraryEntry) -> Int? {
+        entry.id == entry.media.id ? nil : entry.id
+    }
+
     /// Entries are keyed by MyAnimeList id where Simkl gave one, otherwise by AniList id — and
     /// an entry keyed by MyAnimeList id keeps no AniList id, so that lookup needs the MAL id.
     nonisolated static func entry(in entries: [LibraryEntry], malId: Int?, anilistId: Int?,
@@ -428,10 +441,15 @@ final class SimklLibraryService {
     ///
     /// A `score` of 0 sends no rating, which leaves Simkl's untouched: clearing a score here does
     /// not clear it there.
+    ///
+    /// Returns whether Simkl has the write — false while it waits in the queue for the next flush.
+    /// The queue sends in order and a failed batch keeps everything after it, so anything still
+    /// pending includes this write.
+    @discardableResult
     func writeNow(malId: Int?, anilistId: Int?, simklId: Int? = nil, status: MediaListStatus, progress: Int,
-                  score: Double, format: ScoreFormat, title: String?) async {
+                  score: Double, format: ScoreFormat, title: String?) async -> Bool {
         let ids = Self.writeIDs(malId: malId, anilistId: anilistId, simklId: simklId)
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty else { return false }
 
         let current = cachedEntry(malId: malId, anilistId: anilistId, simklId: simklId)
         let change = SimklPayloadBuilder.progressChange(
@@ -445,9 +463,9 @@ final class SimklLibraryService {
         }
         rawUpdateEntry(malId: malId, anilistId: anilistId, simklId: simklId, status: status, progress: progress,
                        previousProgress: change.markFrom, score: score, format: format, title: title)
-        if await flush() == 0 {
-            noteWritten(malId: malId, anilistId: anilistId, simklId: simklId, status: status, progress: progress)
-        }
+        guard await flush() == 0 else { return false }
+        noteWritten(malId: malId, anilistId: anilistId, simklId: simklId, status: status, progress: progress)
+        return true
     }
 
     private func fullRead() async throws -> [LibraryEntry] {

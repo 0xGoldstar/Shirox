@@ -20,6 +20,7 @@ final class LibraryViewModel: ObservableObject {
         switch source {
         case .local:    return LocalLibraryDataSource()
         case .provider: return RemoteLibraryDataSource()
+        case .simkl:    return SimklLibraryDataSource()
         }
     }
 
@@ -143,11 +144,14 @@ final class LibraryViewModel: ObservableObject {
         // fetch (which reads `ProviderManager.primary`) and the manga fetch (which switches on
         // `source`'s type) all agree. When this actually changes primary, the `$orderedProviders`
         // sink updates `source` and reloads; when it doesn't, we fall through and reload here.
-        if case .provider(let type) = source {
+        // My Library and Simkl select nothing — Simkl must never become the primary provider.
+        if let type = source.providerToSelect {
             ProviderManager.shared.selectProvider(type)
         }
         guard self.source != source else { return }
         self.source = source
+        // Simkl lists anime only; arriving from the Manga tab would ask it for a list it lacks.
+        if !source.mediaKinds.contains(mediaType) { mediaType = .anime }
         selectedCustomList = nil
         selectedStatus = .current
         switchKey()
@@ -197,12 +201,17 @@ final class LibraryViewModel: ObservableObject {
            let snap = LibraryCacheStore.shared.snapshot(provider: type, mediaType: key.mediaType) {
             return (snap.entries, snap.syncedAt)
         }
+        // `SimklLibraryService` keeps the Simkl list's snapshot under the same store.
+        if key.source == .simkl, key.mediaType == .anime,
+           let snap = LibraryCacheStore.shared.snapshot(provider: .simkl, mediaType: .anime) {
+            return (snap.entries, snap.syncedAt)
+        }
         return nil
     }
 
     func refresh() async {
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.load() }
+            group.addTask { await self.fetch(userRequested: true) }
             group.addTask {
                 // Sequential: both sync funcs mutate the same CW store across await points.
                 await ContinueWatchingManager.shared.syncWithAniList()
@@ -281,7 +290,7 @@ final class LibraryViewModel: ObservableObject {
 
     // MARK: - Private
 
-    private func fetch(silent: Bool = false) async {
+    private func fetch(silent: Bool = false, userRequested: Bool = false) async {
         // Claim this generation. `mediaType`, `source` and `currentKey` are read synchronously
         // here — before the first await — so they match the selection this fetch is loading.
         loadGeneration &+= 1
@@ -298,8 +307,12 @@ final class LibraryViewModel: ObservableObject {
                 // Provider-direct: fetch the *selected* provider only, bypassing ProviderManager's
                 // cross-provider fallback, so the AniList list is never served from MAL.
                 result = try await fetchRemoteAnimeLibraryDirect(provider: type)
+            } else if key.source == .simkl, userRequested {
+                // Pull to refresh and Retry are the only times the Simkl list asks Simkl whether
+                // anything changed; every other load shows its cached copy.
+                result = try await SimklLibraryDataSource().checkForChanges()
             } else {
-                result = try await dataSource.fetchLibrary()   // local source
+                result = try await dataSource.fetchLibrary()   // local, or Simkl's cached list
             }
             // A newer selection superseded this request while the network was in flight —
             // drop the stale result so the list never disagrees with the selected pill.
@@ -316,7 +329,7 @@ final class LibraryViewModel: ObservableObject {
             Task { await PendingWriteQueue.shared.flush() }
         } catch {
             guard generation == loadGeneration else { return }
-            if !silent { self.error = error.localizedDescription }
+            if !silent { report(error, keepingList: key.source == .simkl && !allEntries.isEmpty) }
         }
         if generation == loadGeneration && !silent { isLoading = false }
     }
@@ -329,6 +342,19 @@ final class LibraryViewModel: ObservableObject {
             throw ProviderError.unauthenticated
         }
         return try await p.fetchLibrary()
+    }
+
+    /// Shows a failed load. The Simkl list keeps its cached copy on screen — still right as of the
+    /// last check — with the error over it: often the daily limit, which no retry clears before
+    /// midnight US Eastern. Everything else shows the error in place of the list.
+    private func report(_ error: Error, keepingList: Bool) {
+        #if os(iOS)
+        if keepingList {
+            ToastManager.shared.show(message: error.localizedDescription, type: .error)
+            return
+        }
+        #endif
+        self.error = error.localizedDescription
     }
 
     /// Refreshes the custom-list-name menu from the freshly fetched entries (or the local
@@ -350,6 +376,8 @@ final class LibraryViewModel: ObservableObject {
         switch source {
         case .local:
             return LocalLibraryManager.shared.entries.filter { $0.media.isManga }
+        case .simkl:
+            return []   // anime only; the Manga pill is hidden on this source
         case .provider(let type):
             switch type {
             case .anilist:
