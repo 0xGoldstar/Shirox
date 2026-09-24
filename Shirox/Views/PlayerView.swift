@@ -1143,6 +1143,14 @@ struct PlayerView: View {
             Logger.shared.log("[Rating] trackAniListProgress: currentContext nil — bail", type: "Debug")
             return
         }
+        // A title played from its Simkl page has no AniList or MyAnimeList id, and a module title
+        // mapped by name could be the wrong anime — it is marked on Simkl alone.
+        if let ref = ctx.simklTitle {
+            let number = ctx.episodeNumber
+            let title = ctx.mediaTitle
+            Task { await SimklPlayTracker.finished(ref, number: number, title: title) }
+            return
+        }
         let context = MarkContext(
             aniListID: ctx.aniListID,
             malID: ctx.malID,
