@@ -699,6 +699,16 @@ final class SimklLibraryService {
         return queue.pendingCount
     }
 
+    /// Queues one write. For the TV and movie writes in `SimklLibraryService+Titles.swift`.
+    func enqueue(_ write: SimklWrite) {
+        queue.enqueue(write)
+    }
+
+    /// A `/sync/history/remove` body, sent at once — un-marks and removals are never queued.
+    func postRemoval(_ body: [String: Any]) async throws {
+        try await post("/sync/history/remove", body: body)
+    }
+
     /// Titles Simkl answered `not_found` for in the last flush — nothing was stored for them.
     var lastNotFoundCount: Int { queue.notFoundCount }
 
