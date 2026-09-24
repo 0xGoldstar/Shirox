@@ -26,6 +26,12 @@ final class GooeyRefreshTests: XCTestCase {
         XCTAssertLessThanOrEqual(Geometry.anchorRect(for: .edge, width: 402).maxY, 0)
     }
 
+    /// Black on black vanishes, so only dark mode outlines the drop.
+    func testOnlyDarkModeOutlinesTheDrop() {
+        XCTAssertNotNil(Geometry.rim(for: .dark))
+        XCTAssertNil(Geometry.rim(for: .light))
+    }
+
     func testTheDropHangsFurtherAsThePullGrows() {
         let anchor = Geometry.anchorRect(for: .dynamicIsland, width: 402)
         let rest = Geometry.dropCenterY(anchor: anchor, progress: 0, refreshing: false)

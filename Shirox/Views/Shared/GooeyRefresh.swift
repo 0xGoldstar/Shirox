@@ -52,6 +52,17 @@ enum GooeyRefreshGeometry {
     /// How far to pull before letting go refreshes.
     static let threshold: CGFloat = 90
 
+    /// In dark mode the black drop vanishes into a black screen, so it gets a grey rim, as iOS
+    /// gives the Dynamic Island when it opens over black — a glow around the finished shape, so
+    /// it follows the neck and parts with the drop.
+    static let rimColor = Color(white: 0.9)
+    static let rimRadius: CGFloat = 1.5
+
+    /// Light mode needs none: black on a light screen shows by itself.
+    static func rim(for scheme: ColorScheme) -> Color? {
+        scheme == .dark ? rimColor : nil
+    }
+
     static func progress(pull: CGFloat) -> CGFloat {
         max(0, pull) / threshold
     }
@@ -288,6 +299,8 @@ final class GooeyRefreshCenter: ObservableObject {
             overlay.rootViewController = host
             window = overlay
         }
+        // Light or dark as the screen beneath is, for the rim.
+        window?.overrideUserInterfaceStyle = hostWindow.traitCollection.userInterfaceStyle
         window?.isHidden = false
     }
 
@@ -310,6 +323,7 @@ private final class PassthroughWindow: UIWindow {
 
 private struct GooeyDropOverlay: View {
     @ObservedObject var center: GooeyRefreshCenter
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let anchor = GooeyRefreshGeometry.anchorRect(for: center.cutout, width: center.width)
@@ -317,7 +331,8 @@ private struct GooeyDropOverlay: View {
         let dropY = GooeyRefreshGeometry.dropCenterY(anchor: anchor, progress: progress, refreshing: center.refreshing)
         let radius = GooeyRefreshGeometry.dropRadius(progress: progress, refreshing: center.refreshing)
         ZStack(alignment: .topLeading) {
-            GooeyBlob(anchor: anchor, dropY: dropY, radius: radius)
+            GooeyBlob(anchor: anchor, dropY: dropY, radius: radius,
+                      rim: GooeyRefreshGeometry.rim(for: colorScheme))
             ProgressView()
                 .tint(.white)
                 .scaleEffect(0.7)
@@ -331,11 +346,12 @@ private struct GooeyDropOverlay: View {
 }
 
 /// The metaball: the anchor and the drop blurred together and cut at half opacity, so they join
-/// in a neck while close and part cleanly once far enough apart.
+/// in a neck while close and part cleanly once far enough apart. `rim` outlines it, for dark mode.
 struct GooeyBlob: View, Animatable {
     let anchor: CGRect
     var dropY: CGFloat
     var radius: CGFloat
+    var rim: Color? = nil
 
     var animatableData: AnimatablePair<CGFloat, CGFloat> {
         get { AnimatablePair(dropY, radius) }
@@ -347,6 +363,8 @@ struct GooeyBlob: View, Animatable {
 
     var body: some View {
         Canvas { context, _ in
+            // Filters run last-added first: blur, then the cut, then the rim around what's left.
+            if let rim { context.addFilter(.shadow(color: rim, radius: GooeyRefreshGeometry.rimRadius)) }
             context.addFilter(.alphaThreshold(min: 0.5, color: .black))
             context.addFilter(.blur(radius: 9))
             context.drawLayer { layer in
