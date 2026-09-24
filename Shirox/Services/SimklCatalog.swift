@@ -50,6 +50,8 @@ struct SimklTitleDetails: Codable, Equatable {
     let network: String?
     let certification: String?
     let totalEpisodes: Int?
+    /// Simkl's community rating, out of 10.
+    let rating: Double?
 
     var posterURL: String? { poster.map(SimklCatalogItem.posterURLString(_:)) }
     /// Simkl's 960×540 fanart — the size it names for a mobile hero.
@@ -76,6 +78,11 @@ private struct SimklRawDetails: Decodable {
     let network: String?
     let certification: String?
     let total_episodes: Int?
+    struct Ratings: Decodable {
+        struct Source: Decodable { let rating: Double? }
+        let simkl: Source?
+    }
+    let ratings: Ratings?
 }
 
 /// One `/tv/episodes/{id}` item as Simkl sends it.
@@ -88,6 +95,7 @@ private struct SimklRawEpisode: Decodable {
     let aired: Bool?
     let img: String?
     let date: String?
+    let description: String?
     let ids: IDs?
 }
 
@@ -174,7 +182,8 @@ enum SimklCatalog {
             simklID: id, title: title, year: raw.year?.value, overview: raw.overview,
             genres: raw.genres ?? [], runtime: raw.runtime?.value, poster: raw.poster,
             fanart: raw.fanart, status: raw.status, network: raw.network,
-            certification: raw.certification, totalEpisodes: raw.total_episodes)
+            certification: raw.certification, totalEpisodes: raw.total_episodes,
+            rating: raw.ratings?.simkl?.rating)
     }
 
     /// Specials carry `type: "special"` and no season or episode number.
@@ -184,7 +193,7 @@ enum SimklCatalog {
                 season: raw.season, episode: raw.episode, title: raw.title, aired: raw.aired ?? false,
                 img: raw.img, date: raw.date,
                 isSpecial: raw.type == "special" || raw.season == nil || raw.episode == nil,
-                simklID: raw.ids?.simkl_id?.value ?? 0)
+                simklID: raw.ids?.simkl_id?.value ?? 0, overview: raw.description)
         }
     }
 

@@ -37,6 +37,8 @@ struct SimklEpisode: Codable, Equatable, Sendable, Identifiable {
     /// Simkl lists specials after the regular episodes, with no season or episode number.
     let isSpecial: Bool
     let simklID: Int
+    /// The episode's synopsis. Optional, so episode lists saved before it still decode.
+    var overview: String? = nil
 
     var id: Int { simklID }
 

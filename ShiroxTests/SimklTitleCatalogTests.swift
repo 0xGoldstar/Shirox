@@ -80,6 +80,18 @@ final class SimklTitleCatalogTests: XCTestCase {
         XCTAssertEqual(cache.episodes(simklID: 5)?.first?.simklID, 12)
     }
 
+    func testDecodesTheSimklRatingAndEpisodeSynopses() throws {
+        let details = try XCTUnwrap(SimklCatalog.decodeDetails(Data("""
+        {"title":"Game of Thrones","ids":{"simkl":17465},"ratings":{"simkl":{"rating":9.1,"votes":1270}}}
+        """.utf8)))
+        XCTAssertEqual(details.rating, 9.1)
+        let episodes = try SimklCatalog.decodeEpisodes(Data("""
+        [{"title":"Pilot","season":1,"episode":1,"type":"episode","aired":true,"description":"It begins.",
+          "ids":{"simkl_id":1}}]
+        """.utf8))
+        XCTAssertEqual(episodes.first?.overview, "It begins.")
+    }
+
     func testSearchPathsPerKind() {
         XCTAssertEqual(SimklCatalog.searchPath(for: .anime), "/search/anime")
         XCTAssertEqual(SimklCatalog.searchPath(for: .tv), "/search/tv")
