@@ -22,6 +22,12 @@ struct LibraryEntryEditSheet: View {
         let digits = text.filter { $0.isASCII && $0.isNumber }
         return min(Int(digits) ?? 0, max)
     }
+
+    /// The statuses the picker offers. A free Simkl account can't record a rewatch, so a Simkl
+    /// entry is never offered Rewatching.
+    static func statuses(for provider: ProviderType) -> [MediaListStatus] {
+        provider == .simkl ? MediaListStatus.allCases.filter { $0 != .repeating } : MediaListStatus.allCases
+    }
     @State private var score: Double
     @State private var isPrivate: Bool
     @State private var notes: String
@@ -123,7 +129,7 @@ struct LibraryEntryEditSheet: View {
             Form {
                 Section("Status") {
                     Picker("Status", selection: $status) {
-                        ForEach(MediaListStatus.allCases) { s in
+                        ForEach(Self.statuses(for: media.provider)) { s in
                             Text(s.displayName).tag(s)
                         }
                     }
