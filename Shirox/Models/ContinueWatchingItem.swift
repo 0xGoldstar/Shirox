@@ -51,6 +51,9 @@ struct ContinueWatchingItem: Identifiable, Codable, Hashable {
     var localImportName: String?
     /// Filename of an up-front subtitle copied alongside the video, so resume reloads it.
     var localSubtitleImportName: String?
+    /// The Simkl title this play belongs to, so resuming it keeps marking on Simkl. Optional, so
+    /// saved items still decode.
+    var simklTitle: SimklPlayRef? = nil
 }
 
 extension ContinueWatchingItem {

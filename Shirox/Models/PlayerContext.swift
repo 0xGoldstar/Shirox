@@ -20,4 +20,6 @@ struct PlayerContext {
     let thumbnailUrl: String?         // episode thumbnail (16:9), nil falls back to cover art
     var isLocalPlayback: Bool = false // true when playing a user-picked local file
     var jellyfinItemId: String? = nil // set when streaming from a Jellyfin server
+    /// Set when the play started on a Simkl movie or show page; finishing it marks it there.
+    var simklTitle: SimklPlayRef? = nil
 }

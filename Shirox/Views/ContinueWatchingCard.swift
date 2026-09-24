@@ -149,7 +149,7 @@ struct ContinueWatchingSection: View {
             allSubtitles: item.allSubtitles
         )
 
-        let context = PlayerContext(
+        var context = PlayerContext(
             mediaTitle: item.mediaTitle,
             episodeNumber: item.episodeNumber,
             episodeTitle: item.episodeTitle,
@@ -167,6 +167,7 @@ struct ContinueWatchingSection: View {
             workingDetailHref: item.detailHref,
             thumbnailUrl: item.thumbnailUrl
         )
+        context.simklTitle = item.simklTitle
 
         // Setup Next Episode loader using ModuleJSRunner (if module) or JSEngine (if AniList).
         // Anchor on the saved episode href so multi-season flat lists (numbers repeat) advance
