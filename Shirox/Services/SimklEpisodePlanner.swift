@@ -124,4 +124,16 @@ enum SimklEpisodePlanner {
             unmarks: [],
             watched: watched.union(airedInSeason))
     }
+
+    /// What the edit sheet saves for a show. Completed marks every episode by status alone — a
+    /// `completed` status with no seasons is exactly that on Simkl. An unchanged "watched up to"
+    /// sends no episodes (nil).
+    static func edit(status: MediaListStatus, watched: Set<SimklEpisodeRef>, upTo: SimklEpisodeRef?,
+                     initialUpTo: SimklEpisodeRef?, episodes: [SimklEpisode]) -> SimklEpisodePlan? {
+        if status == .completed {
+            return SimklEpisodePlan(marks: [], unmarks: [], watched: watched.union(aired(episodes)))
+        }
+        guard upTo != initialUpTo else { return nil }
+        return plan(watched: watched, upTo: upTo, episodes: episodes)
+    }
 }
