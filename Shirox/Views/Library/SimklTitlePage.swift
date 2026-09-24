@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// A Simkl TV show's or movie's page: details from Simkl's free catalog, the user's entry, and for
-/// a show its seasons with a tick per episode.
+/// A Simkl TV show's or movie's page, in the anime page's layout: hero, chips, synopsis, a big
+/// Watch/Continue button, and for a show its seasons as the anime page's episode rows. Playing
+/// goes through the module picker; finishing marks it on Simkl (`SimklPlayTracker`).
 struct SimklTitlePage: View {
     let simklID: Int
     let kind: MediaKind
@@ -9,6 +10,7 @@ struct SimklTitlePage: View {
     let seedTitle: String
     let seedPosterURL: String?
 
+    @ObservedObject private var continueWatching = ContinueWatchingManager.shared
     @State private var details: SimklTitleDetails?
     @State private var detailsFailed = false
     @State private var episodes: [SimklEpisode] = []
@@ -18,8 +20,13 @@ struct SimklTitlePage: View {
     @State private var editing: LibraryEntry?
     @State private var busy = false
     @State private var message: String?
+    @State private var leadingInset: CGFloat = 0
+    // Playing: the picker, then — when it offers several streams — the stream choice.
+    @State private var picker: PlayRequest?
+    @State private var choice: StreamChoice?
+    @State private var pending: PendingPlay?
 
-    private static let scrollSpace = "simklTitleScroll"
+    private static let scrollSpace = "simklHeroScroll"
     private var service: SimklLibraryService { .shared }
     private var title: String { details?.title ?? seedTitle }
     private var posterURL: String? { details?.posterURL ?? seedPosterURL }
@@ -30,25 +37,54 @@ struct SimklTitlePage: View {
                                     episodes: episodes)
     }
 
+    /// The latest unfinished Continue Watching item for this title.
+    private var resumeItem: ContinueWatchingItem? {
+        continueWatching.items
+            .filter { $0.simklTitle?.simklID == simklID && $0.totalSeconds > 0 && $0.watchedSeconds / $0.totalSeconds < 0.9 }
+            .max { $0.lastWatchedAt < $1.lastWatchedAt }
+    }
+
+    private var resumeEpisode: SimklEpisodeRef? {
+        guard let item = resumeItem, let season = item.simklTitle?.season else { return nil }
+        return SimklPlayNumbering.episode(season: season, number: item.episodeNumber, in: episodes)
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 0) {
                 hero
-                VStack(alignment: .leading, spacing: 20) {
-                    entrySection
-                    if let message {
-                        Text(message).font(.footnote).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: 0) {
+                    genres
+                    if let overview = details?.overview, !overview.isEmpty {
+                        SynopsisSection(text: overview)
+                            .padding(.top, 16)
+                    } else if detailsFailed {
+                        HStack {
+                            Text("Couldn't load the details.").foregroundStyle(.secondary)
+                            Button("Retry") { Task { await load() } }
+                        }
+                        .font(.subheadline)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
                     }
-                    detailsSection
+                    actionRow
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, 8)
+                    entryLine
+                        .padding(.horizontal, 16)
                     if kind == .tv { episodesSection }
                 }
-                .padding(.horizontal, 16)
+                .padding(.leading, leadingInset)
                 .padding(.bottom, 32)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .softScrollEdges([.bottom, .leading, .trailing])
         .hideScrollEdgeEffect(.top)
         .coordinateSpace(name: Self.scrollSpace)
+        .observeSafeAreaLeading($leadingInset)
         #if os(iOS)
         .ignoresSafeArea(edges: [.top, .leading])
         .navigationBarTitleDisplayMode(.inline)
@@ -59,123 +95,202 @@ struct SimklTitlePage: View {
         .adaptiveSheet(item: $editing) { entry in
             SimklTitleEditSheet(entry: entry, kind: kind) { reloadEntry() }
         }
+        .adaptiveSheet(item: $picker, onDismiss: presentAfterPicker) { request in
+            ModuleStreamPickerView(
+                mediaId: nil,
+                animeTitle: request.searchTitle,
+                episodeNumber: request.play.number,
+                seasonNumbering: request.play.seasonNumbering,
+                onDismiss: { picker = nil }
+            ) { streams, selected, showHref, count, episodeHref in
+                streamsLoaded(streams, selected: selected, request: request.play,
+                              href: showHref, episodeHref: episodeHref, count: count)
+            }
+            .environmentObject(ModuleManager.shared)
+        }
+        .adaptiveSheet(item: $choice, onDismiss: presentPending) { choice in
+            AniListStreamResultSheet(
+                episodeNumber: choice.play.request.number,
+                streams: choice.play.streams,
+                onDismiss: { self.choice = nil },
+                onSelect: { stream in
+                    pending = PendingPlay(stream: stream, streams: choice.play.streams, request: choice.play.request,
+                                          href: choice.play.href, episodeHref: choice.play.episodeHref,
+                                          count: choice.play.count)
+                    self.choice = nil
+                })
+        }
     }
 
-    // MARK: - Hero
+    // MARK: - Hero (as AniListDetailView.heroSection)
 
     private var hero: some View {
-        let height: CGFloat = 380
+        #if os(iOS)
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        let isIPad = false
+        #endif
+        let baseHeight: CGFloat = isIPad ? 500 : 420
         return ZStack(alignment: .bottom) {
             GeometryReader { proxy in
-                // Stretch from the first point of the pull, by the whole distance, as the anime page does.
-                let stretch = max(proxy.frame(in: .named(Self.scrollSpace)).minY, 0)
+                let scrollY = proxy.frame(in: .named(Self.scrollSpace)).minY
+                // Stretch from the first point of the pull, by the whole distance.
+                let isPullingDown = scrollY > 0
+                let scale = isPullingDown ? 1.0 + scrollY / max(baseHeight, 1) : 1.0
                 CachedAsyncImage(urlString: details?.fanartURL ?? posterURL ?? "")
-                    .frame(width: proxy.size.width, height: height)
+                    .frame(width: proxy.size.width, height: baseHeight)
                     .clipped()
-                    .scaleEffect(1 + stretch / height, anchor: .bottom)
+                    .scaleEffect(scale, anchor: .bottom)
             }
-            .frame(height: height)
+            .frame(height: baseHeight)
 
-            CurvedGradientShadow(height: 320, color: .adaptiveSystemBackground, style: .subtle)
+            CurvedGradientShadow(height: 350, color: .adaptiveSystemBackground, style: .subtle)
 
             HStack(alignment: .bottom, spacing: 14) {
                 CachedAsyncImage(urlString: posterURL ?? "")
                     .frame(width: 110, height: 165)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                    .expandablePoster {
+                        CachedAsyncImage(urlString: posterURL ?? "")
+                    }
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text(title)
                         .font(.title3.weight(.bold))
                         .lineLimit(3)
                         .heroTitleAnchor(in: Self.scrollSpace)
                     HStack(spacing: 8) {
-                        ForEach(chips, id: \.self) { chip in
-                            Text(chip)
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(Color.primary.opacity(0.1), in: Capsule())
+                        if let rating = details?.rating {
+                            chip {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "star.fill").font(.caption2.weight(.bold))
+                                    Text(String(format: "%.1f", rating)).font(.caption2.weight(.bold))
+                                }
+                            }
+                        }
+                        if let status = details?.status {
+                            chip { Text(status.capitalized).font(.caption2).fontWeight(.semibold) }
+                        }
+                        if let year = details?.year {
+                            chip { Text(String(year)).font(.caption2.weight(.medium)) }
                         }
                     }
                 }
-                Spacer(minLength: 0)
+                Spacer()
             }
             .padding(.horizontal, 16)
+            .padding(.leading, leadingInset)
             .padding(.bottom, 20)
         }
     }
 
-    private var chips: [String] {
-        guard let details else { return [] }
-        return [details.year.map(String.init),
-                details.runtime.map { SimklTitleLabels.runtime($0) },
-                details.status?.capitalized].compactMap { $0 }
+    private func chip<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Color.primary.opacity(0.1), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5))
     }
 
-    // MARK: - Your entry
+    // MARK: - Genres (as AniListDetailView.metadataSection)
 
     @ViewBuilder
-    private var entrySection: some View {
-        if let entry {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.status.displayName).font(.headline)
-                    Text(kind == .movie ? SimklTitleLabels.movieLine(entry.media) : SimklTitleLabels.showProgress(entry))
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    if entry.score > 0 {
-                        Text("Your score: \(Int(entry.score))/10").font(.subheadline).foregroundStyle(.secondary)
+    private var genres: some View {
+        if let genres = details?.genres, !genres.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(genres.prefix(6), id: \.self) { genre in
+                        Text(genre)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(Color.primary.opacity(0.1), in: Capsule())
+                            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5))
                     }
                 }
-                Spacer()
-                if kind == .movie, entry.status != .completed {
-                    Button("Watched") { Task { await save(status: .completed, plan: nil) } }
-                        .buttonStyle(.bordered)
-                        .disabled(busy)
-                }
-                Button("Edit") { editing = entry }
-                    .buttonStyle(.borderedProminent)
             }
-        } else {
-            Menu {
-                ForEach(LibrarySource.simkl.statuses(in: MediaListStatus.allCases, for: kind)) { status in
-                    Button(status.displayName) { Task { await save(status: status, plan: nil) } }
-                }
-            } label: {
-                Label("Add to list", systemImage: "plus.circle.fill").font(.headline)
-            }
-            .disabled(busy)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 4)
         }
-        Link(destination: simklURL) {
-            Label("Open on Simkl", systemImage: "safari")
-        }
-        .font(.subheadline)
     }
 
-    // MARK: - Details
+    // MARK: - Watch, edit, add
 
-    @ViewBuilder
-    private var detailsSection: some View {
-        if let details {
-            VStack(alignment: .leading, spacing: 8) {
-                if !details.genres.isEmpty {
-                    Text(details.genres.joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
+    private var actionRow: some View {
+        HStack(spacing: 10) {
+            watchButton
+            if let entry {
+                circleButton(systemImage: "square.and.pencil") { editing = entry }
+            } else {
+                Menu {
+                    ForEach(LibrarySource.simkl.statuses(in: MediaListStatus.allCases, for: kind)) { status in
+                        Button(status.displayName) { Task { await save(status: status, plan: nil) } }
+                    }
+                } label: {
+                    circleLabel(systemImage: "plus")
                 }
-                let facts = [details.network, details.certification].compactMap { $0 }
-                if !facts.isEmpty {
-                    Text(facts.joined(separator: " · ")).font(.footnote).foregroundStyle(.secondary)
-                }
-                if let overview = details.overview {
-                    Text(overview)
-                }
+                .disabled(busy)
             }
-        } else if detailsFailed {
-            HStack {
-                Text("Couldn't load the details.").foregroundStyle(.secondary)
-                Button("Retry") { Task { await load() } }
+        }
+    }
+
+    /// As AniListDetailView.watchButton: a capsule that continues or starts the right episode.
+    private var watchButton: some View {
+        let target = kind == .movie ? nil : SimklWatchTarget.episode(resume: resumeEpisode, watched: watched, episodes: episodes)
+        let resuming = kind == .movie ? resumeItem != nil : (resumeEpisode != nil && resumeEpisode == target)
+        return Button {
+            play(target)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "play.fill").font(.system(size: 13, weight: .bold))
+                Text(SimklWatchTarget.label(kind: kind, episode: target, resuming: resuming))
+                    .font(.system(size: 15, weight: .bold))
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 46)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
+            .foregroundStyle(.primary)
+        }
+        .buttonStyle(.plain)
+        .disabled(kind == .tv && target == nil)
+    }
+
+    private func circleButton(systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { circleLabel(systemImage: systemImage) }
+            .buttonStyle(.plain)
+    }
+
+    private func circleLabel(systemImage: String) -> some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(.primary)
+            .frame(width: 46, height: 46)
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay(Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
+    }
+
+    /// Where the user is, their score, and the way out to Simkl.
+    private var entryLine: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let entry {
+                let progress = kind == .movie ? SimklTitleLabels.movieLine(entry.media) : SimklTitleLabels.showProgress(entry)
+                Text("\(entry.status.displayName) · \(progress)\(entry.score > 0 ? " · \(Int(entry.score))/10" : "")")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            if let message {
+                Text(message).font(.footnote).foregroundStyle(.secondary)
+            }
+            Link(destination: simklURL) {
+                Label("Open on Simkl", systemImage: "safari")
             }
             .font(.subheadline)
-        } else {
-            ProgressView().frame(maxWidth: .infinity)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Seasons and episodes
@@ -198,16 +313,41 @@ struct SimklTitlePage: View {
                             seasonPill("Specials", selected: showsSpecials) { showsSpecials = true }
                         }
                     }
+                    .padding(.horizontal, 16)
                 }
                 if showsSpecials {
-                    Text("Simkl gives specials no season or episode number, so they can't be marked from here.")
+                    Text("Simkl gives specials no season or episode number, so they can't be played or marked from here.")
                         .font(.footnote).foregroundStyle(.secondary)
-                    ForEach(specials) { episodeRow($0, ref: nil) }
+                        .padding(.horizontal, 16)
+                    ForEach(specials) { special in
+                        Text(special.title ?? "Special")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 16)
+                    }
                 } else if let season {
                     seasonHeader(season)
-                    ForEach(episodes.filter { $0.ref?.season == season }) { episodeRow($0, ref: $0.ref) }
+                        .padding(.horizontal, 16)
+                    VStack(spacing: 10) {
+                        ForEach(episodes.filter { $0.ref?.season == season }) { episode in
+                            if let ref = episode.ref {
+                                ThumbnailEpisodeRow(
+                                    number: ref.episode,
+                                    thumbnail: episode.imageURL,
+                                    title: episode.title,
+                                    airdate: episode.date.map { String($0.prefix(10)) },
+                                    episodeDescription: episode.overview,
+                                    progress: progress(for: ref),
+                                    onTap: { play(ref) },
+                                    onMarkWatched: { Task { await mark(ref, watched: true) } },
+                                    onMarkUnwatched: { Task { await mark(ref, watched: false) } })
+                                .opacity(episode.aired ? 1 : 0.5)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
                 }
             }
+            .padding(.top, 12)
         }
     }
 
@@ -224,7 +364,7 @@ struct SimklTitlePage: View {
 
     private func seasonHeader(_ number: Int) -> some View {
         HStack {
-            Text("Season \(number)").font(.headline)
+            Text("Season \(number)").font(.title3.weight(.bold))
             Spacer()
             Menu {
                 Button("Mark season watched") { Task { await changeSeason(number, marking: true) } }
@@ -236,31 +376,91 @@ struct SimklTitlePage: View {
         }
     }
 
-    private func episodeRow(_ episode: SimklEpisode, ref: SimklEpisodeRef?) -> some View {
-        HStack(spacing: 12) {
-            CachedAsyncImage(urlString: episode.imageURL ?? "")
-                .frame(width: 112, height: 63)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(ref.map { "E\($0.episode) · \(episode.title ?? "Episode \($0.episode)")" } ?? (episode.title ?? "Special"))
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
-                if let date = episode.date {
-                    Text(String(date.prefix(10))).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Spacer(minLength: 0)
-            if let ref {
-                Button {
-                    Task { await toggle(ref) }
-                } label: {
-                    Image(systemName: watched.contains(ref) ? "checkmark.circle.fill" : "circle")
-                        .font(.title2)
-                }
-                .buttonStyle(.plain)
-                .disabled(!episode.aired || busy)
-                .opacity(episode.aired ? 1 : 0.35)
-            }
+    /// Watched on Simkl shows as complete; otherwise how far Continue Watching got.
+    private func progress(for ref: SimklEpisodeRef) -> Double? {
+        if watched.contains(ref) { return 1 }
+        let item = continueWatching.items.first { item in
+            guard item.simklTitle?.simklID == simklID, let season = item.simklTitle?.season else { return false }
+            return SimklPlayNumbering.episode(season: season, number: item.episodeNumber, in: episodes) == ref
+        }
+        guard let item, item.totalSeconds > 0 else { return nil }
+        return min(item.watchedSeconds / item.totalSeconds, 1)
+    }
+
+    // MARK: - Playing
+
+    private struct PlayRequest: Identifiable {
+        let play: SimklPlayback.Request
+        let searchTitle: String
+        var id: String { "\(play.ref.simklID)-\(play.ref.season ?? 0)-\(play.number)" }
+    }
+
+    private struct PendingPlay {
+        let stream: StreamResult
+        let streams: [StreamResult]
+        let request: SimklPlayback.Request
+        let href: String?
+        let episodeHref: String?
+        let count: Int?
+    }
+
+    private struct StreamChoice: Identifiable {
+        let id = UUID()
+        let play: PendingPlay
+    }
+
+    /// Opens the module picker for a movie, or for an episode by its season's own number.
+    private func play(_ episode: SimklEpisodeRef?) {
+        if kind == .movie {
+            picker = PlayRequest(
+                play: SimklPlayback.Request(
+                    ref: SimklPlayRef(simklID: simklID, kind: .movie, season: nil), number: 1,
+                    mediaTitle: title, imageURL: posterURL ?? "", thumbnailURL: details?.fanartURL,
+                    totalEpisodes: 1, isAiring: nil, seasonNumbering: nil),
+                searchTitle: title)
+            return
+        }
+        guard let episode else { return }
+        let searchTitle = SimklPlayNumbering.searchTitle(title, season: episode.season)
+        picker = PlayRequest(
+            play: SimklPlayback.Request(
+                ref: SimklPlayRef(simklID: simklID, kind: .tv, season: episode.season), number: episode.episode,
+                mediaTitle: searchTitle, imageURL: posterURL ?? "",
+                thumbnailURL: episodes.first { $0.ref == episode }?.imageURL,
+                totalEpisodes: SimklPlayNumbering.seasonCount(episode.season, in: episodes),
+                isAiring: details?.status == "airing",
+                seasonNumbering: SimklPlayNumbering.numbering(for: episode.season, in: episodes)),
+            searchTitle: searchTitle)
+    }
+
+    /// As AniListDetailViewModel.onStreamsLoaded: one stream (or one picked) plays once the picker
+    /// has gone; several open the stream choice.
+    private func streamsLoaded(_ streams: [StreamResult], selected: StreamResult?, request: SimklPlayback.Request,
+                               href: String?, episodeHref: String?, count: Int?) {
+        let sorted = streams.sorted { $0.title < $1.title }
+        guard let first = selected ?? (sorted.count == 1 ? sorted.first : nil) else {
+            choice = StreamChoice(play: PendingPlay(stream: sorted[0], streams: sorted, request: request,
+                                                    href: href, episodeHref: episodeHref, count: count))
+            picker = nil
+            return
+        }
+        pending = PendingPlay(stream: first, streams: sorted, request: request, href: href,
+                              episodeHref: episodeHref, count: count)
+        picker = nil
+    }
+
+    private func presentAfterPicker() {
+        // A stream choice replaces the picker; its own dismissal plays.
+        guard choice == nil else { return }
+        presentPending()
+    }
+
+    private func presentPending() {
+        guard let play = pending else { return }
+        pending = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + streamSelectionDelay) {
+            SimklPlayback.play(play.stream, streams: play.streams, request: play.request,
+                               searchResultHref: play.href, episodeHref: play.episodeHref, availableCount: play.count)
         }
     }
 
@@ -285,11 +485,10 @@ struct SimklTitlePage: View {
         }
     }
 
-    /// Opens on the season of the next episode to watch — or of the furthest watched, or the first.
+    /// Opens on the season of the episode the button plays.
     private func pickSeason() {
         guard season == nil else { return }
-        season = SimklEpisodePlanner.next(after: watched, in: episodes)?.season
-            ?? SimklEpisodePlanner.furthest(watched)?.season
+        season = SimklWatchTarget.episode(resume: resumeEpisode, watched: watched, episodes: episodes)?.season
             ?? SimklEpisodePlanner.regularSeasons(in: episodes).first
     }
 
@@ -297,8 +496,8 @@ struct SimklTitlePage: View {
         entry = service.cachedLibrary(kind)?.first { $0.id == simklID }
     }
 
-    private func toggle(_ ref: SimklEpisodeRef) async {
-        let marking = !watched.contains(ref)
+    private func mark(_ ref: SimklEpisodeRef, watched marking: Bool) async {
+        guard watched.contains(ref) != marking else { return }
         var newWatched = watched
         if marking { newWatched.insert(ref) } else { newWatched.remove(ref) }
         let mark = [SimklSeasonMark(number: ref.season, episodes: [ref.episode])]
