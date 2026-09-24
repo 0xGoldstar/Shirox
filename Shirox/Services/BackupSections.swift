@@ -142,7 +142,7 @@ struct SettingsBackupSection: BackupSection {
         "autoPickLastStream", "autoResumeDownloads", "autoSkipSegments",
         "backgroundDownloadsEnabled", "defaultReverseSort", "forceLandscape",
         "librarySortAscending", "playerLiquidGlass", "rateOnFinish",
-        "readerLiquidGlass", "skipReWatchTracking", "useDefaultExtension",
+        "readerLiquidGlass", "readerPageCurl", "skipReWatchTracking", "useDefaultExtension",
         "dataSaverEnabled"
     ]
 

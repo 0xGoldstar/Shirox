@@ -104,6 +104,8 @@ struct MangaReaderView: View {
     @State private var isAutoScrolling = false
     @AppStorage("mangaAutoScrollSpeed") private var autoScrollSpeed = 120.0
     @AppStorage("readerLiquidGlass") private var readerLiquidGlass = true
+    /// Apple Books' page curl for the paged modes; off, pages slide.
+    @AppStorage("readerPageCurl") private var pageCurl = true
     // Live speed range (pt/s): top is ~6.7× the old "Turbo" preset (120).
     private static let autoScrollSpeedRange: ClosedRange<Double> = 20...800
 
@@ -255,9 +257,9 @@ struct MangaReaderView: View {
             verticalReader
         } else {
             pagedReader
-                // Recreate only on MODE change — chapter boundaries are
-                // crossed by swiping within the same stitched TabView.
-                .id(mode.rawValue)
+                // Recreate only on MODE (or curl) change — chapter boundaries are
+                // crossed by swiping within the same stitched pager.
+                .id("\(mode.rawValue)-\(pageCurl)")
         }
     }
 
@@ -351,7 +353,31 @@ struct MangaReaderView: View {
     }
 
 
+    @ViewBuilder
     private var pagedReader: some View {
+        if pageCurl {
+            // Reading order both ways; right to left moves the spine, not the pages.
+            PageCurlPager(pageIDs: strip.map(\.globalIdx), current: $currentPage, rightToLeft: isRTL) { id, onZoomChange in
+                curlPage(id, onZoomChange: onZoomChange)
+            }
+            .ignoresSafeArea()
+        } else {
+            slidingPager
+        }
+    }
+
+    @ViewBuilder
+    private func curlPage(_ id: Int, onZoomChange: @escaping (CGFloat) -> Void) -> some View {
+        if let item = strip.first(where: { $0.globalIdx == id }) {
+            ZoomableContainer(onSingleTap: {
+                withAnimation(.easeInOut(duration: 0.2)) { chromeVisible.toggle() }
+            }, onZoomChange: onZoomChange) {
+                ReaderPageView(urlString: item.url, referer: referer, pageNumber: item.pageIdx + 1)
+            }
+        }
+    }
+
+    private var slidingPager: some View {
         // Stable tags (globalIdx) + reversed data order for RTL: appending a
         // stitched chapter never shifts existing pages' identity, so the
         // current page holds still while the strip grows in either direction.
@@ -436,6 +462,10 @@ struct MangaReaderView: View {
                         Label(m.label, systemImage: m.icon).tag(m.rawValue)
                     }
                 }
+                Toggle(isOn: $pageCurl) {
+                    Label("Page Curl", systemImage: "book.pages")
+                }
+                .disabled(mode == .vertical)
             } label: {
                 Image(systemName: "book")
                     .font(.system(size: 18, weight: .semibold))

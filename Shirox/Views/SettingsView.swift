@@ -658,9 +658,18 @@ struct PlayerSettingsView: View {
 #if os(iOS)
 struct ReaderSettingsView: View {
     @AppStorage("readerLiquidGlass") private var readerLiquidGlass = true
+    @AppStorage("readerPageCurl") private var readerPageCurl = true
 
     var body: some View {
         List {
+            Section {
+                Toggle("Page Curl", isOn: $readerPageCurl)
+                    .tint(.secondary)
+            } header: {
+                Text("Turning Pages")
+            } footer: {
+                Text("Turn pages with a curl, like a book, in the paged reading modes. Turn off to slide them instead.")
+            }
             if #available(iOS 26.0, *) {
                 Section {
                     Toggle("Liquid Glass Controls", isOn: $readerLiquidGlass)
