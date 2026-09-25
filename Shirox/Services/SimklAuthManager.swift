@@ -161,6 +161,16 @@ final class SimklAuthManager: NSObject, ObservableObject {
         return request
     }
 
+    /// A request for one of Simkl's CDN files on data.simkl.in — the trending, DVD and calendar
+    /// files. They're public and cost no one any allowance, so no token goes with them.
+    func dataRequest(path: String) -> URLRequest {
+        var components = URLComponents(string: "https://data.simkl.in\(path)")!
+        components.queryItems = identificationQuery
+        var request = URLRequest(url: components.url!)
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        return request
+    }
+
     /// Sends an authenticated API request, refreshing ahead of expiry and — once — on a 401.
     ///
     /// A V2 access token lasts seven days, so a 401 is nearly always plain expiry: refresh,
