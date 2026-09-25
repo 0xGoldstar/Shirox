@@ -376,6 +376,7 @@ struct DetailView: View {
             TrackingLinksView(
                 page: .module(title: item.title, moduleKey: linkModuleKey, aniListID: vm.aniListID),
                 initialSide: .anilist,
+                moduleEpisodeCount: vm.detail?.episodes.count ?? 0,
                 onAniListMatch: { aid in
                     if let aid {
                         vm.setAniListMatch(aid)

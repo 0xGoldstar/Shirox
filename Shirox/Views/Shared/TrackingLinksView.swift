@@ -35,6 +35,8 @@ struct TrackingLinksView: View {
 
     let page: Page
     var initialSide: LibrarySide = .anilist
+    /// Module pages: how many episodes the page lists, for a linked show's season guess.
+    var moduleEpisodeCount: Int = 0
     /// Module pages only: the AniList match, which also drives page metadata. nil unlinks.
     var onAniListMatch: ((Int?) -> Void)? = nil
     /// After any stored link changes, so the page can reload its entries.
@@ -56,7 +58,27 @@ struct TrackingLinksView: View {
     @State private var message: String?
     @State private var searchTask: Task<Void, Never>?
 
+    /// Module pages' Simkl tab: anime, or the show or movie the page is.
+    @State private var simklKind: MediaKind = .anime
+    @State private var titleLink: SimklTitleLink?
+    @State private var titleLinkName: String?
+    @State private var seasons: [Int] = []
+
     private var isModulePage: Bool { if case .module = page { return true }; return false }
+
+    /// The Simkl tab on a module page, set to Shows or Movies.
+    private var linksTitle: Bool { isModulePage && side == .simkl && simklKind != .anime }
+
+    /// The Simkl kind searches and IDs are for.
+    private var searchKind: MediaKind { linksTitle ? simklKind : .anime }
+
+    private var kindNoun: String {
+        switch searchKind {
+        case .tv:    return "show"
+        case .movie: return "movie"
+        default:     return "anime"
+        }
+    }
 
     private var sides: [LibrarySide] {
         LibrarySide.allCases.filter { s in
@@ -79,7 +101,20 @@ struct TrackingLinksView: View {
                     .pickerStyle(.segmented)
                 }
 
-                Section("Linked") { currentRow }
+                if isModulePage && side == .simkl {
+                    Section {
+                        Picker("Kind", selection: $simklKind) {
+                            ForEach(MediaKind.simklKinds, id: \.self) { Text($0.simklKindTitle).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                    } footer: {
+                        Text("A show or movie linked here is marked on Simkl as you finish its episodes.")
+                    }
+                }
+
+                Section("Linked") {
+                    if linksTitle { titleLinkRow } else { currentRow }
+                }
 
                 if page.fixedSide != side {
                     Section("Search \(side.name)") {
@@ -104,7 +139,7 @@ struct TrackingLinksView: View {
                     } header: {
                         Text("Or enter an ID")
                     } footer: {
-                        Text("A number, or a link to the anime on \(side.name).")
+                        Text("A number, or a link to the \(kindNoun) on \(side.name).")
                     }
                 }
 
@@ -124,9 +159,16 @@ struct TrackingLinksView: View {
             side = sides.contains(initialSide) ? initialSide : (sides.first ?? .anilist)
             query = page.title
             await reload()
+            if let kind = titleLink?.kind { simklKind = kind }
             performSearch()
         }
         .onChangeOf(side) {
+            results = []
+            idText = ""
+            message = nil
+            performSearch()
+        }
+        .onChangeOf(simklKind) {
             results = []
             idText = ""
             message = nil
@@ -156,6 +198,39 @@ struct TrackingLinksView: View {
             Button("Unlink", role: .destructive) {
                 onAniListMatch?(nil)
                 dismiss()
+            }
+        }
+    }
+
+    @ViewBuilder private var titleLinkRow: some View {
+        if let link = titleLink, link.kind == simklKind {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(titleLinkName ?? "#\(link.simklID)").font(.headline)
+                    Text(link.automatic ? "Matched automatically" : "Set by you")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Unlink") { unlinkTitle() }
+                    .font(.caption)
+            }
+            if link.kind == .tv {
+                Picker("This page is", selection: Binding(get: { link.season ?? 0 },
+                                                          set: { setSeason($0 == 0 ? nil : $0) })) {
+                    Text("All seasons").tag(0)
+                    ForEach(Array(Set(seasons + [link.season].compactMap { $0 })).sorted(), id: \.self) {
+                        Text("Season \($0)").tag($0)
+                    }
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Not linked").font(.headline)
+                Text(titleLink.map { "Linked as a \($0.kind == .movie ? "movie" : "show")" }
+                     ?? "Episodes finished here aren't marked on Simkl")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -231,6 +306,15 @@ struct TrackingLinksView: View {
             }
         }
         currentTitles = titles
+        titleLink = links.simklTitle
+        titleLinkName = nil
+        seasons = []
+        if let link = titleLink {
+            titleLinkName = (try? await SimklCatalog.details(link.kind, simklID: link.simklID))?.title
+            if link.kind == .tv, let episodes = try? await SimklCatalog.loadEpisodes(simklID: link.simklID) {
+                seasons = SimklEpisodePlanner.regularSeasons(in: episodes)
+            }
+        }
     }
 
     // MARK: - Actions
@@ -239,13 +323,14 @@ struct TrackingLinksView: View {
         searchTask?.cancel()
         let q = query.trimmingCharacters(in: .whitespaces)
         let s = side
+        let kind = searchKind
         guard !q.isEmpty, page.fixedSide != s else { results = []; return }
         searchTask = Task {
             try? await Task.sleep(nanoseconds: 400_000_000)
             guard !Task.isCancelled else { return }
             isSearching = true
             do {
-                let found = try await Self.search(q, on: s)
+                let found = try await Self.search(q, on: s, simklKind: kind)
                 guard !Task.isCancelled else { return }
                 results = found
                 message = found.isEmpty ? "No results on \(s.name)." : nil
@@ -260,15 +345,17 @@ struct TrackingLinksView: View {
 
     private func linkTypedID() {
         let s = side
-        guard let id = TrackingIDInput.parse(idText, for: s) else {
-            message = "Enter a number, or a link to the anime on \(s.name)."
+        let kind = searchKind
+        let noun = kindNoun
+        guard let id = TrackingIDInput.parse(idText, for: s, simklKind: kind) else {
+            message = "Enter a number, or a link to the \(noun) on \(s.name)."
             return
         }
         message = "Checking…"
         Task {
             do {
-                guard let found = try await Self.lookup(id, on: s) else {
-                    message = "\(s.name) has no anime with ID \(id)."
+                guard let found = try await Self.lookup(id, on: s, simklKind: kind) else {
+                    message = "\(s.name) has no \(noun) with ID \(id)."
                     return
                 }
                 link(found)
@@ -279,6 +366,10 @@ struct TrackingLinksView: View {
     }
 
     private func link(_ candidate: LinkCandidate) {
+        if linksTitle {
+            linkTitle(candidate)
+            return
+        }
         if isModulePage, side == .anilist {
             onAniListMatch?(candidate.id)
             dismiss()
@@ -316,6 +407,52 @@ struct TrackingLinksView: View {
         Task { await reload() }
     }
 
+    /// Links the page's show or movie. A show's season starts at the guess; the picker changes it.
+    private func linkTitle(_ candidate: LinkCandidate) {
+        guard let key = page.storeKey else {
+            message = "This page has no module address, so links can't be saved for it."
+            return
+        }
+        let kind = simklKind
+        message = "Linking…"
+        Task {
+            var season: Int?
+            if kind == .tv {
+                season = SimklModuleMatch.seasonGuess(title: page.title, moduleEpisodeCount: moduleEpisodeCount,
+                                                      simklEpisodes: try? await SimklCatalog.loadEpisodes(simklID: candidate.id))
+            }
+            TrackingLinkStore.shared.update(key) {
+                $0.simklTitle = SimklTitleLink(simklID: candidate.id, kind: kind, season: season, automatic: false)
+                $0.simklSearched = true
+            }
+            message = "Linked Simkl to \(candidate.title)."
+            idText = ""
+            onChange()
+            await reload()
+        }
+    }
+
+    private func setSeason(_ season: Int?) {
+        guard let key = page.storeKey, var link = titleLink else { return }
+        link.season = season
+        link.automatic = false
+        TrackingLinkStore.shared.update(key) { $0.simklTitle = link }
+        titleLink = link
+        onChange()
+    }
+
+    /// The page stays marked searched, so it isn't matched automatically again.
+    private func unlinkTitle() {
+        guard let key = page.storeKey else { return }
+        TrackingLinkStore.shared.update(key) {
+            $0.simklTitle = nil
+            $0.simklSearched = true
+        }
+        message = nil
+        onChange()
+        Task { await reload() }
+    }
+
     // MARK: - Services
 
     struct LinkCandidate: Identifiable, Equatable {
@@ -340,22 +477,32 @@ struct TrackingLinksView: View {
                 .nilIfEmpty
             posterURL = item.posterURL
         }
-    }
 
-    @MainActor
-    static func search(_ query: String, on side: LibrarySide) async throws -> [LinkCandidate] {
-        switch side {
-        case .anilist: return try await AniListProvider.shared.search(query).map(LinkCandidate.init(media:))
-        case .mal:     return try await MALProvider.shared.search(query).map(LinkCandidate.init(media:))
-        case .simkl:   return try await SimklCatalog.search(query).compactMap(LinkCandidate.init(simkl:))
+
+        init(details: SimklTitleDetails) {
+            id = details.simklID
+            title = details.title
+            detail = details.year.map(String.init)
+            posterURL = details.posterURL.flatMap(URL.init(string:))
         }
     }
 
     @MainActor
-    static func lookup(_ id: Int, on side: LibrarySide) async throws -> LinkCandidate? {
+    static func search(_ query: String, on side: LibrarySide, simklKind: MediaKind = .anime) async throws -> [LinkCandidate] {
+        switch side {
+        case .anilist: return try await AniListProvider.shared.search(query).map(LinkCandidate.init(media:))
+        case .mal:     return try await MALProvider.shared.search(query).map(LinkCandidate.init(media:))
+        case .simkl:   return try await SimklCatalog.search(query, kind: simklKind).compactMap(LinkCandidate.init(simkl:))
+        }
+    }
+
+    @MainActor
+    static func lookup(_ id: Int, on side: LibrarySide, simklKind: MediaKind = .anime) async throws -> LinkCandidate? {
         switch side {
         case .anilist: return LinkCandidate(media: try await AniListProvider.shared.detail(id: id))
         case .mal:     return LinkCandidate(media: try await MALProvider.shared.detail(id: id))
+        case .simkl where simklKind == .tv || simklKind == .movie:
+            return try await SimklCatalog.details(simklKind, simklID: id).map(LinkCandidate.init(details:))
         case .simkl:   return try await SimklCatalog.lookup(simklID: id).flatMap(LinkCandidate.init(simkl:))
         }
     }
