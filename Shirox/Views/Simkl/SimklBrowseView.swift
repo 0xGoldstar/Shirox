@@ -18,36 +18,72 @@ enum SimklBrowse {
         guard let genre else { return items }
         return items.filter { $0.genres.contains(genre) }
     }
+
+    /// Every list the menu offers for a kind: the three trending periods, then Home's other rows.
+    static func lists(for kind: MediaKind) -> [SimklFeedList] {
+        SimklFeedList.Period.allCases.map { SimklFeedList.trending(kind, $0) }
+            + SimklHomeRows.rows(for: kind).filter {
+                if case .trending = $0 { return false }
+                return true
+            }
+    }
+
+    /// The same sort of list for another kind. New Premieres and New Releases stand in for each
+    /// other, as Airing Today and Coming Soon do; DVD & Digital is movies only.
+    static func equivalent(_ list: SimklFeedList, in kind: MediaKind) -> SimklFeedList {
+        switch list {
+        case .trending(_, let period): return .trending(kind, period)
+        case .top: return .top(kind)
+        case .calendar: return .calendar(kind)
+        case .premieres, .newReleases: return kind == .movie ? .newReleases : .premieres(kind)
+        case .dvdReleases: return kind == .movie ? .dvdReleases : .trending(kind, .week)
+        }
+    }
 }
 
 @MainActor
 final class SimklBrowseViewModel: ObservableObject {
-    @Published var period: SimklFeedList.Period = .week
+    /// The list picked in the menu; nil until the first load picks Trending This Week.
+    @Published private var chosen: SimklFeedList?
     @Published private(set) var genre: String?
     @Published private(set) var genres: [String] = []
     @Published private(set) var titles: [Media] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
 
-    private var items: [SimklDiscoverItem] = []
-    private var list: SimklFeedList?
-    private var tracker: ProviderType = .anilist
-    private var map: [Int: Int] = [:]
+    private var loaded: SimklFeedList?
+    private var prepared: SimklDiscoverMedia.Prepared?
 
-    /// The top 500 most watched of a kind over the period — a free file, filtered on the device.
+    /// The list shown for a kind: the one picked, in that kind's terms.
+    func list(for kind: MediaKind) -> SimklFeedList {
+        SimklBrowse.equivalent(chosen ?? .trending(kind, .week), in: kind)
+    }
+
+    /// The view's task, keyed on the list, loads it.
+    func choose(_ list: SimklFeedList) {
+        chosen = list
+    }
+
+    /// The whole list — the top 500 where there's a choice — narrowed on the device by genre.
     func load(kind: MediaKind) async {
-        let list = SimklFeedList.trending(kind, period)
+        let list = list(for: kind)
+        chosen = list
+        if loaded != list {
+            // Not the last list's titles under this one's heading while it loads.
+            titles = []
+            genres = []
+        }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
         do {
             let raw = try await SimklFeedStore.shared.items(list, full: true)
-            tracker = SimklDiscoverMedia.tracker
-            map = await SimklDiscoverMedia.anilistMap(for: raw, kind: kind, tracker: tracker)
+            let prepared = await SimklDiscoverMedia.prepare(list, raw)
             guard !Task.isCancelled else { return }
-            items = raw
-            self.list = list
-            genres = SimklBrowse.genres(in: raw)
+            self.prepared = prepared
+            loaded = list
+            // Only trending and DVD entries carry genres; the other lists offer no chips.
+            genres = SimklBrowse.genres(in: SimklHomeRows.select(list, prepared.items, today: today))
             if let genre, !genres.contains(genre) { self.genre = nil }
             refilter()
         } catch {
@@ -62,15 +98,17 @@ final class SimklBrowseViewModel: ObservableObject {
         refilter()
     }
 
+    private var today: String { SimklHomeRows.day(Date()) }
+
     private func refilter() {
-        guard let list else { return }
-        titles = SimklHomeRows.titles(list, SimklBrowse.filter(items, genre: genre), today: "",
-                                      tracker: tracker, anilistForMAL: map)
+        guard let list = loaded, let prepared else { return }
+        titles = SimklHomeRows.titles(list, SimklBrowse.filter(prepared.items, genre: genre), today: today,
+                                      tracker: prepared.tracker, anilistForMAL: prepared.anilistForMAL)
     }
 }
 
-/// What Search shows on Simkl before anything's typed: the most watched of a kind, by period and
-/// genre. Free — it's Simkl's trending file.
+/// What Search shows on Simkl before anything's typed: any of Home's lists for a kind, narrowed
+/// by genre where the list has them.
 struct SimklBrowseView: View {
     @StateObject private var vm = SimklBrowseViewModel()
     @ObservedObject private var discovery = DiscoverySource.shared
@@ -97,6 +135,13 @@ struct SimklBrowseView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)
+                } else if vm.titles.isEmpty {
+                    ContentUnavailableView(
+                        "Nothing Here",
+                        systemImage: "square.stack.3d.up.slash",
+                        description: Text(vm.genre.map { "Nothing in \($0) on this list." }
+                                          ?? "Simkl has nothing on this list right now."))
+                        .padding(.top, 40)
                 } else {
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(vm.titles, id: \.uniqueId) { media in
@@ -114,49 +159,45 @@ struct SimklBrowseView: View {
             }
             .padding(.top, 4)
         }
-        .task(id: "\(discovery.simklKind.rawValue)-\(vm.period.rawValue)") {
+        .task(id: "\(discovery.simklKind.rawValue)|\(vm.list(for: discovery.simklKind))") {
             await vm.load(kind: discovery.simklKind)
         }
     }
 
     private var filters: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Trending")
-                    .font(.title3.weight(.bold))
-                Spacer()
-                Menu {
-                    Picker("Period", selection: $vm.period) {
-                        ForEach(SimklFeedList.Period.allCases, id: \.self) { period in
-                            Text(period.title).tag(period)
-                        }
+        let kind = discovery.simklKind
+        return VStack(alignment: .leading, spacing: 10) {
+            // The heading is the menu: every list Home has for the kind, and the three trending periods.
+            Menu {
+                Picker("List", selection: Binding(get: { vm.list(for: kind) }, set: { vm.choose($0) })) {
+                    ForEach(SimklBrowse.lists(for: kind), id: \.self) { list in
+                        Text(list.title).tag(list)
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(vm.period.title)
-                            .font(.subheadline.weight(.semibold))
-                        Image(systemName: "chevron.down")
-                            .font(.caption2.weight(.bold))
-                    }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.secondary.opacity(0.12), in: Capsule())
                 }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(vm.list(for: kind).title)
+                        .font(.title3.weight(.bold))
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.bold))
+                }
+                .foregroundStyle(.primary)
             }
             .padding(.horizontal, 16)
 
             SimklKindPicker(kind: $discovery.simklKind)
                 .padding(.horizontal, 16)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    FilterChip(title: "All", selected: vm.genre == nil) { vm.choose(genre: nil) }
-                    ForEach(vm.genres, id: \.self) { name in
-                        FilterChip(title: name, selected: vm.genre == name) { vm.choose(genre: name) }
+            if !vm.genres.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        FilterChip(title: "All", selected: vm.genre == nil) { vm.choose(genre: nil) }
+                        ForEach(vm.genres, id: \.self) { name in
+                            FilterChip(title: name, selected: vm.genre == name) { vm.choose(genre: name) }
+                        }
                     }
+                    .padding(.horizontal, 16)
                 }
-                .padding(.horizontal, 16)
             }
         }
     }

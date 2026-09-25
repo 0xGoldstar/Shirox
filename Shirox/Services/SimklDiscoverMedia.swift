@@ -49,6 +49,21 @@ enum SimklDiscoverMedia {
         }
     }
 
+    /// A list's entries ready to turn into titles: anime's missing ids filled in (Top Rated sends
+    /// only Simkl's), and AniList ids for those that had only MyAnimeList's.
+    struct Prepared {
+        let items: [SimklDiscoverItem]
+        let tracker: ProviderType
+        let anilistForMAL: [Int: Int]
+    }
+
+    @MainActor static func prepare(_ list: SimklFeedList, _ items: [SimklDiscoverItem]) async -> Prepared {
+        let items = list.kind == .anime ? await SimklAnimeIDCache.shared.fill(items) : items
+        let tracker = tracker
+        let map = await anilistMap(for: items, kind: list.kind, tracker: tracker)
+        return Prepared(items: items, tracker: tracker, anilistForMAL: map)
+    }
+
     /// The anime tracker: MyAnimeList when it's first in the provider order, else AniList.
     @MainActor static var tracker: ProviderType {
         ProviderManager.shared.primary?.providerType == .mal ? .mal : .anilist

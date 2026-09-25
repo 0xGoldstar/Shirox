@@ -21,4 +21,32 @@ final class SimklBrowseTests: XCTestCase {
         XCTAssertEqual(SimklBrowse.filter(items, genre: "Comedy").map(\.ids.simkl), [2, 3])
         XCTAssertEqual(SimklBrowse.filter(items, genre: nil).map(\.ids.simkl), [1, 2, 3])
     }
+
+    func testEachKindsListsInTheMenu() {
+        XCTAssertEqual(SimklBrowse.lists(for: .tv), [
+            .trending(.tv, .today), .trending(.tv, .week), .trending(.tv, .month),
+            .top(.tv), .premieres(.tv), .calendar(.tv),
+        ])
+        XCTAssertEqual(SimklBrowse.lists(for: .movie), [
+            .trending(.movie, .today), .trending(.movie, .week), .trending(.movie, .month),
+            .top(.movie), .newReleases, .dvdReleases, .calendar(.movie),
+        ])
+    }
+
+    /// Switching kind keeps the same sort of list: Top Rated stays Top Rated, New Premieres
+    /// becomes New Releases, Airing Today becomes Coming Soon.
+    func testSwitchingKindKeepsTheSameSortOfList() {
+        XCTAssertEqual(SimklBrowse.equivalent(.trending(.tv, .month), in: .anime), .trending(.anime, .month))
+        XCTAssertEqual(SimklBrowse.equivalent(.top(.tv), in: .movie), .top(.movie))
+        XCTAssertEqual(SimklBrowse.equivalent(.premieres(.tv), in: .movie), .newReleases)
+        XCTAssertEqual(SimklBrowse.equivalent(.newReleases, in: .anime), .premieres(.anime))
+        XCTAssertEqual(SimklBrowse.equivalent(.calendar(.tv), in: .movie), .calendar(.movie))
+        XCTAssertEqual(SimklBrowse.equivalent(.dvdReleases, in: .tv), .trending(.tv, .week))
+        XCTAssertEqual(SimklBrowse.equivalent(.dvdReleases, in: .movie), .dvdReleases)
+        for kind in MediaKind.simklKinds {
+            for list in SimklBrowse.lists(for: kind) {
+                XCTAssertTrue(SimklBrowse.lists(for: kind).contains(SimklBrowse.equivalent(list, in: kind)))
+            }
+        }
+    }
 }
