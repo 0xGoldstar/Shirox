@@ -77,6 +77,37 @@ final class SimklDiscoverTests: XCTestCase {
         XCTAssertEqual(items.map(\.released), ["2026-09-26", "2026-08-12", nil])
     }
 
+    /// Calendar v2: each airing joined with its title's details, on the viewer's own day — its
+    /// times are UTC.
+    func testCalendarVersionTwo() throws {
+        let json = #"""
+        {"calendar":[
+           {"simkl_id":3200766,"date":"2026-09-23T15:00:00Z","finale_type":null,"episode":{"episode":20,"title":"Episode 20"}},
+           {"simkl_id":1882859,"date":"2026-09-24T04:00:00Z","episode":{"season":2,"episode":1}},
+           {"simkl_id":999,"date":"2026-09-24T04:00:00Z","episode":{"episode":1}}],
+         "metadata":{
+           "3200766":{"title":"Primeval Overlord","title_romaji":"Taigu Shenzun","poster":"20/2043","fanart":null,
+                      "ids":{"simkl_id":3200766,"mal":"64710","anilist":"180001"},"release_date":"2026-07-29T15:00:00Z",
+                      "rank":null,"ratings":{"simkl":{"rating":null}},"runtime":"10m","total_episodes":40,
+                      "genres":["Action","Fantasy"]},
+           "1882859":{"title":"Craft Games","poster":"12/1247","ids":{"simkl_id":1882859},"rank":23032,"genres":["Comedy"]}}}
+        """#
+        let tokyo = try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))
+        let items = try SimklDiscoverItem.decodeList(Data(json.utf8), timeZone: tokyo)
+        XCTAssertEqual(items.map(\.ids.simkl), [3200766, 1882859], "An airing without details is skipped")
+        XCTAssertEqual(items.map(\.airDay), ["2026-09-24", "2026-09-24"], "15:00 UTC on the 23rd is the 24th in Tokyo")
+        XCTAssertEqual(items.map(\.episode), [20, 1])
+        XCTAssertEqual(items[0].ids, .init(simkl: 3200766, mal: 64710, anilist: 180001))
+        XCTAssertEqual(items[0].genres, ["Action", "Fantasy"])
+        XCTAssertEqual(items[0].released, "2026-07-29")
+        XCTAssertEqual(items[0].runtime, 10)
+        XCTAssertNil(items[0].rank)
+        XCTAssertEqual(items[1].rank, 23032)
+        let newYork = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        XCTAssertEqual(try SimklDiscoverItem.decodeList(Data(json.utf8), timeZone: newYork).map(\.airDay),
+                       ["2026-09-23", "2026-09-24"], "The same airings on New York's days")
+    }
+
     func testAnEntryWithoutASimklIdIsSkipped() throws {
         let items = try decode(#"[{"title":"No id","ids":{"slug":"x"}},{"title":"Kept","ids":{"simkl_id":7}}]"#)
         XCTAssertEqual(items.map(\.title), ["Kept"])
@@ -95,9 +126,19 @@ final class SimklDiscoverTests: XCTestCase {
         XCTAssertEqual(SimklFeedList.trending(.movie, .week).path(full: true), "/discover/trending/movies/week_500.json")
         XCTAssertEqual(SimklFeedList.trending(.anime, .month).path(full: false), "/discover/trending/anime/month_100.json")
         XCTAssertEqual(SimklFeedList.dvdReleases.path(full: true), "/discover/dvd/releases_500.json")
-        XCTAssertEqual(SimklFeedList.calendar(.anime).path(full: true), "/calendar/anime.json")
-        XCTAssertEqual(SimklFeedList.calendar(.tv).path(full: false), "/calendar/tv.json")
-        XCTAssertEqual(SimklFeedList.calendar(.movie).path(full: false), "/calendar/movie_release.json")
+        XCTAssertEqual(SimklFeedList.calendar(.anime).path(full: true), "/calendar/v2/anime.json")
+        XCTAssertEqual(SimklFeedList.calendar(.tv).path(full: false), "/calendar/v2/tv.json")
+        XCTAssertEqual(SimklFeedList.calendar(.movie).path(full: false), "/calendar/v2/movie_release.json")
+    }
+
+    /// The calendar falls back to its v1 file, until Simkl retires it; nothing else has a fallback.
+    func testOnlyTheCalendarHasAFallback() {
+        XCTAssertEqual(SimklFeedList.calendar(.anime).fallbackPath(full: true), "/calendar/anime.json")
+        XCTAssertEqual(SimklFeedList.calendar(.movie).fallbackPath(full: false), "/calendar/movie_release.json")
+        XCTAssertEqual(SimklFeedList.premieres(.tv).fallbackPath(full: false), "/calendar/tv.json")
+        XCTAssertNil(SimklFeedList.trending(.tv, .today).fallbackPath(full: false))
+        XCTAssertNil(SimklFeedList.top(.tv).fallbackPath(full: false))
+        XCTAssertNil(SimklFeedList.dvdReleases.fallbackPath(full: true))
     }
 
     /// Top Rated comes from Simkl's API with the user's token; New Premieres and New Releases
@@ -116,7 +157,7 @@ final class SimklDiscoverTests: XCTestCase {
         XCTAssertEqual(SimklFeedList.premieres(.tv).refreshInterval, 21600)
         XCTAssertEqual(SimklFeedList.newReleases.refreshInterval, 86400)
         XCTAssertEqual(SimklFeedList.premieres(.tv).path(full: false), SimklFeedList.calendar(.tv).path(full: false))
-        XCTAssertEqual(SimklFeedList.premieres(.anime).path(full: true), "/calendar/anime.json")
+        XCTAssertEqual(SimklFeedList.premieres(.anime).path(full: true), "/calendar/v2/anime.json")
         XCTAssertEqual(SimklFeedList.newReleases.path(full: false), "/discover/trending/movies/month_100.json")
         XCTAssertEqual(SimklFeedList.newReleases.path(full: true), "/discover/trending/movies/month_500.json")
         XCTAssertEqual(SimklFeedList.top(.tv).title, "Top Rated")

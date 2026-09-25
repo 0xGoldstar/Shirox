@@ -9,7 +9,7 @@ import Foundation
 final class SimklFeedStore {
     static let shared = SimklFeedStore()
 
-    typealias Download = @MainActor (SimklFeedList, _ full: Bool) async throws -> Data
+    typealias Download = @MainActor (SimklFeedList, _ path: String) async throws -> Data
 
     private let directory: URL
     private let download: Download
@@ -37,16 +37,22 @@ final class SimklFeedStore {
         }
         if let running = inFlight[file] { return try await running.value }
         let download = self.download
+        // The calendar's v1 file stands in when v2 can't be had; the saved copy reads as either.
+        let paths = [list.path(full: full)] + [list.fallbackPath(full: full)].compactMap { $0 }
         let task = Task { () throws -> [SimklDiscoverItem] in
-            do {
-                let data = try await download(list, full)
-                let items = try SimklDiscoverItem.decodeList(data)
-                self.save(data, to: file)
-                return items
-            } catch {
-                if let saved = self.read(file) { return saved }
-                throw error
+            var failure: Error?
+            for path in paths {
+                do {
+                    let data = try await download(list, path)
+                    let items = try SimklDiscoverItem.decodeList(data)
+                    self.save(data, to: file)
+                    return items
+                } catch {
+                    failure = error
+                }
             }
+            if let saved = self.read(file) { return saved }
+            throw failure ?? CancellationError()
         }
         inFlight[file] = task
         defer { inFlight[file] = nil }
@@ -60,11 +66,11 @@ final class SimklFeedStore {
 
     /// A CDN file without a token; an API list with the user's, through the sender that
     /// refreshes it — and that list's refusal in Simkl's words, as search's is.
-    static func fetch(_ list: SimklFeedList, full: Bool) async throws -> Data {
+    static func fetch(_ list: SimklFeedList, path: String) async throws -> Data {
         let auth = SimklAuthManager.shared
         if list.needsToken {
             let (data, http) = try await auth.send {
-                try auth.authorizedRequest(path: list.path(full: full), query: list.query)
+                try auth.authorizedRequest(path: path, query: list.query)
             }
             guard (200...299).contains(http.statusCode) else {
                 let failure = SimklLibraryService.classify(status: http.statusCode, body: data,
@@ -73,7 +79,7 @@ final class SimklFeedStore {
             }
             return data
         }
-        let (data, response) = try await URLSession.shared.data(for: auth.dataRequest(path: list.path(full: full)))
+        let (data, response) = try await URLSession.shared.data(for: auth.dataRequest(path: path))
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(status) else { throw ProviderError.serverError(status) }
         return data

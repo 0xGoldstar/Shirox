@@ -12,6 +12,9 @@ final class SimklFeedStoreTests: XCTestCase {
         .appendingPathComponent("SimklFeedStoreTests-\(UUID().uuidString)", isDirectory: true)
     private var clock = Date(timeIntervalSince1970: 1_800_000_000)
     private var downloads: [SimklFeedList] = []
+    /// The files asked for, in order.
+    private var paths: [String] = []
+    private var failingPaths: Set<String> = []
     /// Lets a download yield mid-way, so a second caller can arrive while it runs.
     private var slowDownloads = false
     private var failing = false
@@ -21,10 +24,11 @@ final class SimklFeedStoreTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         return SimklFeedStore(
             directory: directory,
-            download: { [unowned self] list, _ in
+            download: { [unowned self] list, path in
                 self.downloads.append(list)
+                self.paths.append(path)
                 if self.slowDownloads { await Task.yield() }
-                if self.failing { throw Offline() }
+                if self.failing || self.failingPaths.contains(path) { throw Offline() }
                 return self.fileData
             },
             now: { [unowned self] in self.clock })
@@ -65,7 +69,7 @@ final class SimklFeedStoreTests: XCTestCase {
         failing = true
         let items = try await store.items(.calendar(.tv))
         XCTAssertEqual(items.map(\.title), ["Ted Lasso"])
-        XCTAssertEqual(downloads.count, 2)
+        XCTAssertEqual(downloads.count, 3, "The first, then v2 and its v1 fallback both failing")
     }
 
     func testNoCopyAndNoDownloadThrows() async {
@@ -114,6 +118,25 @@ final class SimklFeedStoreTests: XCTestCase {
         XCTAssertEqual(downloads.count, 1)
         XCTAssertEqual(a.count, 1)
         XCTAssertEqual(b.count, 1)
+    }
+
+    /// The calendar's v2 file first; v1 when v2 can't be had.
+    func testTheCalendarFallsBackToVersionOne() async throws {
+        failingPaths = ["/calendar/v2/tv.json"]
+        let items = try await store().items(.calendar(.tv))
+        XCTAssertEqual(paths, ["/calendar/v2/tv.json", "/calendar/tv.json"])
+        XCTAssertEqual(items.map(\.title), ["Ted Lasso"])
+    }
+
+    func testTheCalendarStaysOnVersionTwoWhenItWorks() async throws {
+        _ = try await store().items(.calendar(.anime))
+        XCTAssertEqual(paths, ["/calendar/v2/anime.json"])
+    }
+
+    func testOtherListsHaveNoFallback() async {
+        failing = true
+        _ = try? await store().items(.trending(.tv, .week))
+        XCTAssertEqual(paths, ["/discover/trending/tv/week_100.json"])
     }
 
     func testFilesComeFromTheCDNWithoutAToken() throws {

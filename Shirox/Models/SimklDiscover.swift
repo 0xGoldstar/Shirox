@@ -24,8 +24,9 @@ struct SimklDiscoverItem: Equatable, Sendable {
     let totalEpisodes: Int?
     /// Popularity rank, 1 the most watched; nil where Simkl has none (the calendar sends 0).
     let rank: Int?
-    /// Calendar entries only: the day it airs or releases, "yyyy-MM-dd", as Simkl lists it.
-    let airDay: String?
+    /// Calendar entries only: the day it airs or releases, "yyyy-MM-dd" — the viewer's own day
+    /// from v2's times, or the day as v1 lists it.
+    var airDay: String?
     /// Calendar entries only: the episode airing — 1 for a new show or season.
     var episode: Int? = nil
     /// When the title came out, "yyyy-MM-dd".
@@ -111,9 +112,43 @@ extension SimklDiscoverItem: Decodable {
         return day.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil ? day : nil
     }
 
-    /// A whole file. An entry that can't be read — no Simkl id, say — is skipped, not fatal.
-    static func decodeList(_ data: Data) throws -> [SimklDiscoverItem] {
-        try JSONDecoder().decode([Lenient].self, from: data).compactMap(\.item)
+    /// A whole file — a list, or a v2 calendar. An entry that can't be read — no Simkl id, say —
+    /// is skipped, not fatal. `timeZone` is the viewer's, whose days v2's UTC times fall on.
+    static func decodeList(_ data: Data, timeZone: TimeZone = .current) throws -> [SimklDiscoverItem] {
+        if let calendar = try? JSONDecoder().decode(CalendarV2.self, from: data) {
+            return calendar.items(in: timeZone)
+        }
+        return try JSONDecoder().decode([Lenient].self, from: data).compactMap(\.item)
+    }
+
+    /// Calendar v2: the airings, with each title's details once, by Simkl id. An airing is joined
+    /// with its title's details; one without them is skipped.
+    private struct CalendarV2: Decodable {
+        struct Airing: Decodable {
+            struct Episode: Decodable { let episode: Int? }
+            let simkl_id: SimklLibraryService.FlexibleID?
+            let date: String?
+            let episode: Episode?
+        }
+
+        let calendar: [Airing]
+        let metadata: [String: Lenient]
+
+        func items(in timeZone: TimeZone) -> [SimklDiscoverItem] {
+            let parser = ISO8601DateFormatter()
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = timeZone
+            formatter.dateFormat = "yyyy-MM-dd"
+            return calendar.compactMap { airing in
+                guard let id = airing.simkl_id?.value, var item = metadata[String(id)]?.item,
+                      let date = airing.date.flatMap(parser.date(from:)) else { return nil }
+                item.airDay = formatter.string(from: date)
+                item.episode = airing.episode?.episode
+                return item
+            }
+        }
     }
 
     private struct Lenient: Decodable {
@@ -179,9 +214,8 @@ enum SimklFeedList: Hashable, Sendable {
         case .dvdReleases:
             return "/discover/dvd/releases_\(size).json"
         case .calendar(let kind), .premieres(let kind):
-            // The v1 files: each entry carries its title, poster and ids, and its listed day.
-            // v2 splits those out and moves every time to UTC.
-            return "/calendar/\(kind == .movie ? "movie_release" : Self.segment(kind)).json"
+            // v2: real air times, and each title's details — AniList ids for most anime among them.
+            return "/calendar/v2/\(Self.calendarName(kind)).json"
         case .newReleases:
             return SimklFeedList.trending(.movie, .month).path(full: full)
         case .top(.anime):
@@ -192,6 +226,18 @@ enum SimklFeedList: Hashable, Sendable {
         case .top:
             return "/tv/best/all"
         }
+    }
+
+    /// Where to look when the file can't be had: the calendar's v1 file, until Simkl retires it.
+    func fallbackPath(full: Bool) -> String? {
+        switch self {
+        case .calendar(let kind), .premieres(let kind): return "/calendar/\(Self.calendarName(kind)).json"
+        default: return nil
+        }
+    }
+
+    private static func calendarName(_ kind: MediaKind) -> String {
+        kind == .movie ? "movie_release" : segment(kind)
     }
 
     /// How often Simkl regenerates the file.
