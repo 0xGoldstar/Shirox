@@ -1,5 +1,6 @@
 #if os(iOS)
 import XCTest
+import UIKit
 @testable import Shirox
 
 /// Where the gooey drop comes from, how far it hangs, and when a pull becomes a refresh.
@@ -62,6 +63,67 @@ final class GooeyRefreshTests: XCTestCase {
         XCTAssertFalse(Geometry.shouldRefresh(pull: Geometry.threshold + 40, released: true, refreshing: true))
         XCTAssertEqual(Geometry.progress(pull: Geometry.threshold / 2), 0.5)
         XCTAssertEqual(Geometry.progress(pull: -30), 0)
+    }
+}
+/// The drop lives in a window above the whole app, so it has to follow the screen that was pulled.
+@MainActor
+final class GooeyRefreshScreenTests: XCTestCase {
+    private func screen() -> (UIWindow, UIViewController, UIScrollView) {
+        let root = UIViewController()
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        root.view.addSubview(scrollView)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        return (window, root, scrollView)
+    }
+
+    func testAScreenShowingIsOnScreen() {
+        let (window, _, scrollView) = screen()
+        defer { window.isHidden = true }
+        XCTAssertTrue(GooeyRefreshCenter.isOnScreen(scrollView))
+    }
+
+    /// Another tab, or a page pushed over it.
+    func testAScreenHiddenOrGoneIsNot() {
+        let (window, root, scrollView) = screen()
+        defer { window.isHidden = true }
+        root.view.isHidden = true
+        XCTAssertFalse(GooeyRefreshCenter.isOnScreen(scrollView))
+        root.view.isHidden = false
+        scrollView.removeFromSuperview()
+        XCTAssertFalse(GooeyRefreshCenter.isOnScreen(scrollView))
+    }
+
+    func testAScreenUnderASheetIsNot() {
+        let (window, root, scrollView) = screen()
+        defer { window.isHidden = true }
+        let sheet = UIViewController()
+        let sheetList = UIScrollView()
+        sheet.view.addSubview(sheetList)
+        root.present(sheet, animated: false)
+        defer { sheet.dismiss(animated: false) }
+        // The presentation puts the sheet in the window on a later turn of the run loop.
+        let deadline = Date().addingTimeInterval(2)
+        while sheet.view.window == nil, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
+        XCTAssertFalse(GooeyRefreshCenter.isOnScreen(scrollView))
+        XCTAssertTrue(GooeyRefreshCenter.isOnScreen(sheetList))
+    }
+
+    /// Pulled, then the screen went mid-pull: the drop lets go rather than hanging there.
+    func testAPullItsScreenTookAwayIsLetGo() {
+        let (window, _, scrollView) = screen()
+        defer { window.isHidden = true }
+        let center = GooeyRefreshCenter.shared
+        center.update(pull: 60, from: scrollView)
+        XCTAssertEqual(center.pull, 60)
+        center.checkSource()
+        XCTAssertEqual(center.pull, 60, "Still showing, so the pull stands")
+        scrollView.removeFromSuperview()
+        center.checkSource()
+        XCTAssertEqual(center.pull, 0)
     }
 }
 #endif

@@ -231,7 +231,7 @@ final class GooeyRefreshController: NSObject {
             if past, !crossedThreshold { haptic.impactOccurred() }
             crossedThreshold = past
         }
-        center.update(pull: pull, in: scrollView.window)
+        center.update(pull: pull, from: scrollView)
     }
 
     @objc private func panned(_ gesture: UIPanGestureRecognizer) {
@@ -261,14 +261,67 @@ final class GooeyRefreshCenter: ObservableObject {
 
     private var window: UIWindow?
     private var hideWork: DispatchWorkItem?
+    /// The scroll view whose pull the drop shows.
+    private weak var source: UIScrollView?
+    /// Checks, while the drop is out, that the pulled screen is still showing.
+    private var watch: Timer?
 
     private init() {}
 
-    func update(pull: CGFloat, in hostWindow: UIWindow?) {
+    func update(pull: CGFloat, from scrollView: UIScrollView) {
         guard !refreshing else { return }
-        if pull > 0 { show(in: hostWindow) }
+        if pull > 0 {
+            source = scrollView
+            show(in: scrollView.window)
+        }
         if self.pull != pull { self.pull = pull }
         if pull == 0 { hideSoon() }
+    }
+
+    /// The drop belongs to the screen that was pulled — it lives in a window above the whole app,
+    /// so nothing else takes it away. When that screen goes (another tab, a pushed page, a sheet
+    /// over it) the drop goes too, and comes back if the refresh is still running when the
+    /// screen does. A pull the screen took away with it is let go.
+    func checkSource() {
+        let showing = source.map(Self.isOnScreen) ?? false
+        if !showing {
+            if !refreshing, pull != 0 { pull = 0 }
+            window?.isHidden = true
+        } else if pull > 0 || refreshing {
+            window?.isHidden = false
+        }
+        if pull == 0, !refreshing { stopWatching() }
+    }
+
+    /// On screen, and not under a sheet or a cover.
+    static func isOnScreen(_ view: UIView) -> Bool {
+        guard let window = view.window else { return false }
+        var current: UIView? = view
+        while let ancestor = current {
+            if ancestor.isHidden || ancestor.alpha < 0.01 { return false }
+            current = ancestor.superview
+        }
+        var top = window.rootViewController
+        while let presented = top?.presentedViewController, !presented.isBeingDismissed {
+            top = presented
+        }
+        guard let topView = top?.view else { return true }
+        return view.isDescendant(of: topView)
+    }
+
+    private func startWatching() {
+        guard watch == nil else { return }
+        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkSource() }
+        }
+        // `.common`, so it keeps checking while a list scrolls.
+        RunLoop.main.add(timer, forMode: .common)
+        watch = timer
+    }
+
+    private func stopWatching() {
+        watch?.invalidate()
+        watch = nil
     }
 
     func beginRefreshing() {
@@ -303,6 +356,7 @@ final class GooeyRefreshCenter: ObservableObject {
         // Light or dark as the screen beneath is, for the glow.
         window?.overrideUserInterfaceStyle = hostWindow.traitCollection.userInterfaceStyle
         window?.isHidden = false
+        startWatching()
     }
 
     /// Hidden once the drop has melted back in, so the window never lingers over the app.
