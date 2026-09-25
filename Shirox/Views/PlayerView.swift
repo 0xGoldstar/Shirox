@@ -1151,6 +1151,21 @@ struct PlayerView: View {
             Task { await SimklPlayTracker.finished(ref, number: number, title: title) }
             return
         }
+        // A module page linked to a Simkl show or movie: marked there, by the episode's place on
+        // the page — and, like a Simkl page's play, not on AniList or MyAnimeList, where a module
+        // title matched by name could be the wrong anime.
+        switch SimklModuleTracker.outcome(moduleId: ctx.moduleId, detailHref: ctx.detailHref, episodeHref: ctx.episodeHref) {
+        case .notLinked:
+            break
+        case .linked(let play):
+            let title = ctx.mediaTitle
+            if let play {
+                Task { await SimklPlayTracker.finished(play.ref, number: play.number, title: title) }
+            } else {
+                Logger.shared.log("[Simkl] \(title): this episode's place on its page isn't known — not marked", type: "Provider")
+            }
+            return
+        }
         let context = MarkContext(
             aniListID: ctx.aniListID,
             malID: ctx.malID,
