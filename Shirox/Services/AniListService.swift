@@ -1004,6 +1004,13 @@ enum BrowseCategory: String, CaseIterable, Hashable {
 
     // MARK: - Bulk /mappings/all
 
+    /// The AniList id of a MyAnimeList anime, from the bulk mapping snapshot — for Simkl's
+    /// calendar, whose anime carry a MyAnimeList id and no AniList one.
+    func anilistId(forMalId malId: Int) async -> Int? {
+        await loadAllMappings()
+        return malMappingIndex[malId]?.anilist_id
+    }
+
     /// Ensures the bulk mapping snapshot is loaded (deduping concurrent callers).
     private func loadAllMappings() async {
         if bulkLoaded { return }
