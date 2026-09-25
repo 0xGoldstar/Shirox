@@ -47,6 +47,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Shirox uses the local network to discover and cast to Chromecast devices.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Shirox saves video frames to your Photos library when you hold the player.</string>
 	<key>TMDBAPIKey</key>
 	<string>$(TMDB_API_KEY)</string>
 	<key>UIApplicationSceneManifest</key>
