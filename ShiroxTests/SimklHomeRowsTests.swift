@@ -6,22 +6,52 @@ import XCTest
 final class SimklHomeRowsTests: XCTestCase {
     private let today = "2026-09-25"
 
-    private func entry(_ simkl: Int, mal: Int? = nil, anilist: Int? = nil,
-                       rank: Int? = nil, day: String? = nil) -> SimklDiscoverItem {
+    private func entry(_ simkl: Int, mal: Int? = nil, anilist: Int? = nil, rank: Int? = nil,
+                       day: String? = nil, episode: Int? = nil, released: String? = nil) -> SimklDiscoverItem {
         SimklDiscoverItem(title: "Title \(simkl)", titleRomaji: nil,
                           ids: .init(simkl: simkl, mal: mal, anilist: anilist), poster: "1/1", fanart: nil,
                           overview: nil, genres: [], rating: nil, runtime: nil, totalEpisodes: nil,
-                          rank: rank, airDay: day)
+                          rank: rank, airDay: day, episode: episode, released: released)
     }
 
-    func testEachKindsListsInOrder() {
-        XCTAssertEqual(SimklHomeRows.lists(for: .tv),
-                       [.trending(.tv, .today), .trending(.tv, .week), .trending(.tv, .month), .calendar(.tv)])
-        XCTAssertEqual(SimklHomeRows.lists(for: .anime),
-                       [.trending(.anime, .today), .trending(.anime, .week), .trending(.anime, .month), .calendar(.anime)])
-        XCTAssertEqual(SimklHomeRows.lists(for: .movie),
-                       [.trending(.movie, .today), .trending(.movie, .week), .trending(.movie, .month),
-                        .dvdReleases, .calendar(.movie)])
+    func testEachKindsRowsInOrder() {
+        XCTAssertEqual(SimklHomeRows.rows(for: .tv),
+                       [.top(.tv), .trending(.tv, .week), .premieres(.tv), .calendar(.tv)])
+        XCTAssertEqual(SimklHomeRows.rows(for: .anime),
+                       [.top(.anime), .trending(.anime, .week), .premieres(.anime), .calendar(.anime)])
+        XCTAssertEqual(SimklHomeRows.rows(for: .movie),
+                       [.top(.movie), .trending(.movie, .week), .newReleases, .dvdReleases, .calendar(.movie)])
+    }
+
+    /// The hero stays today's most watched, so Home loads that file beside the rows'.
+    func testHomeLoadsTheHerosListAndTheRows() {
+        XCTAssertEqual(SimklHomeRows.heroList(for: .tv), .trending(.tv, .today))
+        XCTAssertEqual(SimklHomeRows.lists(for: .tv), [.trending(.tv, .today)] + SimklHomeRows.rows(for: .tv))
+    }
+
+    func testNewPremieresAreFirstEpisodesStillAheadSoonestFirst() {
+        let calendar = [entry(1, rank: 9, day: "2026-10-02", episode: 1), entry(2, day: today, episode: 5),
+                        entry(3, rank: 7, day: today, episode: 1), entry(4, rank: 2, day: "2026-09-24", episode: 1),
+                        entry(5, day: today, episode: 1)]
+        let picked = SimklHomeRows.select(.premieres(.tv), calendar, today: today)
+        XCTAssertEqual(picked.map(\.ids.simkl), [3, 5, 1], "Episode 1s from today on; later episodes and past days left out")
+    }
+
+    func testNewReleasesCameOutInTheLastSixtyDays() {
+        let month = [entry(1, released: "2026-09-20"), entry(2, released: "2026-06-01"),
+                     entry(3, released: "2026-07-27"), entry(4, released: "2026-10-10"), entry(5)]
+        let picked = SimklHomeRows.select(.newReleases, month, today: today)
+        XCTAssertEqual(picked.map(\.ids.simkl), [1, 3], "The month's own order; older, unreleased and undated left out")
+    }
+
+    func testTopRatedKeepsSimklsOrder() {
+        let picked = SimklHomeRows.select(.top(.tv), [entry(3), entry(1), entry(2)], today: today)
+        XCTAssertEqual(picked.map(\.ids.simkl), [3, 1, 2])
+    }
+
+    func testADayCountsBack() {
+        XCTAssertEqual(SimklHomeRows.day("2026-09-25", minus: 60), "2026-07-27")
+        XCTAssertEqual(SimklHomeRows.day("2026-03-30", minus: 1), "2026-03-29")
     }
 
     func testAiringTodayIsTodaysMostPopularFirst() {
@@ -52,9 +82,8 @@ final class SimklHomeRowsTests: XCTestCase {
         let layout = SimklHomeRows.layout(kind: .tv, files: files, today: today, tracker: .anilist,
                                           anilistForMAL: [:], rowLength: 20)
         XCTAssertEqual(layout.hero.map(\.id), Array(1...8))
-        XCTAssertEqual(layout.rows.map(\.title),
-                       ["Trending Today on Simkl", "Trending This Week on Simkl", "Airing Today"],
-                       "A list with no file is left out")
+        XCTAssertEqual(layout.rows.map(\.title), ["Trending This Week on Simkl", "Airing Today"],
+                       "The hero's list isn't a row, and a list with no file is left out")
         XCTAssertEqual(layout.rows.last?.items.map(\.id), [30])
     }
 

@@ -11,7 +11,7 @@ struct SimklDiscoverItem: Equatable, Sendable {
 
     let title: String
     let titleRomaji: String?
-    let ids: IDs
+    var ids: IDs
     /// Image path fragments; `SimklDiscoverMedia` turns them into URLs.
     let poster: String?
     let fanart: String?
@@ -26,11 +26,16 @@ struct SimklDiscoverItem: Equatable, Sendable {
     let rank: Int?
     /// Calendar entries only: the day it airs or releases, "yyyy-MM-dd", as Simkl lists it.
     let airDay: String?
+    /// Calendar entries only: the episode airing — 1 for a new show or season.
+    var episode: Int? = nil
+    /// When the title came out, "yyyy-MM-dd".
+    var released: String? = nil
 }
 
 extension SimklDiscoverItem: Decodable {
     private enum CodingKeys: String, CodingKey {
         case title, title_romaji, ids, poster, fanart, overview, genres, ratings, runtime, total_episodes, rank, date
+        case episode, release_date
     }
 
     private struct RawIDs: Decodable {
@@ -38,6 +43,10 @@ extension SimklDiscoverItem: Decodable {
         let simkl: SimklLibraryService.FlexibleID?
         let mal: SimklLibraryService.FlexibleID?
         let anilist: SimklLibraryService.FlexibleID?
+    }
+
+    private struct Episode: Decodable {
+        let episode: Int?
     }
 
     private struct Ratings: Decodable {
@@ -69,6 +78,18 @@ extension SimklDiscoverItem: Decodable {
         totalEpisodes = optional(Int.self, .total_episodes)
         rank = optional(Int.self, .rank).flatMap { $0 > 0 ? $0 : nil }
         airDay = optional(String.self, .date).flatMap(Self.day(from:))
+        episode = optional(Episode.self, .episode)?.episode
+        released = optional(String.self, .release_date).flatMap(Self.releaseDay(from:))
+    }
+
+    /// A release date as "yyyy-MM-dd". The trending files write it "08/12/2026"; the calendar
+    /// "2026-08-12".
+    static func releaseDay(from text: String) -> String? {
+        if let day = day(from: text) { return day }
+        let parts = text.split(separator: "/")
+        guard parts.count == 3, parts[0].count == 2, parts[1].count == 2, parts[2].count == 4,
+              parts.allSatisfy({ $0.allSatisfy(\.isNumber) }) else { return nil }
+        return "\(parts[2])-\(parts[0])-\(parts[1])"
     }
 
     /// "25m", "1h 45m" or "2h", in minutes.
@@ -121,12 +142,32 @@ enum SimklFeedList: Hashable, Sendable {
     case dvdReleases
     /// Airings and releases from yesterday to a month ahead; `.movie` is the release calendar.
     case calendar(MediaKind)
+    /// Simkl's all-time top rated, from its API — with the user's token, so from their allowance.
+    case top(MediaKind)
+    /// New shows and new seasons starting in the calendar's month ahead.
+    case premieres(MediaKind)
+    /// Movies only: this month's most watched that came out recently.
+    case newReleases
 
     var kind: MediaKind {
         switch self {
-        case .trending(let kind, _), .calendar(let kind): return kind
-        case .dvdReleases: return .movie
+        case .trending(let kind, _), .calendar(let kind), .top(let kind), .premieres(let kind): return kind
+        case .dvdReleases, .newReleases: return .movie
         }
+    }
+
+    /// Whether the list comes from Simkl's API, which wants the user's token and counts against
+    /// their daily allowance. The rest are free files on the CDN.
+    var needsToken: Bool {
+        if case .top = self { return true }
+        return false
+    }
+
+    /// Query items beyond Simkl's identification ones.
+    var query: [URLQueryItem] {
+        // The movie ranking pages; one page of 60 is the list.
+        if case .top(.movie) = self { return [URLQueryItem(name: "limit", value: "60")] }
+        return []
     }
 
     /// The file's path; `full` asks for the top 500 instead of the top 100 where there's a choice.
@@ -137,10 +178,19 @@ enum SimklFeedList: Hashable, Sendable {
             return "/discover/trending/\(Self.segment(kind))/\(period.rawValue)_\(size).json"
         case .dvdReleases:
             return "/discover/dvd/releases_\(size).json"
-        case .calendar(let kind):
+        case .calendar(let kind), .premieres(let kind):
             // The v1 files: each entry carries its title, poster and ids, and its listed day.
             // v2 splits those out and moves every time to UTC.
             return "/calendar/\(kind == .movie ? "movie_release" : Self.segment(kind)).json"
+        case .newReleases:
+            return SimklFeedList.trending(.movie, .month).path(full: full)
+        case .top(.anime):
+            return "/anime/best/all"
+        case .top(.movie):
+            // Movies have no best-of list; all movies by rank is the same thing.
+            return "/movies/genres/all/movies/all/all/rank"
+        case .top:
+            return "/tv/best/all"
         }
     }
 
@@ -148,8 +198,8 @@ enum SimklFeedList: Hashable, Sendable {
     var refreshInterval: TimeInterval {
         switch self {
         case .trending(_, .today): return 60 * 60
-        case .trending, .dvdReleases: return 24 * 60 * 60
-        case .calendar: return 6 * 60 * 60
+        case .trending, .dvdReleases, .newReleases, .top: return 24 * 60 * 60
+        case .calendar, .premieres: return 6 * 60 * 60
         }
     }
 
@@ -160,6 +210,9 @@ enum SimklFeedList: Hashable, Sendable {
         case .dvdReleases: return "Popular on DVD & Digital"
         case .calendar(.movie): return "Coming Soon"
         case .calendar: return "Airing Today"
+        case .top: return "Top Rated on Simkl"
+        case .premieres: return "New Premieres"
+        case .newReleases: return "New Releases"
         }
     }
 

@@ -13,10 +13,12 @@ final class SimklHomeViewModel: ObservableObject {
     typealias Fetch = @MainActor (SimklFeedList, Bool) async throws -> [SimklDiscoverItem]
     typealias Saved = @MainActor (SimklFeedList) -> [SimklDiscoverItem]?
     typealias AniListIDs = @MainActor ([Int]) async -> [Int: Int]
+    typealias FillIDs = @MainActor ([SimklDiscoverItem]) async -> [SimklDiscoverItem]
 
     private let fetch: Fetch
     private let saved: Saved
     private let anilistIDs: AniListIDs
+    private let fillIDs: FillIDs
     private let tracker: @MainActor () -> ProviderType
     private let today: @MainActor () -> String
     /// The kind asked for last; a load for any other has been overtaken.
@@ -26,11 +28,13 @@ final class SimklHomeViewModel: ObservableObject {
     init(fetch: @escaping Fetch = { list, force in try await SimklFeedStore.shared.items(list, forceRefresh: force) },
          saved: @escaping Saved = { SimklFeedStore.shared.savedItems($0) },
          anilistIDs: @escaping AniListIDs = { await SimklDiscoverMedia.anilistIDs(forMAL: $0) },
+         fillIDs: @escaping FillIDs = { await SimklAnimeIDCache.shared.fill($0) },
          tracker: @escaping @MainActor () -> ProviderType = { SimklDiscoverMedia.tracker },
          today: @escaping @MainActor () -> String = { SimklHomeRows.day(Date()) }) {
         self.fetch = fetch
         self.saved = saved
         self.anilistIDs = anilistIDs
+        self.fillIDs = fillIDs
         self.tracker = tracker
         self.today = today
     }
@@ -71,7 +75,19 @@ final class SimklHomeViewModel: ObservableObject {
         }
     }
 
+    /// The layout at once, and again once Simkl's top-rated anime — which come with only its own
+    /// id — have their AniList and MyAnimeList ids, looked up once and remembered.
     private func show(_ files: [SimklFeedList: [SimklDiscoverItem]], kind: MediaKind) async {
+        await present(files, kind: kind)
+        guard kind == .anime, let top = files[.top(.anime)] else { return }
+        let filled = await fillIDs(top)
+        guard filled != top, wanted == kind else { return }
+        var files = files
+        files[.top(.anime)] = filled
+        await present(files, kind: kind)
+    }
+
+    private func present(_ files: [SimklFeedList: [SimklDiscoverItem]], kind: MediaKind) async {
         let tracker = tracker()
         let map = await SimklDiscoverMedia.anilistMap(for: files.values.flatMap { $0 }, kind: kind,
                                                       tracker: tracker, lookUp: anilistIDs)

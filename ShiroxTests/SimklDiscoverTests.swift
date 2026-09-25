@@ -64,6 +64,19 @@ final class SimklDiscoverTests: XCTestCase {
         XCTAssertEqual(items[1].rank, 194)
     }
 
+    /// The calendar's episode number marks premieres; a release date, in either of Simkl's
+    /// spellings, marks new releases.
+    func testTheEpisodeAndTheReleaseDate() throws {
+        let items = try decode(#"""
+        [{"title":"New Show","date":"2026-09-26T00:00:00-04:00","release_date":"2026-09-26","rank":0,
+          "ids":{"simkl_id":1},"episode":{"season":1,"episode":1}},
+         {"title":"A Movie","release_date":"08/12/2026","ids":{"simkl_id":2}},
+         {"title":"An Anime","date":"2026-09-26T00:00:00+09:00","ids":{"simkl_id":3},"episode":{"episode":20}}]
+        """#)
+        XCTAssertEqual(items.map(\.episode), [1, nil, 20])
+        XCTAssertEqual(items.map(\.released), ["2026-09-26", "2026-08-12", nil])
+    }
+
     func testAnEntryWithoutASimklIdIsSkipped() throws {
         let items = try decode(#"[{"title":"No id","ids":{"slug":"x"}},{"title":"Kept","ids":{"simkl_id":7}}]"#)
         XCTAssertEqual(items.map(\.title), ["Kept"])
@@ -85,6 +98,33 @@ final class SimklDiscoverTests: XCTestCase {
         XCTAssertEqual(SimklFeedList.calendar(.anime).path(full: true), "/calendar/anime.json")
         XCTAssertEqual(SimklFeedList.calendar(.tv).path(full: false), "/calendar/tv.json")
         XCTAssertEqual(SimklFeedList.calendar(.movie).path(full: false), "/calendar/movie_release.json")
+    }
+
+    /// Top Rated comes from Simkl's API with the user's token; New Premieres and New Releases
+    /// read files other rows already load.
+    func testTheTopAndDerivedLists() {
+        XCTAssertEqual(SimklFeedList.top(.anime).path(full: false), "/anime/best/all")
+        XCTAssertEqual(SimklFeedList.top(.tv).path(full: true), "/tv/best/all")
+        XCTAssertEqual(SimklFeedList.top(.movie).path(full: false), "/movies/genres/all/movies/all/all/rank")
+        XCTAssertEqual(SimklFeedList.top(.movie).query, [URLQueryItem(name: "limit", value: "60")])
+        XCTAssertEqual(SimklFeedList.top(.tv).query, [])
+        XCTAssertTrue(SimklFeedList.top(.tv).needsToken)
+        XCTAssertFalse(SimklFeedList.trending(.tv, .week).needsToken)
+        XCTAssertFalse(SimklFeedList.premieres(.tv).needsToken)
+        XCTAssertFalse(SimklFeedList.newReleases.needsToken)
+        XCTAssertEqual(SimklFeedList.top(.anime).refreshInterval, 86400)
+        XCTAssertEqual(SimklFeedList.premieres(.tv).refreshInterval, 21600)
+        XCTAssertEqual(SimklFeedList.newReleases.refreshInterval, 86400)
+        XCTAssertEqual(SimklFeedList.premieres(.tv).path(full: false), SimklFeedList.calendar(.tv).path(full: false))
+        XCTAssertEqual(SimklFeedList.premieres(.anime).path(full: true), "/calendar/anime.json")
+        XCTAssertEqual(SimklFeedList.newReleases.path(full: false), "/discover/trending/movies/month_100.json")
+        XCTAssertEqual(SimklFeedList.newReleases.path(full: true), "/discover/trending/movies/month_500.json")
+        XCTAssertEqual(SimklFeedList.top(.tv).title, "Top Rated on Simkl")
+        XCTAssertEqual(SimklFeedList.premieres(.tv).title, "New Premieres")
+        XCTAssertEqual(SimklFeedList.newReleases.title, "New Releases")
+        XCTAssertEqual(SimklFeedList.top(.movie).kind, .movie)
+        XCTAssertEqual(SimklFeedList.premieres(.anime).kind, .anime)
+        XCTAssertEqual(SimklFeedList.newReleases.kind, .movie)
     }
 
     /// Simkl regenerates Today hourly, the calendar every 6 hours, the rest daily.

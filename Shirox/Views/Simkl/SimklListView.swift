@@ -55,7 +55,10 @@ struct SimklListView: View {
     private func load() async {
         defer { loading = false }
         do {
-            let raw = try await SimklFeedStore.shared.items(list, full: true)
+            var raw = try await SimklFeedStore.shared.items(list, full: true)
+            // Top-rated anime come with only Simkl's id; their AniList and MyAnimeList ids are
+            // looked up once and remembered.
+            if list.kind == .anime { raw = await SimklAnimeIDCache.shared.fill(raw) }
             let tracker = SimklDiscoverMedia.tracker
             let map = await SimklDiscoverMedia.anilistMap(for: raw, kind: list.kind, tracker: tracker)
             items = SimklHomeRows.titles(list, raw, today: SimklHomeRows.day(Date()), tracker: tracker,

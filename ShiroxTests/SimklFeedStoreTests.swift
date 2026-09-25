@@ -11,7 +11,9 @@ final class SimklFeedStoreTests: XCTestCase {
     private lazy var directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("SimklFeedStoreTests-\(UUID().uuidString)", isDirectory: true)
     private var clock = Date(timeIntervalSince1970: 1_800_000_000)
-    private var downloads: [URLRequest] = []
+    private var downloads: [SimklFeedList] = []
+    /// Lets a download yield mid-way, so a second caller can arrive while it runs.
+    private var slowDownloads = false
     private var failing = false
 
     private func store() -> SimklFeedStore {
@@ -19,8 +21,9 @@ final class SimklFeedStoreTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         return SimklFeedStore(
             directory: directory,
-            download: { [unowned self] request in
-                self.downloads.append(request)
+            download: { [unowned self] list, _ in
+                self.downloads.append(list)
+                if self.slowDownloads { await Task.yield() }
                 if self.failing { throw Offline() }
                 return self.fileData
             },
@@ -90,9 +93,31 @@ final class SimklFeedStoreTests: XCTestCase {
         XCTAssertNil(store.savedItems(.trending(.movie, .month), full: true), "The top 500 is its own file")
     }
 
-    func testFilesComeFromTheCDNWithoutAToken() async throws {
-        _ = try await store().items(.trending(.tv, .today))
-        let request = try XCTUnwrap(downloads.first)
+    /// A pull to refresh never spends the allowance on a list that's still fresh.
+    func testForcingLeavesAFreshTokenListAlone() async throws {
+        let store = store()
+        _ = try await store.items(.top(.tv))
+        _ = try await store.items(.top(.tv), forceRefresh: true)
+        XCTAssertEqual(downloads.count, 1)
+        clock += 25 * 3600
+        _ = try await store.items(.top(.tv), forceRefresh: true)
+        XCTAssertEqual(downloads.count, 2, "A day on, it's fetched again")
+    }
+
+    /// Airing Today and New Premieres read the same calendar; loaded together, it's fetched once.
+    func testListsSharingAFileDownloadItOnce() async throws {
+        let store = store()
+        slowDownloads = true
+        async let airing = store.items(.calendar(.tv))
+        async let premieres = store.items(.premieres(.tv))
+        let (a, b) = try await (airing, premieres)
+        XCTAssertEqual(downloads.count, 1)
+        XCTAssertEqual(a.count, 1)
+        XCTAssertEqual(b.count, 1)
+    }
+
+    func testFilesComeFromTheCDNWithoutAToken() throws {
+        let request = SimklAuthManager.shared.dataRequest(path: SimklFeedList.trending(.tv, .today).path(full: false))
         XCTAssertEqual(request.url?.host, "data.simkl.in")
         XCTAssertEqual(request.url?.path, "/discover/trending/tv/today_100.json")
         XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))

@@ -1,18 +1,21 @@
 import Foundation
 
-/// Simkl's free files, kept on the device until Simkl makes new ones.
+/// Simkl's lists for Home, kept on the device until Simkl makes new ones.
 ///
-/// They cost no one any allowance, but Simkl regenerates them on a schedule — hourly at most —
-/// so fetching one sooner only gets the same file again.
+/// The CDN files cost no one any allowance, but Simkl regenerates them on a schedule — hourly at
+/// most — so fetching one sooner only gets the same file again. Top Rated comes from the API with
+/// the user's token, so it's kept for a day and a pull to refresh doesn't fetch it again sooner.
 @MainActor
 final class SimklFeedStore {
     static let shared = SimklFeedStore()
 
-    typealias Download = @MainActor (URLRequest) async throws -> Data
+    typealias Download = @MainActor (SimklFeedList, _ full: Bool) async throws -> Data
 
     private let directory: URL
     private let download: Download
     private let now: @MainActor () -> Date
+    /// Downloads running now, by file — Airing Today and New Premieres read the same calendar.
+    private var inFlight: [URL: Task<[SimklDiscoverItem], Error>] = [:]
 
     init(directory: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("simkl-feed", isDirectory: true),
@@ -24,22 +27,30 @@ final class SimklFeedStore {
     }
 
     /// The saved copy while it's fresh, else a new download — or, when that fails, the saved
-    /// copy however old. Throws only when there's neither. `forceRefresh` skips the freshness check.
+    /// copy however old. Throws only when there's neither. `forceRefresh` skips the freshness
+    /// check, except for a list that costs the user's allowance.
     func items(_ list: SimklFeedList, full: Bool = false, forceRefresh: Bool = false) async throws -> [SimklDiscoverItem] {
         let file = url(list, full: full)
-        if !forceRefresh, let savedAt = savedDate(file),
+        if !forceRefresh || list.needsToken, let savedAt = savedDate(file),
            now().timeIntervalSince(savedAt) < list.refreshInterval, let saved = read(file) {
             return saved
         }
-        do {
-            let data = try await download(SimklAuthManager.shared.dataRequest(path: list.path(full: full)))
-            let items = try SimklDiscoverItem.decodeList(data)
-            save(data, to: file)
-            return items
-        } catch {
-            if let saved = read(file) { return saved }
-            throw error
+        if let running = inFlight[file] { return try await running.value }
+        let download = self.download
+        let task = Task { () throws -> [SimklDiscoverItem] in
+            do {
+                let data = try await download(list, full)
+                let items = try SimklDiscoverItem.decodeList(data)
+                self.save(data, to: file)
+                return items
+            } catch {
+                if let saved = self.read(file) { return saved }
+                throw error
+            }
         }
+        inFlight[file] = task
+        defer { inFlight[file] = nil }
+        return try await task.value
     }
 
     /// The saved copy, however old, without asking the network — for Home's first paint.
@@ -47,8 +58,22 @@ final class SimklFeedStore {
         read(url(list, full: full))
     }
 
-    nonisolated static func fetch(_ request: URLRequest) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(for: request)
+    /// A CDN file without a token; an API list with the user's, through the sender that
+    /// refreshes it — and that list's refusal in Simkl's words, as search's is.
+    static func fetch(_ list: SimklFeedList, full: Bool) async throws -> Data {
+        let auth = SimklAuthManager.shared
+        if list.needsToken {
+            let (data, http) = try await auth.send {
+                try auth.authorizedRequest(path: list.path(full: full), query: list.query)
+            }
+            guard (200...299).contains(http.statusCode) else {
+                let failure = SimklLibraryService.classify(status: http.statusCode, body: data,
+                                                           retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
+                throw SimklLibraryService.thrownError(for: failure, status: http.statusCode)
+            }
+            return data
+        }
+        let (data, response) = try await URLSession.shared.data(for: auth.dataRequest(path: list.path(full: full)))
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(status) else { throw ProviderError.serverError(status) }
         return data
