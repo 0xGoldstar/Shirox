@@ -17,11 +17,12 @@ struct SimklHomeLayout: Equatable {
 enum SimklHomeRows {
     static let heroLength = 8
 
-    /// The rows a kind's Home shows, in order.
+    /// The rows a kind's Home shows, in order — as AniList's and MyAnimeList's Homes go: what's
+    /// trending first, what's on and new next, the all-time list last.
     static func rows(for kind: MediaKind) -> [SimklFeedList] {
         kind == .movie
-            ? [.top(.movie), .trending(.movie, .week), .newReleases, .dvdReleases, .calendar(.movie)]
-            : [.top(kind), .trending(kind, .week), .premieres(kind), .calendar(kind)]
+            ? [.trending(.movie, .week), .newReleases, .dvdReleases, .calendar(.movie), .top(.movie)]
+            : [.trending(kind, .week), .calendar(kind), .premieres(kind), .top(kind)]
     }
 
     /// The hero: what's most watched today.

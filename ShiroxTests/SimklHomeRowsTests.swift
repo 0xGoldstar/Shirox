@@ -16,11 +16,11 @@ final class SimklHomeRowsTests: XCTestCase {
 
     func testEachKindsRowsInOrder() {
         XCTAssertEqual(SimklHomeRows.rows(for: .tv),
-                       [.top(.tv), .trending(.tv, .week), .premieres(.tv), .calendar(.tv)])
+                       [.trending(.tv, .week), .calendar(.tv), .premieres(.tv), .top(.tv)])
         XCTAssertEqual(SimklHomeRows.rows(for: .anime),
-                       [.top(.anime), .trending(.anime, .week), .premieres(.anime), .calendar(.anime)])
+                       [.trending(.anime, .week), .calendar(.anime), .premieres(.anime), .top(.anime)])
         XCTAssertEqual(SimklHomeRows.rows(for: .movie),
-                       [.top(.movie), .trending(.movie, .week), .newReleases, .dvdReleases, .calendar(.movie)])
+                       [.trending(.movie, .week), .newReleases, .dvdReleases, .calendar(.movie), .top(.movie)])
     }
 
     /// The hero stays today's most watched, so Home loads that file beside the rows'.

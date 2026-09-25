@@ -42,10 +42,10 @@ final class SimklHomeViewModelTests: XCTestCase {
         await vm.load(kind: .tv)
         XCTAssertEqual(vm.layout?.hero.map(\.id), [1, 2])
         XCTAssertEqual(vm.layout?.rows.map(\.title), [
-            "Top Rated", "Trending This Week", "New Premieres", "Airing Today",
+            "Trending This Week", "Airing Today", "New Premieres", "Top Rated",
         ])
+        XCTAssertEqual(vm.layout?.rows[1].items.map(\.id), [5])
         XCTAssertEqual(vm.layout?.rows[2].items.map(\.id), [6])
-        XCTAssertEqual(vm.layout?.rows[3].items.map(\.id), [5])
         XCTAssertNil(vm.error)
         XCTAssertFalse(vm.isLoading)
     }

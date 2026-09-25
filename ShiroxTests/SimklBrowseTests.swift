@@ -25,11 +25,11 @@ final class SimklBrowseTests: XCTestCase {
     func testEachKindsListsInTheMenu() {
         XCTAssertEqual(SimklBrowse.lists(for: .tv), [
             .trending(.tv, .today), .trending(.tv, .week), .trending(.tv, .month),
-            .top(.tv), .premieres(.tv), .calendar(.tv),
+            .calendar(.tv), .premieres(.tv), .top(.tv),
         ])
         XCTAssertEqual(SimklBrowse.lists(for: .movie), [
             .trending(.movie, .today), .trending(.movie, .week), .trending(.movie, .month),
-            .top(.movie), .newReleases, .dvdReleases, .calendar(.movie),
+            .newReleases, .dvdReleases, .calendar(.movie), .top(.movie),
         ])
     }
 
