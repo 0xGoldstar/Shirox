@@ -203,14 +203,14 @@ enum SimklFeedList: Hashable, Sendable {
         }
     }
 
-    /// The row title. Simkl requires "Simkl" in it wherever its trending lists appear.
+    /// The row title.
     var title: String {
         switch self {
-        case .trending(_, let period): return "Trending \(period.title) on Simkl"
+        case .trending(_, let period): return "Trending \(period.title)"
         case .dvdReleases: return "Popular on DVD & Digital"
         case .calendar(.movie): return "Coming Soon"
         case .calendar: return "Airing Today"
-        case .top: return "Top Rated on Simkl"
+        case .top: return "Top Rated"
         case .premieres: return "New Premieres"
         case .newReleases: return "New Releases"
         }

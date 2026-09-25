@@ -51,6 +51,8 @@ struct SearchView: View {
 
     private var usingModule: Bool { moduleManager.activeModule != nil }
     private var primaryProvider: ProviderType { providerManager.orderedProviders.first?.providerType ?? .anilist }
+    /// What Search draws on without a module: Simkl when chosen, else the chain's first.
+    private var shownProvider: ProviderType { discovery.usesSimkl ? .simkl : primaryProvider }
 
     var body: some View {
         NavigationStack {
@@ -480,7 +482,9 @@ struct SearchView: View {
                             fallbackIcon
                         }
                     } else {
-                        CachedAsyncImage(urlString: primaryProvider.iconURL)
+                        CachedAsyncImage(urlString: shownProvider.iconURL)
+                            // Simkl's icon is a dark tile with a see-through "S": on white.
+                            .background(shownProvider == .simkl ? Color.white : Color.clear)
                     }
                 }
                 .frame(width: 20, height: 20)
@@ -491,7 +495,7 @@ struct SearchView: View {
                 )
 
                 // Text label
-                Text(usingModule ? (moduleManager.activeModule?.sourceName ?? "Module") : primaryProvider.displayName)
+                Text(usingModule ? (moduleManager.activeModule?.sourceName ?? "Module") : shownProvider.displayName)
                     .font(.callout)
                     .fontWeight(.medium)
             }

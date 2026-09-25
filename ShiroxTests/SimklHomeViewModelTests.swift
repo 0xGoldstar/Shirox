@@ -42,7 +42,7 @@ final class SimklHomeViewModelTests: XCTestCase {
         await vm.load(kind: .tv)
         XCTAssertEqual(vm.layout?.hero.map(\.id), [1, 2])
         XCTAssertEqual(vm.layout?.rows.map(\.title), [
-            "Top Rated on Simkl", "Trending This Week on Simkl", "New Premieres", "Airing Today",
+            "Top Rated", "Trending This Week", "New Premieres", "Airing Today",
         ])
         XCTAssertEqual(vm.layout?.rows[2].items.map(\.id), [6])
         XCTAssertEqual(vm.layout?.rows[3].items.map(\.id), [5])
@@ -53,7 +53,7 @@ final class SimklHomeViewModelTests: XCTestCase {
     func testAListThatFailsIsLeftOut() async {
         let vm = model(files: [.trending(.tv, .today): [entry(1)], .trending(.tv, .week): [entry(2)]])
         await vm.load(kind: .tv)
-        XCTAssertEqual(vm.layout?.rows.map(\.title), ["Trending This Week on Simkl"])
+        XCTAssertEqual(vm.layout?.rows.map(\.title), ["Trending This Week"])
         XCTAssertNil(vm.error)
     }
 
@@ -91,7 +91,7 @@ final class SimklHomeViewModelTests: XCTestCase {
                            }
                        })
         await vm.load(kind: .anime)
-        XCTAssertEqual(vm.layout?.rows.first?.title, "Top Rated on Simkl")
+        XCTAssertEqual(vm.layout?.rows.first?.title, "Top Rated")
         XCTAssertEqual(vm.layout?.rows.first?.items.map(\.id), [154587])
     }
 

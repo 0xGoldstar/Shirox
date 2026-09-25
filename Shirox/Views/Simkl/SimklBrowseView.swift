@@ -122,8 +122,7 @@ struct SimklBrowseView: View {
     private var filters: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                // Simkl requires its name wherever its trending lists appear.
-                Text("Trending on Simkl")
+                Text("Trending")
                     .font(.title3.weight(.bold))
                 Spacer()
                 Menu {

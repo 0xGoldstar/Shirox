@@ -119,7 +119,7 @@ final class SimklDiscoverTests: XCTestCase {
         XCTAssertEqual(SimklFeedList.premieres(.anime).path(full: true), "/calendar/anime.json")
         XCTAssertEqual(SimklFeedList.newReleases.path(full: false), "/discover/trending/movies/month_100.json")
         XCTAssertEqual(SimklFeedList.newReleases.path(full: true), "/discover/trending/movies/month_500.json")
-        XCTAssertEqual(SimklFeedList.top(.tv).title, "Top Rated on Simkl")
+        XCTAssertEqual(SimklFeedList.top(.tv).title, "Top Rated")
         XCTAssertEqual(SimklFeedList.premieres(.tv).title, "New Premieres")
         XCTAssertEqual(SimklFeedList.newReleases.title, "New Releases")
         XCTAssertEqual(SimklFeedList.top(.movie).kind, .movie)
@@ -136,11 +136,10 @@ final class SimklDiscoverTests: XCTestCase {
         XCTAssertEqual(SimklFeedList.calendar(.movie).refreshInterval, 21600)
     }
 
-    /// Simkl requires "Simkl" in the title wherever its trending lists are shown.
     func testRowTitlesAndKinds() {
-        XCTAssertEqual(SimklFeedList.trending(.tv, .today).title, "Trending Today on Simkl")
-        XCTAssertEqual(SimklFeedList.trending(.movie, .week).title, "Trending This Week on Simkl")
-        XCTAssertEqual(SimklFeedList.trending(.anime, .month).title, "Trending This Month on Simkl")
+        XCTAssertEqual(SimklFeedList.trending(.tv, .today).title, "Trending Today")
+        XCTAssertEqual(SimklFeedList.trending(.movie, .week).title, "Trending This Week")
+        XCTAssertEqual(SimklFeedList.trending(.anime, .month).title, "Trending This Month")
         XCTAssertEqual(SimklFeedList.dvdReleases.title, "Popular on DVD & Digital")
         XCTAssertEqual(SimklFeedList.calendar(.tv).title, "Airing Today")
         XCTAssertEqual(SimklFeedList.calendar(.movie).title, "Coming Soon")

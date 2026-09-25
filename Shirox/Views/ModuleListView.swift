@@ -3,6 +3,8 @@ import SwiftUI
 struct ModuleListView: View {
     @EnvironmentObject private var moduleManager: ModuleManager
     @ObservedObject private var providerManager = ProviderManager.shared
+    @ObservedObject private var discovery = DiscoverySource.shared
+    @ObservedObject private var simklAuth = SimklAuthManager.shared
     @Environment(\.dismiss) private var dismiss
     @State private var moduleURL = ""
     @State private var isRefreshing = false
@@ -58,6 +60,12 @@ struct ModuleListView: View {
                 Section {
                     ForEach(ProviderType.userProviders, id: \.self) { type in
                         builtInProviderRow(type)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                    }
+                    // Home and Search from Simkl — offered while signed in, as its search needs the account.
+                    if simklAuth.isLoggedIn {
+                        builtInProviderRow(.simkl)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                     }
@@ -350,15 +358,22 @@ struct ModuleListView: View {
 
     // MARK: - Built-in Provider Row
     private func builtInProviderRow(_ type: ProviderType) -> some View {
-        let isChosen = providerManager.orderedProviders.first?.providerType == type
+        // Simkl is the Home and Search source beside the AniList/MAL chain, not a link in it.
+        let isChosen = type == .simkl
+            ? discovery.usesSimkl
+            : !discovery.usesSimkl && providerManager.orderedProviders.first?.providerType == type
         let isSelected = moduleManager.activeModule == nil
-        let isDown = isChosen && providerManager.fallbackActive
+        let isDown = isChosen && type != .simkl && providerManager.fallbackActive
 
         return Button {
             if moduleManager.activeModule != nil {
                 moduleManager.deselectModule()
             }
-            providerManager.selectProvider(type)
+            if type == .simkl {
+                discovery.chooseSimkl()
+            } else {
+                discovery.chooseProvider(type)
+            }
             #if os(iOS)
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             #endif
@@ -379,13 +394,15 @@ struct ModuleListView: View {
                     }
                 }
                 .frame(width: 44, height: 44)
+                // Simkl's icon is a dark tile with a see-through "S": on white, as elsewhere.
+                .background(type == .simkl ? Color.white : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(type.displayName).font(.headline)
                     HStack(spacing: 6) {
-                        Text("Built-in · anime metadata")
+                        Text(type == .simkl ? "Built-in · anime, shows and movies" : "Built-in · anime metadata")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         if isDown {

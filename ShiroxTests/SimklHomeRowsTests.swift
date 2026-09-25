@@ -82,7 +82,7 @@ final class SimklHomeRowsTests: XCTestCase {
         let layout = SimklHomeRows.layout(kind: .tv, files: files, today: today, tracker: .anilist,
                                           anilistForMAL: [:], rowLength: 20)
         XCTAssertEqual(layout.hero.map(\.id), Array(1...8))
-        XCTAssertEqual(layout.rows.map(\.title), ["Trending This Week on Simkl", "Airing Today"],
+        XCTAssertEqual(layout.rows.map(\.title), ["Trending This Week", "Airing Today"],
                        "The hero's list isn't a row, and a list with no file is left out")
         XCTAssertEqual(layout.rows.last?.items.map(\.id), [30])
     }
