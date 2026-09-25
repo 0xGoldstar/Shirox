@@ -610,12 +610,12 @@ struct SimklTrackWrite: Equatable {
                     let remoteStatus: MediaListStatus = capturedProposed == 0 ? .planning : .current
                     if let aid = capturedAniListID, capturedAniListLoggedIn {
                         try? await AniListLibraryService.shared.updateEntry(
-                            mediaId: aid, status: remoteStatus, progress: capturedProposed, score: 0)
+                            mediaId: aid, status: remoteStatus, progress: capturedProposed)
                     }
                     if let mid = capturedMALID, capturedMalLoggedIn {
                         do {
-                            try await MALProvider.shared.updateEntry(
-                                mediaId: mid, status: remoteStatus, progress: capturedProposed, score: 0)
+                            try await MALLibraryService.shared.updateEntry(
+                                malId: mid, status: remoteStatus, progress: capturedProposed, score: nil)
                         } catch {
                             Logger.shared.log("[Tracking] MAL unmark update failed: \(error)", type: "Error")
                         }
@@ -1071,8 +1071,8 @@ struct SimklTrackWrite: Equatable {
                             mediaId: aid, status: status, progress: progress, repeat: newRepeat)
                     } else {
                         Logger.shared.log("[Tracking] AniList update: \(status.rawValue) ep \(progress)", type: "Info")
-                        try? await AniListProvider.shared.updateEntry(
-                            mediaId: aid, status: status, progress: progress, score: 0)
+                        try? await AniListLibraryService.shared.updateEntry(
+                            mediaId: aid, status: status, progress: progress)
                     }
                 }
             }
@@ -1104,12 +1104,12 @@ struct SimklTrackWrite: Equatable {
                         if incrementRepeat {
                             let newRepeat = (current?.timesRewatched ?? 0) + 1
                             try await MALLibraryService.shared.updateEntry(
-                                malId: mid, status: status, progress: progress, score: 0,
+                                malId: mid, status: status, progress: progress, score: nil,
                                 numTimesRewatched: newRepeat)
                             Logger.shared.log("[Tracking] MAL rewatch counted: \(status.rawValue) ep \(progress), num_times_rewatched → \(newRepeat)", type: "Info")
                         } else {
-                            try await MALProvider.shared.updateEntry(
-                                mediaId: mid, status: status, progress: progress, score: 0)
+                            try await MALLibraryService.shared.updateEntry(
+                                malId: mid, status: status, progress: progress, score: nil)
                             Logger.shared.log("[Tracking] MAL update: \(status.rawValue) ep \(progress), malId \(mid)", type: "Info")
                         }
                     } catch {

@@ -53,7 +53,7 @@ import Foundation
             if let push = Self.remoteProgress(existing: existing ?? nil, chapter: chapter, total: effective.totalChapters) {
                 do {
                     try await MALMangaLibraryService.shared.updateEntry(
-                        malId: mid, status: push.status, progress: push.progress, score: 0)
+                        malId: mid, status: push.status, progress: push.progress, score: nil)
                 } catch {
                     Logger.shared.log("[Tracking] MAL manga update failed: \(error)", type: "Error")
                 }

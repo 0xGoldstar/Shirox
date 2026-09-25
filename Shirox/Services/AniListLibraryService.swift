@@ -220,6 +220,15 @@ final class AniListLibraryService {
           }
         }
         """
+        let variables = Self.updateVariables(mediaId: mediaId, status: status, progress: progress,
+                                             score: score, repeat: repeatCount)
+        _ = try await post(query: mutation, variables: variables)
+    }
+
+    /// A score only when there is one: `SaveMediaListEntry` sets whatever it's given, and AniList
+    /// reads 0 as "unscored" — so tracking, which knows nothing of the rating, sends none.
+    static func updateVariables(mediaId: Int, status: MediaListStatus, progress: Int,
+                                score: Double?, repeat repeatCount: Int?) -> [String: Any] {
         var variables: [String: Any] = [
             "mediaId": mediaId,
             "status": status.rawValue,
@@ -227,7 +236,7 @@ final class AniListLibraryService {
         ]
         if let score { variables["score"] = score }
         if let repeatCount { variables["repeat"] = repeatCount }
-        _ = try await post(query: mutation, variables: variables)
+        return variables
     }
 
     // MARK: - Privacy

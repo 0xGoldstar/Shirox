@@ -14,11 +14,12 @@ struct LibraryWriteSink: PendingWriteSink {
         case (.mal, .update):
             if w.mediaType == .manga {
                 try await MALMangaLibraryService.shared.rawUpdateEntry(
-                    malId: w.mediaId ?? 0, status: w.status ?? .current, progress: w.progress ?? 0, score: w.score ?? 0)
+                    malId: w.mediaId ?? 0, status: w.status ?? .current, progress: w.progress ?? 0, score: w.score)
             } else {
                 try await MALLibraryService.shared.rawUpdateEntry(
                     malId: w.mediaId ?? 0, status: w.status ?? .current, progress: w.progress ?? 0,
-                    score: w.score ?? 0, numTimesRewatched: w.repeatCount)
+                    // A queued write without a score still has none: 0 would remove the rating.
+                    score: w.score, numTimesRewatched: w.repeatCount)
             }
         case (.mal, .delete):
             if w.mediaType == .manga {

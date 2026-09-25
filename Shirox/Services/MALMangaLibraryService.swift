@@ -91,7 +91,16 @@ final class MALMangaLibraryService {
 
     // MARK: - Update entry
 
-    func updateEntry(malId: Int, status: MediaListStatus, progress: Int, score: Double) async throws {
+    /// Without a score the field is left out, which leaves the rating alone; 0 would remove it.
+    static func updateBody(status: MediaListStatus, progress: Int, score: Double?) -> String {
+        var body = "status=\(MALMangaLibraryService.shared.mapStatusToMAL(status))&num_chapters_read=\(progress)"
+        if let score { body += "&score=\(Int(score))" }
+        return body
+    }
+
+    /// `score` nil leaves the entry's rating as it is — what chapter tracking sends. MyAnimeList
+    /// reads 0 as "remove the rating".
+    func updateEntry(malId: Int, status: MediaListStatus, progress: Int, score: Double?) async throws {
         do {
             try await rawUpdateEntry(malId: malId, status: status, progress: progress, score: score)
         } catch {
@@ -103,9 +112,9 @@ final class MALMangaLibraryService {
         }
     }
 
-    func rawUpdateEntry(malId: Int, status: MediaListStatus, progress: Int, score: Double) async throws {
+    func rawUpdateEntry(malId: Int, status: MediaListStatus, progress: Int, score: Double?) async throws {
         let url = base.appendingPathComponent("manga/\(malId)/my_list_status")
-        let body = "status=\(mapStatusToMAL(status))&num_chapters_read=\(progress)&score=\(Int(score))"
+        let body = Self.updateBody(status: status, progress: progress, score: score)
         let (_, response) = try await MALAuthManager.shared.send(
             url: url, method: "PATCH",
             body: body.data(using: .utf8),

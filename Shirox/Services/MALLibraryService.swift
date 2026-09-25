@@ -116,7 +116,9 @@ final class MALLibraryService {
 
     // MARK: - Update entry
 
-    func updateEntry(malId: Int, status: MediaListStatus, progress: Int, score: Double, numTimesRewatched: Int? = nil) async throws {
+    /// `score` nil leaves the entry's rating as it is — what tracking sends, knowing nothing of it.
+    /// MyAnimeList reads 0 as "remove the rating".
+    func updateEntry(malId: Int, status: MediaListStatus, progress: Int, score: Double?, numTimesRewatched: Int? = nil) async throws {
         do {
             try await rawUpdateEntry(malId: malId, status: status, progress: progress, score: score, numTimesRewatched: numTimesRewatched)
         } catch {
@@ -128,7 +130,7 @@ final class MALLibraryService {
         }
     }
 
-    func rawUpdateEntry(malId: Int, status: MediaListStatus, progress: Int, score: Double, numTimesRewatched: Int? = nil) async throws {
+    func rawUpdateEntry(malId: Int, status: MediaListStatus, progress: Int, score: Double?, numTimesRewatched: Int? = nil) async throws {
         let url = base.appendingPathComponent("anime/\(malId)/my_list_status")
         let bodyString = Self.updateBody(status: status, progress: progress, score: score,
                                          numTimesRewatched: numTimesRewatched)
@@ -162,11 +164,13 @@ final class MALLibraryService {
     /// A `my_list_status` update. MyAnimeList has no "rewatching" status — a rewatch is
     /// `watching` plus `is_rewatching=true` — so the flag is sent on every update: set for a
     /// rewatch, cleared for everything else, or a finished rewatch would stay flagged.
-    static func updateBody(status: MediaListStatus, progress: Int, score: Double,
+    ///
+    /// Without a score the field is left out, which leaves the rating alone; 0 would remove it.
+    static func updateBody(status: MediaListStatus, progress: Int, score: Double?,
                            numTimesRewatched: Int?) -> String {
         let malStatus = MALLibraryService.shared.mapStatusToMAL(status)
-        var body = "status=\(malStatus)&is_rewatching=\(status == .repeating)"
-            + "&num_watched_episodes=\(progress)&score=\(Int(score))"
+        var body = "status=\(malStatus)&is_rewatching=\(status == .repeating)&num_watched_episodes=\(progress)"
+        if let score { body += "&score=\(Int(score))" }
         if let numTimesRewatched { body += "&num_times_rewatched=\(numTimesRewatched)" }
         return body
     }
