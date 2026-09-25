@@ -154,7 +154,8 @@ struct SettingsBackupSection: BackupSection {
 
     static let stringKeys = [
         "librarySortOrder", "libraryStatusOrder", "mangaReadingMode",
-        "preferredQuality", "titleLanguagePriority", SyncTargets.key
+        "preferredQuality", "titleLanguagePriority", SyncTargets.key,
+        DiscoverySource.choiceKey, DiscoverySource.kindKey
     ]
 
     private enum SubtitleKeys {
