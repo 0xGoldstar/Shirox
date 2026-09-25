@@ -190,6 +190,8 @@ final class GooeyRefreshController: NSObject {
     var action: @Sendable () async -> Void
     private(set) weak var scrollView: UIScrollView?
     private(set) var refreshing = false
+    /// The app-wide few-a-minute allowance; a pull over it never starts the spinner.
+    var limiter = RefreshLimiter.shared
     private var observation: NSKeyValueObservation?
     private var crossedThreshold = false
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
@@ -241,9 +243,9 @@ final class GooeyRefreshController: NSObject {
         refresh()
     }
 
-    /// Runs the action, unless this screen is already refreshing.
+    /// Runs the action, unless this screen is already refreshing or the app is over its limit.
     func refresh() {
-        guard !refreshing else { return }
+        guard !refreshing, limiter.allow() else { return }
         refreshing = true
         let center = GooeyRefreshCenter.shared
         center.began(self)
@@ -408,7 +410,7 @@ final class GooeyRefreshCenter: ObservableObject {
 }
 
 /// Lets every touch through to the app beneath.
-private final class PassthroughWindow: UIWindow {
+final class PassthroughWindow: UIWindow {
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
 }
 

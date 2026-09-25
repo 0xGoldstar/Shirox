@@ -50,6 +50,13 @@ struct HomeView: View {
         }
     }
 
+    /// The hero circle's pull, held to the app's few-a-minute limit like every other; the drop's
+    /// pulls are held to it in its controller.
+    private func heroRefresh() async {
+        guard RefreshLimiter.shared.allow() else { return }
+        await performRefresh()
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -75,7 +82,7 @@ struct HomeView: View {
                                     items: vm.trending,
                                     isRefreshing: isRefreshing,
                                     // With the drop off, the hero's own circle refreshes.
-                                    onRefresh: gooeyRefresh ? nil : performRefresh,
+                                    onRefresh: gooeyRefresh ? nil : heroRefresh,
                                     leadingInset: leadingInset
                                 )
                             }

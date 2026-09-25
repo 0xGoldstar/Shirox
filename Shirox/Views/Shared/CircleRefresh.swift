@@ -6,10 +6,11 @@ extension View {
     ///
     /// It is `.refreshable` underneath — the same refresh control, so a sheet still refreshes
     /// rather than closing, and the list still waits below the circle — with only the spinner
-    /// swapped out. For sheets, and full screens with Gooey Pull to Refresh off.
+    /// swapped out. For sheets, and full screens with Gooey Pull to Refresh off. Pulls count
+    /// towards the app's few-a-minute limit; one over it ends at once and says so.
     func circleRefreshable(action: @escaping @Sendable () async -> Void) -> some View {
         #if os(iOS)
-        refreshable(action: action).background(CircleRefreshHook())
+        refreshable(action: RefreshLimiter.shared.limiting(action)).background(CircleRefreshHook())
         #else
         refreshable(action: action)
         #endif

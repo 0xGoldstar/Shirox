@@ -137,6 +137,7 @@ final class GooeyRefreshScreenTests: XCTestCase {
         let gate = Gate()
         let a = GooeyRefreshController(action: { await gate.wait() })
         let b = GooeyRefreshController(action: { await gate.wait() })
+        unlimit(a, b)
         a.attach(listA)
         b.attach(listB)
         defer { a.detach(); b.detach() }
@@ -166,6 +167,7 @@ final class GooeyRefreshScreenTests: XCTestCase {
         let gate = Gate()
         let a = GooeyRefreshController(action: { await gate.wait() })
         let b = GooeyRefreshController(action: {})
+        unlimit(a, b)
         a.attach(listA)
         b.attach(listB)
         defer { a.detach(); b.detach() }
@@ -187,6 +189,11 @@ final class GooeyRefreshScreenTests: XCTestCase {
         gate.open()
         waitUntil(!a.refreshing)
         XCTAssertFalse(center.refreshing)
+    }
+
+    /// Out of the app's shared limit, which these tests aren't about.
+    private func unlimit(_ screens: GooeyRefreshController...) {
+        for screen in screens { screen.limiter = RefreshLimiter(limit: .max) { _ in } }
     }
 
     private func waitUntil(_ condition: @autoclosure () -> Bool) {
