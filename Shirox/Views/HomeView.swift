@@ -33,12 +33,14 @@ struct HomeView: View {
     @State private var isRefreshing = false
     @State private var leadingInset: CGFloat = 0
     @AppStorage(GooeyRefreshGeometry.settingKey) private var gooeyRefresh = true
+    @ObservedObject private var discovery = DiscoverySource.shared
+    @StateObject private var simkl = SimklHomeViewModel()
 
     private func performRefresh() async {
         guard !isRefreshing else { return }
         isRefreshing = true
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await vm.reload() }
+            group.addTask { await reloadCurrent() }
             group.addTask {
                 await ContinueWatchingManager.shared.syncWithAniList()
                 await ContinueWatchingManager.shared.syncWithMAL()
@@ -57,13 +59,48 @@ struct HomeView: View {
         await performRefresh()
     }
 
+    /// Which Home is showing — the chain's, or Simkl's for one kind. A change reloads.
+    private var homeSourceID: String {
+        discovery.usesSimkl ? "simkl-\(discovery.simklKind.rawValue)" : "providers"
+    }
+
+    /// The hero's titles, from whichever source Home is showing.
+    private var heroItems: [Media] {
+        discovery.usesSimkl ? (simkl.layout?.hero ?? []) : vm.trending
+    }
+
+    private var isLoadingEmpty: Bool {
+        discovery.usesSimkl ? simkl.isLoading && simkl.layout == nil : vm.isLoading && vm.trending.isEmpty
+    }
+
+    /// An error worth the whole screen: there's nothing at all to show.
+    private var emptyError: String? {
+        discovery.usesSimkl ? (simkl.layout == nil ? simkl.error : nil) : (vm.trending.isEmpty ? vm.error : nil)
+    }
+
+    private func loadCurrent() async {
+        if discovery.usesSimkl {
+            await simkl.load(kind: discovery.simklKind)
+        } else {
+            await vm.load()
+        }
+    }
+
+    private func reloadCurrent() async {
+        if discovery.usesSimkl {
+            await simkl.load(kind: discovery.simklKind, force: true)
+        } else {
+            await vm.reload()
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Group {
-                if vm.isLoading && vm.trending.isEmpty {
+                if isLoadingEmpty {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let error = vm.error, vm.trending.isEmpty {
+                } else if let error = emptyError {
                     ContentUnavailableView(
                         "Couldn't Load",
                         systemImage: "wifi.slash",
@@ -71,15 +108,15 @@ struct HomeView: View {
                     )
                     .toolbar {
                         ToolbarItem(placement: .primaryAction) {
-                            Button("Retry") { Task { await vm.reload() } }
+                            Button("Retry") { Task { await reloadCurrent() } }
                         }
                     }
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 24) {
-                            if !vm.trending.isEmpty {
+                            if !heroItems.isEmpty {
                                 FeaturedCarousel(
-                                    items: vm.trending,
+                                    items: heroItems,
                                     isRefreshing: isRefreshing,
                                     // With the drop off, the hero's own circle refreshes.
                                     onRefresh: gooeyRefresh ? nil : heroRefresh,
@@ -95,28 +132,36 @@ struct HomeView: View {
                                     ContinueReadingSection(items: mangaProgress.items, readerContext: $readerContext)
                                 }
                                 #endif
-                                if !vm.trending.isEmpty {
-                                    AnimeSection(title: "Trending Now",     items: vm.trending, category: .trending)
-                                }
-                                if !vm.seasonal.isEmpty {
-                                    AnimeSection(title: "This Season",      items: vm.seasonal, category: .seasonal)
-                                }
-                                if !vm.lastSeason.isEmpty {
-                                    AnimeSection(title: "Last Season · Complete", items: vm.lastSeason, category: .lastSeason)
-                                }
-                                if !vm.popular.isEmpty {
-                                    AnimeSection(title: "All-Time Popular", items: vm.popular,  category: .popular)
-                                }
-                                if !vm.topRated.isEmpty {
-                                    AnimeSection(title: "Top Rated",        items: vm.topRated, category: .topRated)
+                                if discovery.usesSimkl {
+                                    ForEach(simkl.layout?.rows ?? []) { row in
+                                        AnimeSection(title: row.title, items: row.items) {
+                                            SimklListView(list: row.list)
+                                        }
+                                    }
+                                } else {
+                                    if !vm.trending.isEmpty {
+                                        AnimeSection(title: "Trending Now", items: vm.trending) { BrowseView(category: .trending) }
+                                    }
+                                    if !vm.seasonal.isEmpty {
+                                        AnimeSection(title: "This Season", items: vm.seasonal) { BrowseView(category: .seasonal) }
+                                    }
+                                    if !vm.lastSeason.isEmpty {
+                                        AnimeSection(title: "Last Season · Complete", items: vm.lastSeason) { BrowseView(category: .lastSeason) }
+                                    }
+                                    if !vm.popular.isEmpty {
+                                        AnimeSection(title: "All-Time Popular", items: vm.popular) { BrowseView(category: .popular) }
+                                    }
+                                    if !vm.topRated.isEmpty {
+                                        AnimeSection(title: "Top Rated", items: vm.topRated) { BrowseView(category: .topRated) }
+                                    }
                                 }
                             }
                             .padding(.leading, leadingInset)
                         }
                         Spacer().frame(height: 28)
                     }
-                    .softScrollEdges(vm.trending.isEmpty ? .all : [.bottom, .leading, .trailing])
-                    .hideScrollEdgeEffect(vm.trending.isEmpty ? [] : .top)
+                    .softScrollEdges(heroItems.isEmpty ? .all : [.bottom, .leading, .trailing])
+                    .hideScrollEdgeEffect(heroItems.isEmpty ? [] : .top)
                     .coordinateSpace(name: "homeScroll")
                     .gooeyRefreshable(fallback: .custom) { await performRefresh() }
                     // Only the hero is allowed under the status bar — bleeding its banner up
@@ -125,7 +170,7 @@ struct HomeView: View {
                     // overlapping the time looked like. The hero can be absent for ordinary
                     // reasons: a provider that doesn't fill Trending, or an outage on the
                     // endpoint behind it.
-                    .ignoresSafeArea(edges: vm.trending.isEmpty ? [] : [.top, .leading])
+                    .ignoresSafeArea(edges: heroItems.isEmpty ? [] : [.top, .leading])
                 }
             }
             // `ProviderStatusBanner` existed but was never placed in any view — a provider
@@ -146,6 +191,11 @@ struct HomeView: View {
                         Image(systemName: "calendar")
                     }
                 }
+                ToolbarItem(placement: .principal) {
+                    if discovery.usesSimkl {
+                        SimklKindPicker(kind: $discovery.simklKind)
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     ProviderMenuButton()
                 }
@@ -161,7 +211,7 @@ struct HomeView: View {
         }
         .toolbarBackgroundHidden()
         .observeSafeAreaLeading($leadingInset)
-        .task { await vm.load() }
+        .task(id: homeSourceID) { await loadCurrent() }
         .onAppear {
             #if os(iOS)
             let navAppearance = UINavigationBarAppearance()
@@ -661,10 +711,10 @@ private struct FeaturedCard: View {
 
 // MARK: - Anime Section
 
-private struct AnimeSection: View {
+private struct AnimeSection<SeeAll: View>: View {
     let title: String
     let items: [Media]
-    let category: BrowseCategory
+    @ViewBuilder let seeAll: () -> SeeAll
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var cardWidth: CGFloat {
@@ -688,7 +738,7 @@ private struct AnimeSection: View {
                 }
                 Spacer()
                 NavigationLink {
-                    BrowseView(category: category)
+                    seeAll()
                 } label: {
                     HStack(spacing: 3) {
                         Text("See all")
