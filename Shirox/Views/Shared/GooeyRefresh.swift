@@ -183,11 +183,13 @@ final class ScrollViewHookView: UIView {
     }
 }
 
-/// Watches one scroll view's pull and turns a release past the threshold into a refresh.
+/// Watches one scroll view's pull and turns a release past the threshold into a refresh — its
+/// own, whatever other screens are refreshing.
 @MainActor
 final class GooeyRefreshController: NSObject {
     var action: @Sendable () async -> Void
-    private weak var scrollView: UIScrollView?
+    private(set) weak var scrollView: UIScrollView?
+    private(set) var refreshing = false
     private var observation: NSKeyValueObservation?
     private var crossedThreshold = false
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
@@ -222,38 +224,47 @@ final class GooeyRefreshController: NSObject {
     }
 
     private func scrolled() {
-        guard let scrollView, scrollView.window != nil else { return }
-        let center = GooeyRefreshCenter.shared
-        guard !center.refreshing else { return }
+        guard let scrollView, scrollView.window != nil, !refreshing else { return }
         let pull = self.pull
         if scrollView.isTracking {
             let past = pull >= GooeyRefreshGeometry.threshold
             if past, !crossedThreshold { haptic.impactOccurred() }
             crossedThreshold = past
         }
-        center.update(pull: pull, from: scrollView)
+        GooeyRefreshCenter.shared.update(pull: pull, from: self)
     }
 
     @objc private func panned(_ gesture: UIPanGestureRecognizer) {
         guard gesture.state == .ended || gesture.state == .cancelled else { return }
         crossedThreshold = false
+        guard GooeyRefreshGeometry.shouldRefresh(pull: pull, released: true, refreshing: refreshing) else { return }
+        refresh()
+    }
+
+    /// Runs the action, unless this screen is already refreshing.
+    func refresh() {
+        guard !refreshing else { return }
+        refreshing = true
         let center = GooeyRefreshCenter.shared
-        guard GooeyRefreshGeometry.shouldRefresh(pull: pull, released: true, refreshing: center.refreshing) else { return }
-        center.beginRefreshing()
+        center.began(self)
         let action = self.action
+        // Held until the action returns, so the drop is told even if the screen has gone.
         Task { @MainActor in
             await action()
-            center.endRefreshing()
+            self.refreshing = false
+            center.ended(self)
         }
     }
 }
 
 /// The one drop on screen, in its own see-through window above the navigation bar — the only
-/// layer that can reach the island.
+/// layer that can reach the island. Each screen refreshes on its own; the drop shows the one
+/// that's showing.
 @MainActor
 final class GooeyRefreshCenter: ObservableObject {
     static let shared = GooeyRefreshCenter()
 
+    /// The pull and refresh of `source`, the screen the drop is showing.
     @Published private(set) var pull: CGFloat = 0
     @Published private(set) var refreshing = false
     @Published private(set) var cutout: GooeyRefreshGeometry.Cutout = .dynamicIsland
@@ -261,36 +272,72 @@ final class GooeyRefreshCenter: ObservableObject {
 
     private var window: UIWindow?
     private var hideWork: DispatchWorkItem?
-    /// The scroll view whose pull the drop shows.
-    private weak var source: UIScrollView?
+    private weak var source: GooeyRefreshController?
+    /// Every screen refreshing now, shown or not.
+    private let refreshingScreens = NSHashTable<GooeyRefreshController>.weakObjects()
     /// Checks, while the drop is out, that the pulled screen is still showing.
     private var watch: Timer?
 
     private init() {}
 
-    func update(pull: CGFloat, from scrollView: UIScrollView) {
-        guard !refreshing else { return }
+    /// A pull on a screen that isn't refreshing. It takes the drop over from any screen that is
+    /// but has gone from view.
+    func update(pull: CGFloat, from screen: GooeyRefreshController) {
         if pull > 0 {
-            source = scrollView
-            show(in: scrollView.window)
+            if source !== screen {
+                source = screen
+                refreshing = false
+            }
+            show(in: screen.scrollView?.window)
+        } else if source !== screen {
+            return
         }
         if self.pull != pull { self.pull = pull }
         if pull == 0 { hideSoon() }
     }
 
+    func began(_ screen: GooeyRefreshController) {
+        refreshingScreens.add(screen)
+        source = screen
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { refreshing = true }
+        startWatching()
+    }
+
+    func ended(_ screen: GooeyRefreshController) {
+        refreshingScreens.remove(screen)
+        guard source === screen else { return }
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) {
+            refreshing = false
+            pull = 0
+        }
+        hideSoon()
+    }
+
     /// The drop belongs to the screen that was pulled — it lives in a window above the whole app,
     /// so nothing else takes it away. When that screen goes (another tab, a pushed page, a sheet
-    /// over it) the drop goes too, and comes back if the refresh is still running when the
-    /// screen does. A pull the screen took away with it is let go.
+    /// over it) the drop goes too, and comes back with any screen still refreshing when it's
+    /// showing again. A pull the screen took away with it is let go.
     func checkSource() {
-        let showing = source.map(Self.isOnScreen) ?? false
+        var showing = source.map(Self.isShowing) ?? false
+        if !showing || (pull == 0 && !refreshing),
+           let back = refreshingScreens.allObjects.first(where: Self.isShowing), back !== source {
+            source = back
+            pull = 0
+            refreshing = true
+            showing = true
+            show(in: back.scrollView?.window)
+        }
         if !showing {
             if !refreshing, pull != 0 { pull = 0 }
             window?.isHidden = true
         } else if pull > 0 || refreshing {
             window?.isHidden = false
         }
-        if pull == 0, !refreshing { stopWatching() }
+        if pull == 0, refreshingScreens.allObjects.isEmpty { stopWatching() }
+    }
+
+    private static func isShowing(_ screen: GooeyRefreshController) -> Bool {
+        screen.scrollView.map(isOnScreen) ?? false
     }
 
     /// On screen, and not under a sheet or a cover.
@@ -324,17 +371,6 @@ final class GooeyRefreshCenter: ObservableObject {
         watch = nil
     }
 
-    func beginRefreshing() {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { refreshing = true }
-    }
-
-    func endRefreshing() {
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) {
-            refreshing = false
-            pull = 0
-        }
-        hideSoon()
-    }
 
     private func show(in hostWindow: UIWindow?) {
         hideWork?.cancel()

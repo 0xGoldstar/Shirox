@@ -116,14 +116,105 @@ final class GooeyRefreshScreenTests: XCTestCase {
     func testAPullItsScreenTookAwayIsLetGo() {
         let (window, _, scrollView) = screen()
         defer { window.isHidden = true }
+        let screen = GooeyRefreshController(action: {})
+        screen.attach(scrollView)
+        defer { screen.detach() }
         let center = GooeyRefreshCenter.shared
-        center.update(pull: 60, from: scrollView)
+        center.update(pull: 60, from: screen)
         XCTAssertEqual(center.pull, 60)
         center.checkSource()
         XCTAssertEqual(center.pull, 60, "Still showing, so the pull stands")
         scrollView.removeFromSuperview()
         center.checkSource()
         XCTAssertEqual(center.pull, 0)
+    }
+
+    /// Library refreshing doesn't hold Browse back.
+    func testEachScreenRefreshesOnItsOwn() {
+        let (windowA, _, listA) = screen()
+        let (windowB, _, listB) = screen()
+        defer { windowA.isHidden = true; windowB.isHidden = true }
+        let gate = Gate()
+        let a = GooeyRefreshController(action: { await gate.wait() })
+        let b = GooeyRefreshController(action: { await gate.wait() })
+        a.attach(listA)
+        b.attach(listB)
+        defer { a.detach(); b.detach() }
+
+        a.refresh()
+        b.refresh()
+        XCTAssertTrue(a.refreshing)
+        XCTAssertTrue(b.refreshing, "Another screen's refresh doesn't stop this one")
+        a.refresh()
+        waitUntil(gate.runs >= 2)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(gate.runs, 2, "A screen already refreshing doesn't start again")
+
+        gate.open()
+        waitUntil(!a.refreshing && !b.refreshing)
+        XCTAssertFalse(a.refreshing)
+        XCTAssertFalse(b.refreshing)
+        XCTAssertFalse(GooeyRefreshCenter.shared.refreshing)
+    }
+
+    /// The drop shows the screen in view: pull Browse while Library refreshes in another tab, then
+    /// go back to Library and its spinner is there again.
+    func testTheDropFollowsTheScreenInView() {
+        let (windowA, rootA, listA) = screen()
+        let (windowB, _, listB) = screen()
+        defer { windowA.isHidden = true; windowB.isHidden = true }
+        let gate = Gate()
+        let a = GooeyRefreshController(action: { await gate.wait() })
+        let b = GooeyRefreshController(action: {})
+        a.attach(listA)
+        b.attach(listB)
+        defer { a.detach(); b.detach() }
+        let center = GooeyRefreshCenter.shared
+
+        a.refresh()
+        XCTAssertTrue(center.refreshing)
+        listA.removeFromSuperview()
+        center.update(pull: 60, from: b)
+        XCTAssertFalse(center.refreshing, "The drop is Browse's, which isn't refreshing")
+        XCTAssertEqual(center.pull, 60)
+        center.update(pull: 0, from: b)
+
+        rootA.view.addSubview(listA)
+        listB.removeFromSuperview()
+        center.checkSource()
+        XCTAssertTrue(center.refreshing, "Back on Library, still refreshing")
+
+        gate.open()
+        waitUntil(!a.refreshing)
+        XCTAssertFalse(center.refreshing)
+    }
+
+    private func waitUntil(_ condition: @autoclosure () -> Bool) {
+        let deadline = Date().addingTimeInterval(2)
+        while !condition(), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+    }
+}
+
+/// Holds refreshes open until the test lets them finish — including ones that only reach it
+/// after it opens, as a refresh's task starts on a later turn.
+@MainActor
+private final class Gate {
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var isOpen = false
+    private(set) var runs = 0
+
+    func wait() async {
+        runs += 1
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        waiting.forEach { $0.resume() }
+        waiting.removeAll()
     }
 }
 #endif
