@@ -76,16 +76,6 @@ struct SearchBrowseView: View {
     var onDeleteRecent: (String) -> Void = { _ in }
     var onClearRecents: () -> Void = {}
 
-    private var platformBackground: Color {
-        #if os(iOS)
-        Color(UIColor.systemBackground)
-        #elseif os(tvOS)
-        Color.clear
-        #else
-        Color(NSColor.windowBackgroundColor)
-        #endif
-    }
-
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12, pinnedViews: []) {
@@ -127,47 +117,8 @@ struct SearchBrowseView: View {
     // MARK: - Recent searches
 
     private var recents: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Recent")
-                    .font(.title3.weight(.bold))
-                Spacer()
-                Button("Clear", action: onClearRecents)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 16)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(recentSearches, id: \.self) { query in
-                        Button { onSelectRecent(query) } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "clock")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                Text(query)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(Color.secondary.opacity(0.12), in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        // Swipe-to-delete needs a List, which is what cost the browse grid its
-                        // place. Long-press does the same job here.
-                        .contextMenu {
-                            Button(role: .destructive) { onDeleteRecent(query) } label: {
-                                Label("Remove", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-        }
+        RecentSearchesRow(queries: recentSearches, onSelect: onSelectRecent,
+                          onDelete: onDeleteRecent, onClear: onClearRecents)
     }
 
     // MARK: - Filters
@@ -215,21 +166,11 @@ struct SearchBrowseView: View {
     }
 
     private func genreChip(title: String, value: String?) -> some View {
-        let selected = vm.genre == value
-        return Button {
+        FilterChip(title: title, selected: vm.genre == value) {
             guard vm.genre != value else { return }
             vm.genre = value
             vm.reload()
-        } label: {
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(selected ? AnyShapeStyle(platformBackground) : AnyShapeStyle(Color.primary))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .background(selected ? AnyShapeStyle(Color.primary) : AnyShapeStyle(Color.secondary.opacity(0.12)),
-                            in: Capsule())
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Grid
@@ -255,5 +196,87 @@ struct SearchBrowseView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
         }
+    }
+}
+
+/// Recent searches as a row of chips, above a browse grid. Long-press removes one.
+struct RecentSearchesRow: View {
+    let queries: [String]
+    let onSelect: (String) -> Void
+    let onDelete: (String) -> Void
+    let onClear: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Recent")
+                    .font(.title3.weight(.bold))
+                Spacer()
+                Button("Clear", action: onClear)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(queries, id: \.self) { query in
+                        Button { onSelect(query) } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "clock")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(query)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        // Swipe-to-delete needs a List, which is what cost the browse grid its
+                        // place. Long-press does the same job here.
+                        .contextMenu {
+                            Button(role: .destructive) { onDelete(query) } label: {
+                                Label("Remove", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+}
+
+/// A capsule that shows whether its filter is on.
+struct FilterChip: View {
+    let title: String
+    let selected: Bool
+    let action: () -> Void
+
+    private var platformBackground: Color {
+        #if os(iOS)
+        Color(UIColor.systemBackground)
+        #elseif os(tvOS)
+        Color.clear
+        #else
+        Color(NSColor.windowBackgroundColor)
+        #endif
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(selected ? AnyShapeStyle(platformBackground) : AnyShapeStyle(Color.primary))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(selected ? AnyShapeStyle(Color.primary) : AnyShapeStyle(Color.secondary.opacity(0.12)),
+                            in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }

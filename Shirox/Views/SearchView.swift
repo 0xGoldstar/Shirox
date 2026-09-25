@@ -126,17 +126,31 @@ struct SearchView: View {
                 // Nothing typed yet: give people somewhere to go, with any recent searches
                 // carried along at the top. Recents used to be a full-height list of their own,
                 // which meant one previous search hid browsing entirely.
-                SearchBrowseView(
-                    columns: columns,
-                    recentSearches: history.queries,
-                    onSelectRecent: { query in
-                        vm.query = query
-                        history.add(query)
-                        vm.search(usingModule: usingModule)
-                    },
-                    onDeleteRecent: { history.remove($0) },
-                    onClearRecents: { history.clear() }
-                )
+                if discovery.usesSimkl {
+                    SimklBrowseView(
+                        columns: columns,
+                        recentSearches: history.queries,
+                        onSelectRecent: { query in
+                            vm.query = query
+                            history.add(query)
+                            vm.search(usingModule: usingModule)
+                        },
+                        onDeleteRecent: { history.remove($0) },
+                        onClearRecents: { history.clear() }
+                    )
+                } else {
+                    SearchBrowseView(
+                        columns: columns,
+                        recentSearches: history.queries,
+                        onSelectRecent: { query in
+                            vm.query = query
+                            history.add(query)
+                            vm.search(usingModule: usingModule)
+                        },
+                        onDeleteRecent: { history.remove($0) },
+                        onClearRecents: { history.clear() }
+                    )
+                }
             } else if vm.query.isEmpty && !history.queries.isEmpty {
                 // Module sources have no browse grid, so recents keep their own screen there.
                 historyView
