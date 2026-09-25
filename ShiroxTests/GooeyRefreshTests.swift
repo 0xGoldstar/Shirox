@@ -26,20 +26,20 @@ final class GooeyRefreshTests: XCTestCase {
         XCTAssertLessThanOrEqual(Geometry.anchorRect(for: .edge, width: 402).maxY, 0)
     }
 
-    /// Black on black vanishes, so only dark mode outlines the drop.
-    func testOnlyDarkModeOutlinesTheDrop() {
-        XCTAssertNotNil(Geometry.rim(for: .dark))
-        XCTAssertNil(Geometry.rim(for: .light))
+    /// Black on black vanishes, so only dark mode lights the drop.
+    func testOnlyDarkModeLightsTheDrop() {
+        XCTAssertTrue(Geometry.glows(in: .dark))
+        XCTAssertFalse(Geometry.glows(in: .light))
     }
 
-    /// Only what hangs out of the island is outlined; round the anchor the glow showed over the
-    /// island's top edge.
-    func testTheRimStartsBelowTheAnchor() {
+    /// Only what hangs out of the island glows; lit from round the anchor, the glow showed over
+    /// the island's top edge.
+    func testOnlyWhatHangsBelowTheAnchorGlows() {
         let anchor = Geometry.anchorRect(for: .dynamicIsland, width: 402)
-        XCTAssertGreaterThan(Geometry.rimTop(anchor: anchor), anchor.maxY + Geometry.rimRadius)
+        XCTAssertGreaterThanOrEqual(Geometry.glowTop(anchor: anchor), anchor.maxY)
         let hanging = Geometry.dropCenterY(anchor: anchor, progress: 1, refreshing: true)
-        XCTAssertLessThan(Geometry.rimTop(anchor: anchor), hanging - Geometry.dropRadius(progress: 1, refreshing: true),
-                          "The hanging drop is outlined all the way round")
+        XCTAssertLessThan(Geometry.glowTop(anchor: anchor), hanging - Geometry.dropRadius(progress: 1, refreshing: true),
+                          "The hanging drop glows all the way round")
     }
 
     func testTheDropHangsFurtherAsThePullGrows() {

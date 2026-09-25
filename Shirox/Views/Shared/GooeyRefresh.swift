@@ -52,22 +52,17 @@ enum GooeyRefreshGeometry {
     /// How far to pull before letting go refreshes.
     static let threshold: CGFloat = 90
 
-    /// In dark mode the black drop vanishes into a black screen, so it gets a grey rim, as iOS
-    /// gives the Dynamic Island when it opens over black — a glow around the finished shape, so
-    /// it follows the neck and parts with the drop.
-    static let rimColor = Color(white: 0.5)
-    static let rimRadius: CGFloat = 1.5
+    /// In dark mode the black drop vanishes into a black screen, so it gives off a soft white
+    /// glow. Light mode needs none: black on a light screen shows by itself.
+    static func glows(in scheme: ColorScheme) -> Bool { scheme == .dark }
 
-    /// The rim starts this far below the anchor, so it only outlines what hangs out of the
-    /// island: drawn round the anchor too, its glow showed over the island's top edge.
-    static func rimTop(anchor: CGRect) -> CGFloat {
-        anchor.maxY + rimRadius * 2
-    }
+    static let glowRadius: CGFloat = 7
+    static let glowOpacity: Double = 0.6
 
-    /// Light mode needs none: black on a light screen shows by itself.
-    static func rim(for scheme: ColorScheme) -> Color? {
-        scheme == .dark ? rimColor : nil
-    }
+    /// Where the glowing part starts: the anchor's bottom edge, still inside the island. Only
+    /// what hangs out below glows — lit from round the anchor too, it showed over the island's
+    /// top edge.
+    static func glowTop(anchor: CGRect) -> CGFloat { anchor.maxY }
 
     static func progress(pull: CGFloat) -> CGFloat {
         max(0, pull) / threshold
@@ -305,7 +300,7 @@ final class GooeyRefreshCenter: ObservableObject {
             overlay.rootViewController = host
             window = overlay
         }
-        // Light or dark as the screen beneath is, for the rim.
+        // Light or dark as the screen beneath is, for the glow.
         window?.overrideUserInterfaceStyle = hostWindow.traitCollection.userInterfaceStyle
         window?.isHidden = false
     }
@@ -338,7 +333,7 @@ private struct GooeyDropOverlay: View {
         let radius = GooeyRefreshGeometry.dropRadius(progress: progress, refreshing: center.refreshing)
         ZStack(alignment: .topLeading) {
             GooeyBlob(anchor: anchor, dropY: dropY, radius: radius,
-                      rim: GooeyRefreshGeometry.rim(for: colorScheme))
+                      glows: GooeyRefreshGeometry.glows(in: colorScheme))
             ProgressView()
                 .tint(.white)
                 .scaleEffect(0.7)
@@ -352,12 +347,12 @@ private struct GooeyDropOverlay: View {
 }
 
 /// The metaball: the anchor and the drop blurred together and cut at half opacity, so they join
-/// in a neck while close and part cleanly once far enough apart. `rim` outlines it, for dark mode.
+/// in a neck while close and part cleanly once far enough apart. `glows` lights it, for dark mode.
 struct GooeyBlob: View, Animatable {
     let anchor: CGRect
     var dropY: CGFloat
     var radius: CGFloat
-    var rim: Color? = nil
+    var glows = false
 
     var animatableData: AnimatablePair<CGFloat, CGFloat> {
         get { AnimatablePair(dropY, radius) }
@@ -369,21 +364,25 @@ struct GooeyBlob: View, Animatable {
 
     var body: some View {
         Canvas { context, size in
-            if let rim {
-                var rimmed = context
-                let top = GooeyRefreshGeometry.rimTop(anchor: anchor)
-                rimmed.clip(to: Path(CGRect(x: 0, y: top, width: size.width, height: max(0, size.height - top))))
-                // Filters run last-added first: blur, then the cut, then the rim around what's left.
-                rimmed.addFilter(.shadow(color: rim, radius: GooeyRefreshGeometry.rimRadius))
-                metaball(in: rimmed)
+            if glows {
+                // The drop again in white, cut off at the island and blurred into a glow, under
+                // the black one.
+                var lit = context
+                lit.opacity = GooeyRefreshGeometry.glowOpacity
+                lit.addFilter(.blur(radius: GooeyRefreshGeometry.glowRadius))
+                lit.drawLayer { layer in
+                    let top = GooeyRefreshGeometry.glowTop(anchor: anchor)
+                    layer.clip(to: Path(CGRect(x: 0, y: top, width: size.width, height: max(0, size.height - top))))
+                    metaball(in: layer, color: .white)
+                }
             }
-            metaball(in: context)
+            metaball(in: context, color: .black)
         }
     }
 
-    private func metaball(in context: GraphicsContext) {
+    private func metaball(in context: GraphicsContext, color: Color) {
         var context = context
-        context.addFilter(.alphaThreshold(min: 0.5, color: .black))
+        context.addFilter(.alphaThreshold(min: 0.5, color: color))
         context.addFilter(.blur(radius: 9))
         context.drawLayer { layer in
             layer.fill(Path(roundedRect: anchor, cornerRadius: anchor.height / 2), with: .color(.black))
