@@ -5,14 +5,34 @@ struct TrackingLinks: Codable, Equatable {
     var anilist: Int?
     var mal: Int?
     var simkl: Int?
+    /// Module pages: the Simkl show or movie the page is.
+    var simklTitle: SimklTitleLink?
+    /// Module pages: the page has had its one automatic Simkl search, whatever it found.
+    var simklSearched: Bool?
 
-    init(anilist: Int? = nil, mal: Int? = nil, simkl: Int? = nil) {
+    init(anilist: Int? = nil, mal: Int? = nil, simkl: Int? = nil,
+         simklTitle: SimklTitleLink? = nil, simklSearched: Bool? = nil) {
         self.anilist = anilist
         self.mal = mal
         self.simkl = simkl
+        self.simklTitle = simklTitle
+        self.simklSearched = simklSearched
     }
 
-    var isEmpty: Bool { anilist == nil && mal == nil && simkl == nil }
+    /// A searched page keeps its record even with nothing linked, so it isn't searched again.
+    var isEmpty: Bool {
+        anilist == nil && mal == nil && simkl == nil && simklTitle == nil && simklSearched != true
+    }
+}
+
+/// A module page's Simkl show or movie — which Simkl marks the page's episodes on.
+struct SimklTitleLink: Codable, Equatable {
+    let simklID: Int
+    let kind: MediaKind
+    /// The season the page holds, or nil for every season in order. Nil for a movie.
+    var season: Int?
+    /// Matched by the app from the page's title, not chosen by the user.
+    var automatic: Bool
 }
 
 /// The ids a write for a show should use, once the user's links are applied.
@@ -93,6 +113,7 @@ enum TrackingLinkResolver {
             result.anilist = result.anilist ?? record.anilist
             result.mal = result.mal ?? record.mal
             result.simkl = result.simkl ?? record.simkl
+            result.simklTitle = result.simklTitle ?? record.simklTitle
         }
         return result
     }

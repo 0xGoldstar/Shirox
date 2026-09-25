@@ -124,4 +124,27 @@ final class TrackingLinksTests: XCTestCase {
         XCTAssertFalse(TrackingLinkResolver.moduleLinksApply(
             anchorAniListID: nil, anchorMALID: 20, mappedAniListID: nil, mappedMALID: 21))
     }
+
+    // MARK: - Simkl shows and movies (module pages)
+
+    /// Links saved before shows and movies existed still load, with neither.
+    func testOlderRecordsStillDecode() throws {
+        let decoded = try JSONDecoder().decode(TrackingLinks.self, from: Data(#"{"mal":28223,"simkl":37145}"#.utf8))
+        XCTAssertEqual(decoded, TrackingLinks(mal: 28223, simkl: 37145))
+        XCTAssertNil(decoded.simklTitle)
+        XCTAssertNil(decoded.simklSearched)
+    }
+
+    /// A page that has had its one automatic search keeps a record, even with nothing linked —
+    /// or it would be searched again.
+    func testASearchedPageKeepsItsRecord() {
+        TrackingLinkStore(defaults: defaults).update("module:m|/show") { $0.simklSearched = true }
+        XCTAssertEqual(TrackingLinkStore(defaults: defaults).links(for: "module:m|/show")?.simklSearched, true)
+    }
+
+    func testAShowLinkSurvivesARelaunch() {
+        let link = SimklTitleLink(simklID: 1359610, kind: .tv, season: nil, automatic: true)
+        TrackingLinkStore(defaults: defaults).update("module:m|/show") { $0.simklTitle = link }
+        XCTAssertEqual(TrackingLinkStore(defaults: defaults).links(for: "module:m|/show")?.simklTitle, link)
+    }
 }

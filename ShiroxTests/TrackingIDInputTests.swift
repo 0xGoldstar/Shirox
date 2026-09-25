@@ -35,4 +35,14 @@ final class TrackingIDInputTests: XCTestCase {
     func testAMangaLinkIsRefused() {
         XCTAssertNil(TrackingIDInput.parse("https://anilist.co/manga/30002", for: .anilist))
     }
+
+    /// A module page links a Simkl show or movie by its own page's link.
+    func testSimklShowAndMovieLinks() {
+        XCTAssertEqual(TrackingIDInput.parse("https://simkl.com/tv/1359610/ted-lasso", for: .simkl, simklKind: .tv), 1359610)
+        XCTAssertEqual(TrackingIDInput.parse("simkl.com/movies/2123791/the-end-of-oak-street", for: .simkl, simklKind: .movie), 2123791)
+        XCTAssertNil(TrackingIDInput.parse("https://simkl.com/tv/1359610", for: .simkl, simklKind: .movie),
+                     "A show's link isn't a movie")
+        XCTAssertNil(TrackingIDInput.parse("https://simkl.com/tv/1359610", for: .simkl), "Nor an anime")
+        XCTAssertEqual(TrackingIDInput.parse("1359610", for: .simkl, simklKind: .tv), 1359610)
+    }
 }

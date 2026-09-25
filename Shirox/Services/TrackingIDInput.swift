@@ -4,7 +4,8 @@ import Foundation
 /// the anime on that service. Anything else — another service's link, a manga link — is refused,
 /// because a wrong guess links the wrong show.
 enum TrackingIDInput {
-    static func parse(_ text: String, for side: LibrarySide) -> Int? {
+    /// `simklKind` says which Simkl page a link must be: `/anime/`, `/tv/` or `/movies/`.
+    static func parse(_ text: String, for side: LibrarySide, simklKind: MediaKind = .anime) -> Int? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if let number = Int(trimmed) { return number > 0 ? number : nil }
 
@@ -20,7 +21,8 @@ enum TrackingIDInput {
         guard host == expectedHost || host == "www." + expectedHost else { return nil }
 
         let parts = url.pathComponents.filter { $0 != "/" }
-        guard parts.count >= 2, parts[0].lowercased() == "anime",
+        let expected = side != .simkl ? "anime" : simklKind == .tv ? "tv" : simklKind == .movie ? "movies" : "anime"
+        guard parts.count >= 2, parts[0].lowercased() == expected,
               let number = Int(parts[1]), number > 0 else { return nil }
         return number
     }
