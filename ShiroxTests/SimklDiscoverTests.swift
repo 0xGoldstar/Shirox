@@ -1,0 +1,111 @@
+import XCTest
+@testable import Shirox
+
+/// Simkl's free files — trending, DVD releases and the calendar — as `SimklDiscoverItem`s.
+/// Fixtures are trimmed copies of the live files (2026-09-25).
+final class SimklDiscoverTests: XCTestCase {
+    private func decode(_ json: String) throws -> [SimklDiscoverItem] {
+        try SimklDiscoverItem.decodeList(Data(json.utf8))
+    }
+
+    func testATrendingAnimeKeepsItsTrackerIDs() throws {
+        let item = try XCTUnwrap(decode(#"""
+        [{"title":"The Exiled Heavy Knight Knows How to Game the System",
+          "title_romaji":"Tsuihou Sareta Tensei Juu Kishi wa Game Chishiki de Musou Suru",
+          "poster":"20/20276613600d378d41","fanart":"16/16365735cca3c0acee",
+          "ids":{"simkl_id":2573730,"slug":"tsuihou","mal":"59741","anilist":"180136","tvdb":"453028"},
+          "release_date":"07/02/2026","rank":4602,
+          "ratings":{"simkl":{"rating":7,"votes":188},"mal":{"rating":6.8,"votes":16613}},
+          "runtime":"25m","status":"ongoing","anime_type":"tv","total_episodes":26,
+          "overview":"Born into a prestigious family.","genres":["Action","Adventure","Fantasy"]}]
+        """#).first)
+        XCTAssertEqual(item.ids, SimklDiscoverItem.IDs(simkl: 2573730, mal: 59741, anilist: 180136))
+        XCTAssertEqual(item.title, "The Exiled Heavy Knight Knows How to Game the System")
+        XCTAssertEqual(item.titleRomaji, "Tsuihou Sareta Tensei Juu Kishi wa Game Chishiki de Musou Suru")
+        XCTAssertEqual(item.poster, "20/20276613600d378d41")
+        XCTAssertEqual(item.fanart, "16/16365735cca3c0acee")
+        XCTAssertEqual(item.overview, "Born into a prestigious family.")
+        XCTAssertEqual(item.rating, 7)
+        XCTAssertEqual(item.runtime, 25)
+        XCTAssertEqual(item.totalEpisodes, 26)
+        XCTAssertEqual(item.rank, 4602)
+        XCTAssertEqual(item.genres, ["Action", "Adventure", "Fantasy"])
+        XCTAssertNil(item.airDay, "Trending entries aren't dated")
+    }
+
+    func testAMovieReadsItsRuntimeAndDropsRepeatedGenres() throws {
+        let item = try XCTUnwrap(decode(#"""
+        [{"title":"The End of Oak Street","poster":"20/2036989114a175eae4","fanart":"19/19818287730a769e81",
+          "ids":{"simkl_id":2123791,"imdb":"tt27165187","tmdb":"1101383"},"release_date":"08/12/2026",
+          "rank":17470,"ratings":{"simkl":{"rating":6.22,"votes":725}},"runtime":"1h 40m",
+          "status":"ended","overview":"A cosmic event.","genres":["Action","Action","Adventure"]}]
+        """#).first)
+        XCTAssertEqual(item.runtime, 100)
+        XCTAssertEqual(item.genres, ["Action", "Adventure"])
+        XCTAssertEqual(item.ids, SimklDiscoverItem.IDs(simkl: 2123791, mal: nil, anilist: nil))
+    }
+
+    func testACalendarEntryHasItsListedDayAndZeroMeansUnranked() throws {
+        let items = try decode(#"""
+        [{"title":"Primeval Overlord","poster":"20/20438493d0702459ce",
+          "date":"2026-09-24T00:00:00+09:00","release_date":"2026-07-30","rank":0,
+          "ratings":{"simkl":{"rating":null,"votes":null}},
+          "ids":{"simkl_id":3200766,"slug":"taigu-shenzun","tmdb":"330275","mal":"64710"},
+          "episode":{"episode":20},"anime_type":"ona"},
+         {"title":"Ted Lasso","poster":"11/116270662d150894ff","date":"2026-09-24T00:00:00-04:00",
+          "rank":194,"ids":{"simkl_id":1359610},"episode":{"season":4,"episode":1}}]
+        """#)
+        XCTAssertEqual(items.map(\.airDay), ["2026-09-24", "2026-09-24"],
+                       "The day as Simkl lists it, not moved into another time zone")
+        XCTAssertNil(items[0].rank, "The calendar's 0 means unranked")
+        XCTAssertNil(items[0].rating)
+        XCTAssertEqual(items[0].ids.mal, 64710)
+        XCTAssertNil(items[0].ids.anilist)
+        XCTAssertEqual(items[1].rank, 194)
+    }
+
+    func testAnEntryWithoutASimklIdIsSkipped() throws {
+        let items = try decode(#"[{"title":"No id","ids":{"slug":"x"}},{"title":"Kept","ids":{"simkl_id":7}}]"#)
+        XCTAssertEqual(items.map(\.title), ["Kept"])
+    }
+
+    func testRuntimeReadings() {
+        XCTAssertEqual(SimklDiscoverItem.minutes(from: "25m"), 25)
+        XCTAssertEqual(SimklDiscoverItem.minutes(from: "1h 45m"), 105)
+        XCTAssertEqual(SimklDiscoverItem.minutes(from: "2h"), 120)
+        XCTAssertNil(SimklDiscoverItem.minutes(from: ""))
+        XCTAssertNil(SimklDiscoverItem.minutes(from: "soon"))
+    }
+
+    func testListPaths() {
+        XCTAssertEqual(SimklFeedList.trending(.tv, .today).path(full: false), "/discover/trending/tv/today_100.json")
+        XCTAssertEqual(SimklFeedList.trending(.movie, .week).path(full: true), "/discover/trending/movies/week_500.json")
+        XCTAssertEqual(SimklFeedList.trending(.anime, .month).path(full: false), "/discover/trending/anime/month_100.json")
+        XCTAssertEqual(SimklFeedList.dvdReleases.path(full: true), "/discover/dvd/releases_500.json")
+        XCTAssertEqual(SimklFeedList.calendar(.anime).path(full: true), "/calendar/anime.json")
+        XCTAssertEqual(SimklFeedList.calendar(.tv).path(full: false), "/calendar/tv.json")
+        XCTAssertEqual(SimklFeedList.calendar(.movie).path(full: false), "/calendar/movie_release.json")
+    }
+
+    /// Simkl regenerates Today hourly, the calendar every 6 hours, the rest daily.
+    func testHowLongEachListKeeps() {
+        XCTAssertEqual(SimklFeedList.trending(.tv, .today).refreshInterval, 3600)
+        XCTAssertEqual(SimklFeedList.trending(.tv, .week).refreshInterval, 86400)
+        XCTAssertEqual(SimklFeedList.trending(.anime, .month).refreshInterval, 86400)
+        XCTAssertEqual(SimklFeedList.dvdReleases.refreshInterval, 86400)
+        XCTAssertEqual(SimklFeedList.calendar(.movie).refreshInterval, 21600)
+    }
+
+    /// Simkl requires "Simkl" in the title wherever its trending lists are shown.
+    func testRowTitlesAndKinds() {
+        XCTAssertEqual(SimklFeedList.trending(.tv, .today).title, "Trending Today on Simkl")
+        XCTAssertEqual(SimklFeedList.trending(.movie, .week).title, "Trending This Week on Simkl")
+        XCTAssertEqual(SimklFeedList.trending(.anime, .month).title, "Trending This Month on Simkl")
+        XCTAssertEqual(SimklFeedList.dvdReleases.title, "Popular on DVD & Digital")
+        XCTAssertEqual(SimklFeedList.calendar(.tv).title, "Airing Today")
+        XCTAssertEqual(SimklFeedList.calendar(.movie).title, "Coming Soon")
+        XCTAssertEqual(SimklFeedList.dvdReleases.kind, .movie)
+        XCTAssertEqual(SimklFeedList.calendar(.anime).kind, .anime)
+        XCTAssertEqual(SimklFeedList.trending(.tv, .week).kind, .tv)
+    }
+}
