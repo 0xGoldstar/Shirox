@@ -296,7 +296,7 @@ private struct FeaturedCarousel: View {
                                 }
 
                                 NavigationLink {
-                                    AniListDetailView(mediaId: currentMedia.id, preloadedMedia: currentMedia)
+                                    MediaDestination(media: currentMedia)
                                 } label: {
                                     HStack(spacing: 6) {
                                         Image(systemName: "play.fill").font(.footnote.weight(.semibold))
@@ -460,7 +460,7 @@ private struct MacFeaturedCarousel: View {
                                 }
 
                                 NavigationLink {
-                                    AniListDetailView(mediaId: media.id, preloadedMedia: media)
+                                    MediaDestination(media: media)
                                 } label: {
                                     HStack(spacing: 6) {
                                         Image(systemName: "play.fill").font(.footnote.weight(.semibold))
@@ -552,7 +552,9 @@ private struct FeaturedCard: View {
             Color.clear
                 .frame(width: width, height: height)
                 .overlay {
-                    TVDBPosterImage(media: media, type: isWide ? .fanart : .textlessPoster)
+                    // A Simkl show or movie has no textless poster, and its poster is too small to
+                    // fill the hero; its fanart does, cropped.
+                    TVDBPosterImage(media: media, type: isWide || media.simklTitleKind != nil ? .fanart : .textlessPoster)
                         .frame(width: width, height: height)
                         .clipped()
                 }
@@ -711,7 +713,7 @@ private struct AnimeSection: View {
                 LazyHStack(spacing: 12) {
                     ForEach(items) { media in
                         NavigationLink {
-                            AniListDetailView(mediaId: media.id, preloadedMedia: media)
+                            MediaDestination(media: media)
                         } label: {
                             AniListCardView(media: media)
                         }

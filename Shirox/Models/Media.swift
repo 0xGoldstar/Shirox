@@ -113,6 +113,11 @@ extension Media {
         default:                  return nil
         }
     }
+
+    /// Whether TVDB artwork applies. TVDB is reached through AniList and MyAnimeList anime ids;
+    /// any other id — a Simkl show's, a module title's — would be looked up as an AniList one and
+    /// find some other title's art.
+    var usesTVDBArtwork: Bool { provider == .anilist || provider == .mal }
 }
 
 extension Media {

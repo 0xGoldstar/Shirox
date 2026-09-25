@@ -325,6 +325,7 @@ struct TVDBPosterImage: View {
 
     /// Immediate URL — TVDB cache if available, otherwise provider's native image.
     private var immediateURL: String {
+        guard media.usesTVDBArtwork else { return providerFallback }
         let cached = TVDBMappingService.shared.getCachedArtwork(for: media.id, provider: media.provider)
         let cachedURL: String?
         switch type {
@@ -345,6 +346,7 @@ struct TVDBPosterImage: View {
     var body: some View {
         CachedAsyncImage(urlString: tvdbURL ?? immediateURL, contentMode: contentMode)
             .task(id: media.uniqueId) {
+                guard media.usesTVDBArtwork else { return }
                 if let url = tvdbURL, !url.isEmpty { return }
                 let artwork = await TVDBMappingService.shared.getArtwork(for: media.id, provider: media.provider)
                 let resolvedURL: String?
@@ -371,6 +373,7 @@ struct TVDBTitleLogoView: View {
     @State private var tvdbLogoURL: String?
 
     private var immediateLogoURL: String? {
+        guard media.usesTVDBArtwork else { return nil }
         let direct = TVDBMappingService.shared.getCachedArtwork(for: media.id, provider: media.provider).logo
         if let direct, !direct.isEmpty { return direct }
         if let parentId = media.parentAnimeId {
@@ -402,6 +405,7 @@ struct TVDBTitleLogoView: View {
         .allowsHitTesting(false)
         .task(id: media.uniqueId) {
             tvdbLogoURL = immediateLogoURL
+            guard media.usesTVDBArtwork else { return }
             let artwork = await TVDBMappingService.shared.getArtwork(for: media.id, provider: media.provider)
             if let logo = artwork.logo, !logo.isEmpty {
                 tvdbLogoURL = logo
