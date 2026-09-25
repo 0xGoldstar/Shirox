@@ -30,6 +30,17 @@ final class DetailViewModel: ObservableObject {
     @Published var aniListID: Int?
     @Published var isMatchingAniList = false
 
+    /// The AniList match is AniList's top search result for a title that matched nothing — a guess.
+    @Published private(set) var aniListMatchIsGuess = false
+    /// The page's AniList match has settled: known up front, found, guessed, or none.
+    @Published private(set) var aniListMatchSettled = false
+
+    /// A match the user chose, or cleared.
+    func setAniListMatch(_ id: Int?) {
+        aniListID = id
+        aniListMatchIsGuess = false
+    }
+
     /// Set by loadOffline. Tells load() to treat snapshot data as authoritative for
     /// text fields (synopsis/aliases/airdate) and to only accept the fetched episode
     /// list when it is plausibly real.
@@ -64,6 +75,7 @@ final class DetailViewModel: ObservableObject {
             }
         } else if let aid = aniListID {
             // Already have ID (passed in or from mapping), fetch metadata
+            aniListMatchSettled = true
             fetchAniListMetadata(id: aid)
         }
 
@@ -220,6 +232,7 @@ final class DetailViewModel: ObservableObject {
             let match = perfectMatch ?? results.first
             if let match {
                 aniListID = match.id
+                aniListMatchIsGuess = perfectMatch == nil
                 // Only persist confident (exact) matches. A fuzzy fallback is used for this
                 // session but not cached as ground truth, so an occasional wrong guess doesn't
                 // stick permanently with no way to correct it.
@@ -232,6 +245,7 @@ final class DetailViewModel: ObservableObject {
             Logger.shared.log("[DetailVM] Auto-match failed: \(error)", type: "Error")
         }
         isMatchingAniList = false
+        aniListMatchSettled = true
     }
 
     // MARK: - Streams

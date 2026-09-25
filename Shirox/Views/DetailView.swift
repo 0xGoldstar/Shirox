@@ -217,6 +217,7 @@ struct DetailView: View {
             isReversed = EpisodeSortManager.shared.isReversed(for: "\(moduleId ?? "unknown")_\(item.id)")
         }
         .task(id: vm.aniListID) { await loadWatchOrder() }
+        .task(id: simklMatchTrigger) { await linkToSimklIfNeeded() }
         .onChangeOf(isReversed) { newValue in
             EpisodeSortManager.shared.setReversed(newValue, for: "\(moduleId ?? "unknown")_\(item.id)")
         }
@@ -377,14 +378,17 @@ struct DetailView: View {
                 initialSide: .anilist,
                 onAniListMatch: { aid in
                     if let aid {
-                        vm.aniListID = aid
+                        vm.setAniListMatch(aid)
                         AniListMappingManager.shared.saveMapping(title: item.title, aniListID: aid)
                     } else {
-                        vm.aniListID = nil
+                        vm.setAniListMatch(nil)
                         AniListMappingManager.shared.removeMapping(title: item.title)
                     }
                 },
-                onChange: { Task { await reloadLinkedIDs() } })
+                onChange: {
+                    Task { await reloadLinkedIDs() }
+                    rememberEpisodesIfLinked()
+                })
         }
     }
 
@@ -399,6 +403,30 @@ struct DetailView: View {
 
     private var linkModuleKey: String? {
         TrackingLinkStore.moduleKey(moduleId: effectiveModuleId, detailHref: vm.detailHref ?? item.href)
+    }
+
+    /// When the page is ready for its Simkl match: its detail and episodes loaded, and AniList's
+    /// match settled — an anime page mustn't be searched before AniList has had its say.
+    private var simklMatchTrigger: String {
+        "\(vm.detail != nil)-\(vm.isLoadingEpisodes)-\(vm.aniListMatchSettled)-\(vm.aniListID ?? 0)-\(vm.aniListMatchIsGuess)"
+    }
+
+    /// Matches the page to a Simkl show or movie once (`SimklModuleLinker`), and remembers a linked
+    /// page's episodes, whose places find their Simkl episodes when they finish.
+    private func linkToSimklIfNeeded() async {
+        guard let detail = vm.detail, !vm.isLoadingEpisodes, vm.aniListMatchSettled, let key = linkModuleKey else { return }
+        let confident = (vm.aniListID ?? aniListID) != nil && !vm.aniListMatchIsGuess
+        let page = SimklModuleLinker.Page(
+            key: key, title: detail.title.isEmpty ? item.title : detail.title, aliases: detail.aliases,
+            airdate: detail.airdate, episodeCount: detail.episodes.count, hasConfidentAniListMatch: confident)
+        await SimklModuleLinker.matchIfNeeded(page)
+        rememberEpisodesIfLinked()
+    }
+
+    private func rememberEpisodesIfLinked() {
+        guard let key = linkModuleKey, TrackingLinkStore.shared.links(for: key)?.simklTitle != nil,
+              let episodes = vm.detail?.episodes, !episodes.isEmpty else { return }
+        SimklModulePages.shared.remember(episodes.map(\.href), for: key)
     }
 
     /// MAL and Simkl for this page, with the user's tracking links applied.
