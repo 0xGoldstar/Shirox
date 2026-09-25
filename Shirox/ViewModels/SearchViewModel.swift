@@ -9,6 +9,10 @@ final class SearchViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var query = ""
     @Published var hasSearched = false
+    /// A Simkl search's results, one section per kind.
+    @Published var simklSections: [SimklSearchSection] = []
+    /// Kinds whose Simkl search failed while others worked.
+    @Published var simklFailedKinds: [MediaKind] = []
 
     private(set) var isUsingModule = false
     private var searchTask: Task<Void, Never>?
@@ -18,6 +22,11 @@ final class SearchViewModel: ObservableObject {
         ProviderManager.shared.$orderedProviders
             .map { $0.first?.providerType }
             .removeDuplicates { $0 == $1 }
+            .dropFirst()
+            .sink { [weak self] _ in self?.clearResults() }
+            .store(in: &cancellables)
+        DiscoverySource.shared.$usesSimkl
+            .removeDuplicates()
             .dropFirst()
             .sink { [weak self] _ in self?.clearResults() }
             .store(in: &cancellables)
@@ -33,6 +42,8 @@ final class SearchViewModel: ObservableObject {
         errorMessage = nil
         moduleResults = []
         aniListResults = []
+        simklSections = []
+        simklFailedKinds = []
         searchTask = Task {
             do {
                 if usingModule {
@@ -63,6 +74,13 @@ final class SearchViewModel: ObservableObject {
                         let deduped = res.filter { seen.insert($0.href).inserted }
                         moduleResults = await NSFWContentFilter.shared.filter(deduped, keyword: q)
                         aniListResults = []
+                    }
+                } else if DiscoverySource.shared.usesSimkl {
+                    let outcome = await SimklSearch.run(q)
+                    if !Task.isCancelled {
+                        simklSections = outcome.sections
+                        simklFailedKinds = outcome.failedKinds
+                        errorMessage = outcome.error
                     }
                 } else {
                     let res = try await ProviderManager.shared.call { try await $0.search(q) }
@@ -97,11 +115,15 @@ final class SearchViewModel: ObservableObject {
         searchTask = nil
         moduleResults = []
         aniListResults = []
+        simklSections = []
+        simklFailedKinds = []
         isLoading = false
         errorMessage = nil
         hasSearched = false
     }
 
-    var hasResults: Bool { !moduleResults.isEmpty || !aniListResults.isEmpty }
-    var resultCount: Int { moduleResults.count + aniListResults.count }
+    var hasResults: Bool { !moduleResults.isEmpty || !aniListResults.isEmpty || !simklSections.isEmpty }
+    var resultCount: Int {
+        moduleResults.count + aniListResults.count + simklSections.reduce(0) { $0 + $1.items.count }
+    }
 }

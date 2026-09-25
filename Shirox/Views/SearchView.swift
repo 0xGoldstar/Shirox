@@ -7,6 +7,7 @@ struct SearchView: View {
     @StateObject private var history = SearchHistoryManager()
     @EnvironmentObject private var moduleManager: ModuleManager
     @ObservedObject private var providerManager = ProviderManager.shared
+    @ObservedObject private var discovery = DiscoverySource.shared
     @State private var showModuleList = false
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var isLandscape = false
@@ -85,6 +86,10 @@ struct SearchView: View {
                     guard !vm.query.isEmpty, !usingModule else { return }
                     vm.search(usingModule: false)
                 }
+                .onChangeOf(discovery.usesSimkl) {
+                    guard !vm.query.isEmpty, !usingModule else { return }
+                    vm.search(usingModule: false)
+                }
         }
         .adaptiveSheet(isPresented: $showModuleList) {
             NavigationStack {
@@ -138,10 +143,12 @@ struct SearchView: View {
             } else {
                 emptyStateView(
                     icon: usingModule ? "puzzlepiece.extension" : "magnifyingglass",
-                    title: usingModule ? "Search via Module" : "Search Anime",
+                    title: usingModule ? "Search via Module" : (discovery.usesSimkl ? "Search Simkl" : "Search Anime"),
                     subtitle: usingModule
                         ? "Searching \(moduleManager.activeModule?.sourceName ?? "")…"
-                        : "Find any anime via \(primaryProvider.displayName)"
+                        : discovery.usesSimkl
+                            ? "Find anime, shows and movies on Simkl"
+                            : "Find any anime via \(primaryProvider.displayName)"
                 )
             }
         } else if vm.isLoading {
@@ -154,6 +161,8 @@ struct SearchView: View {
             )
         } else if !vm.hasResults && !vm.query.isEmpty {
             ContentUnavailableView.search(text: vm.query)
+        } else if !vm.simklSections.isEmpty {
+            simklResultsView
         } else {
             resultsView
         }
@@ -326,6 +335,44 @@ struct SearchView: View {
             .padding(.top, 8)
             .padding(.bottom, 16)
             .animation(.easeInOut(duration: 0.25), value: vm.resultCount)
+        }
+        .softScrollEdges()
+    }
+
+    // MARK: - Simkl Results
+    private var simklResultsView: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 20) {
+                if !vm.simklFailedKinds.isEmpty {
+                    Text("Couldn't search \(ListFormatter.localizedString(byJoining: vm.simklFailedKinds.map(\.simklKindTitle))) on Simkl.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
+                }
+                ForEach(vm.simklSections) { section in
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(section.kind.simklKindTitle)
+                            .font(.title3.weight(.bold))
+                            .padding(.horizontal, 16)
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(section.items.compactMap { SimklSearch.cardMedia($0, kind: section.kind) }, id: \.id) { media in
+                                NavigationLink {
+                                    if section.kind == .anime {
+                                        SimklAnimeOpener(seed: media)
+                                    } else {
+                                        MediaDestination(media: media)
+                                    }
+                                } label: {
+                                    AniListCardView(media: media)
+                                }
+                                .buttonStyle(CardPressStyle())
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                }
+            }
+            .padding(.vertical, 8)
         }
         .softScrollEdges()
     }

@@ -115,7 +115,13 @@ enum SimklCatalog {
                 URLQueryItem(name: "limit", value: "20"),
             ])
         }
-        guard (200...299).contains(http.statusCode) else { throw ProviderError.serverError(http.statusCode) }
+        guard (200...299).contains(http.statusCode) else {
+            // The daily limit gets Simkl's own words — "resets at midnight US Eastern" — as the
+            // Library's reads do; anything else stays a server error.
+            let failure = SimklLibraryService.classify(status: http.statusCode, body: data,
+                                                       retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
+            throw SimklLibraryService.thrownError(for: failure, status: http.statusCode)
+        }
         let results = try decodeSearch(data)
         rememberSearch(results, query: query, kind: kind)
         return results
@@ -206,5 +212,29 @@ enum SimklCatalog {
         if let item = try? JSONDecoder().decode(SimklCatalogItem.self, from: data) { return item }
         _ = try JSONDecoder().decode([SimklCatalogItem].self, from: data)
         return nil
+    }
+
+    /// An anime's ids — its AniList and MyAnimeList ones among them — from its free record.
+    static func animeIDs(simklID: Int) async throws -> SimklDiscoverItem.IDs? {
+        try decodeAnimeIDs(try await catalogData(path: "/anime/\(simklID)"))
+    }
+
+    /// `200 []` for an unknown id, as for every lookup.
+    nonisolated static func decodeAnimeIDs(_ data: Data) throws -> SimklDiscoverItem.IDs? {
+        struct Record: Decodable {
+            struct IDs: Decodable {
+                let simkl: SimklLibraryService.FlexibleID?
+                let simkl_id: SimklLibraryService.FlexibleID?
+                let mal: SimklLibraryService.FlexibleID?
+                let anilist: SimklLibraryService.FlexibleID?
+            }
+            let ids: IDs?
+        }
+        guard let record = try? JSONDecoder().decode(Record.self, from: data) else {
+            _ = try JSONDecoder().decode([Record].self, from: data)
+            return nil
+        }
+        guard let ids = record.ids, let simkl = ids.simkl?.value ?? ids.simkl_id?.value else { return nil }
+        return SimklDiscoverItem.IDs(simkl: simkl, mal: ids.mal?.value, anilist: ids.anilist?.value)
     }
 }
