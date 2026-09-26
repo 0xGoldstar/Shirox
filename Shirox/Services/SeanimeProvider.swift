@@ -170,3 +170,71 @@ enum SeanimeInstaller {
         return module
     }
 }
+/// A Seanime streaming provider's Sub/Dub choice, per installed provider. Sub by default.
+enum SeanimeProviderSettings {
+    private static func key(_ moduleId: String) -> String { "seanime_dub_\(moduleId)" }
+
+    static func dub(for moduleId: String, defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: key(moduleId))
+    }
+
+    static func setDub(_ dub: Bool, for moduleId: String, defaults: UserDefaults = .standard) {
+        defaults.set(dub, forKey: key(moduleId))
+    }
+}
+
+/// What a Seanime streaming provider's search is told about the show — from the anime page's
+/// AniList entry. From the Search tab there is none, and the runtime uses the query.
+struct SeanimeSearchMedia: Equatable {
+    let id: Int
+    let idMal: Int?
+    let romajiTitle: String?
+    let englishTitle: String?
+    let synonyms: [String]
+    let episodeCount: Int?
+    let format: String?
+    let status: String?
+    let year: Int?
+    let isAdult: Bool
+
+    init(id: Int, idMal: Int?, romajiTitle: String?, englishTitle: String?, synonyms: [String],
+         episodeCount: Int?, format: String?, status: String?, year: Int?, isAdult: Bool) {
+        self.id = id; self.idMal = idMal; self.romajiTitle = romajiTitle; self.englishTitle = englishTitle
+        self.synonyms = synonyms; self.episodeCount = episodeCount; self.format = format
+        self.status = status; self.year = year; self.isAdult = isAdult
+    }
+
+    init(media: Media) {
+        self.init(id: media.id, idMal: media.idMal, romajiTitle: media.title.romaji, englishTitle: media.title.english,
+                  synonyms: [], episodeCount: media.episodes, format: media.format, status: media.status,
+                  year: media.seasonYear, isAdult: false)
+    }
+
+    var jsonObject: [String: Any] {
+        var object: [String: Any] = ["id": id, "synonyms": synonyms, "isAdult": isAdult]
+        if let idMal { object["idMal"] = idMal }
+        if let romajiTitle { object["romajiTitle"] = romajiTitle }
+        if let englishTitle { object["englishTitle"] = englishTitle }
+        if let episodeCount { object["episodeCount"] = episodeCount }
+        if let format { object["format"] = format }
+        if let status { object["status"] = status }
+        if let year { object["year"] = year }
+        return object
+    }
+}
+
+extension SeanimeScripts {
+    /// Before a Seanime provider's script: the runtime, and what it's told about the module.
+    static func prepare(_ context: JSContext, module: ModuleDefinition) {
+        guard let info = module.seanime, let runtimeSource else { return }
+        let dub = info.kind == .anime && info.supportsDub && SeanimeProviderSettings.dub(for: module.id)
+        context.setObject(["kind": info.kind.rawValue, "name": module.sourceName, "dub": dub],
+                          forKeyedSubscript: "__seanime" as NSString)
+        context.evaluateScript(runtimeSource)
+    }
+
+    /// The show a streaming provider's next search is for; nil from the Search tab.
+    static func setSearchMedia(_ media: SeanimeSearchMedia?, in context: JSContext) {
+        context.setObject(media?.jsonObject ?? NSNull(), forKeyedSubscript: "__seanimeMedia" as NSString)
+    }
+}

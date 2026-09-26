@@ -46,6 +46,7 @@ final class JSEngine: ObservableObject {
         // Fresh context for each module
         context = JSContext()!
         setupContext()
+        SeanimeScripts.prepare(context, module: module)
         context.evaluateScript(script)
         if let exception = context.exception {
             Logger.shared.log("[JSEngine] Script load error: \(exception)", type: "Error")
@@ -207,6 +208,7 @@ final class JSEngine: ObservableObject {
 
                     let responseObj = JSValue(newObjectIn: ctx)!
                     responseObj.setValue(status, forProperty: "status")
+                    responseObj.setValue(HTTPURLResponse.localizedString(forStatusCode: status), forProperty: "statusText")
                     responseObj.setValue(status >= 200 && status < 300, forProperty: "ok")
                     responseObj.setValue(httpResponse.url?.absoluteString ?? urlString, forProperty: "url")
                     responseObj.setValue(headersDict, forProperty: "headers")

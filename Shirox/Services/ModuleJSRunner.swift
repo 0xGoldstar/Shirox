@@ -15,6 +15,10 @@ import Combine
 final class ModuleJSRunner {
 
     private var context: JSContext?
+    private var module: ModuleDefinition?
+
+    /// The show a Seanime streaming provider's search is for — set by the anime page's picker.
+    var seanimeMedia: SeanimeSearchMedia?
 
     /// Set when a request made by *this* runner hit a Turnstile wall with no cached cookie.
     /// Host-scoped to this module, so the picker only offers verification for the module
@@ -57,16 +61,19 @@ final class ModuleJSRunner {
         
         let ctx = JSContext()!
         setupContext(ctx)
+        SeanimeScripts.prepare(ctx, module: module)
         ctx.evaluateScript(script)
         if let exception = ctx.exception {
             Logger.shared.log("[ModuleJSRunner] Script load error: \(exception)", type: "Error")
         }
         self.context = ctx
+        self.module = module
     }
 
     // MARK: - Search
 
     func search(keyword: String) async throws -> [SearchItem] {
+        if module?.seanime != nil, let context { SeanimeScripts.setSearchMedia(seanimeMedia, in: context) }
         let json = try await callAsyncJS("searchResults", args: [keyword])
         guard let data = json.data(using: .utf8),
               let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
@@ -312,6 +319,7 @@ final class ModuleJSRunner {
 
                     let responseObj = JSValue(newObjectIn: ctx)!
                     responseObj.setValue(status, forProperty: "status")
+                    responseObj.setValue(HTTPURLResponse.localizedString(forStatusCode: status), forProperty: "statusText")
                     responseObj.setValue(status >= 200 && status < 300, forProperty: "ok")
                     responseObj.setValue(httpResponse.url?.absoluteString ?? urlString, forProperty: "url")
                     responseObj.setValue(headersDict, forProperty: "headers")

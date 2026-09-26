@@ -36,11 +36,17 @@ final class ModuleManager: ObservableObject {
         errorMessage = nil
         do {
             let (data, _) = try await URLSession.shared.data(from: jsonURL)
-            var module = try JSONDecoder().decode(ModuleDefinition.self, from: data)
-            module.jsonUrl = jsonURL.absoluteString
-
-            // Cache script and icon
-            await cacheAssets(for: &module)
+            var module: ModuleDefinition
+            if let seanime = SeanimeManifest.detect(data) {
+                // A Seanime provider's manifest: its script is fetched, converted and checked here.
+                module = try await SeanimeInstaller.module(from: seanime, manifestURL: jsonURL)
+                await cacheIcon(for: &module)
+            } else {
+                module = try JSONDecoder().decode(ModuleDefinition.self, from: data)
+                module.jsonUrl = jsonURL.absoluteString
+                // Cache script and icon
+                await cacheAssets(for: &module)
+            }
 
             // Avoid duplicates
             if modules.contains(where: { $0.id == module.id }) {
@@ -158,13 +164,21 @@ final class ModuleManager: ObservableObject {
         for i in modules.indices {
             guard let jsonUrlStr = modules[i].jsonUrl,
                   let jsonURL = URL(string: jsonUrlStr),
-                  let (data, _) = try? await URLSession.shared.data(from: jsonURL),
-                  var fresh = try? JSONDecoder().decode(ModuleDefinition.self, from: data),
-                  fresh.version != modules[i].version else { continue }
-            fresh.jsonUrl = jsonUrlStr
-            
-            // Cache fresh assets
-            await cacheAssets(for: &fresh)
+                  let (data, _) = try? await URLSession.shared.data(from: jsonURL) else { continue }
+            var fresh: ModuleDefinition
+            if let seanime = SeanimeManifest.detect(data) {
+                guard seanime.version != modules[i].version,
+                      let installed = try? await SeanimeInstaller.module(from: seanime, manifestURL: jsonURL) else { continue }
+                fresh = installed
+                await cacheIcon(for: &fresh)
+            } else {
+                guard let decoded = try? JSONDecoder().decode(ModuleDefinition.self, from: data),
+                      decoded.version != modules[i].version else { continue }
+                fresh = decoded
+                fresh.jsonUrl = jsonUrlStr
+                // Cache fresh assets
+                await cacheAssets(for: &fresh)
+            }
             
             let wasActive = activeModule?.id == modules[i].id
             modules[i] = fresh
@@ -177,14 +191,19 @@ final class ModuleManager: ObservableObject {
     // MARK: - Asset Caching
 
     private func cacheAssets(for module: inout ModuleDefinition) async {
-        // 1. Script
+        await cacheScript(for: &module)
+        await cacheIcon(for: &module)
+    }
+
+    private func cacheScript(for module: inout ModuleDefinition) async {
         if let scriptURL = URL(string: module.scriptUrl),
            let (data, _) = try? await URLSession.shared.data(from: scriptURL),
            let script = String(data: data, encoding: .utf8) {
             module.scriptContent = script
         }
-        
-        // 2. Icon
+    }
+
+    private func cacheIcon(for module: inout ModuleDefinition) async {
         if let iconUrlStr = module.iconUrl,
            let iconURL = URL(string: iconUrlStr),
            let (data, _) = try? await URLSession.shared.data(from: iconURL) {
