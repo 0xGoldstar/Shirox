@@ -20,6 +20,8 @@ struct ModuleDefinition: Codable, Identifiable, Equatable {
     var jsonUrl: String?     // stored client-side; not present in module JSON
     var scriptContent: String? // cached script content
     var iconData: String?      // cached icon data (Base64)
+    /// Set for a Seanime provider installed from its manifest.
+    var seanime: SeanimeProviderInfo?
 
     var isLocalPlayback: Bool { supportsLocalPlayback == true }
     var isJellyfin: Bool { supportsJellyfin == true }
@@ -28,7 +30,7 @@ struct ModuleDefinition: Codable, Identifiable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case sourceName, iconUrl, author, version, baseUrl, searchBaseUrl,
              scriptUrl, type, asyncJS, streamType, quality, language, softsub,
-             supportsLocalPlayback, supportsJellyfin, jsonUrl, scriptContent, iconData
+             supportsLocalPlayback, supportsJellyfin, jsonUrl, scriptContent, iconData, seanime
     }
 
     /// Luna-style manifests capitalize URL ("iconURL"/"scriptURL") and omit baseUrl.
@@ -64,6 +66,7 @@ struct ModuleDefinition: Codable, Identifiable, Equatable {
         jsonUrl = try c.decodeIfPresent(String.self, forKey: .jsonUrl)
         scriptContent = try c.decodeIfPresent(String.self, forKey: .scriptContent)
         iconData = try c.decodeIfPresent(String.self, forKey: .iconData)
+        seanime = try c.decodeIfPresent(SeanimeProviderInfo.self, forKey: .seanime)
     }
 }
 
