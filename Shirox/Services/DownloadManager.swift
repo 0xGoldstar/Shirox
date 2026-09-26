@@ -401,6 +401,10 @@ final class DownloadManager: NSObject, ObservableObject {
 
         items.append(item)
         persist()
+        Task {
+            await SimklModuleDownloads.prepare(moduleId: context.moduleId, detailHref: context.detailHref,
+                                               episodeHrefs: [episodeHref])
+        }
 
         ToastManager.shared.show(message: "Download added: \(context.mediaTitle) - \(context.episodeNumber)", type: .info)
 
@@ -552,6 +556,11 @@ final class DownloadManager: NSObject, ObservableObject {
             queuedIDs.append((episode.href, id, reuseable))
         }
         persist()
+        let queuedHrefs = queuedIDs.map(\.href)
+        Task {
+            await SimklModuleDownloads.prepare(moduleId: moduleId, detailHref: detailHref,
+                                               episodeHrefs: queuedHrefs, pageEpisodes: episodes.map(\.href))
+        }
 
         // Surface episodes the source couldn't match instead of dropping them silently —
         // this is what made batch downloads look like they "only grabbed episode 1".

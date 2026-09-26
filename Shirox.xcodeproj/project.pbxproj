@@ -23,6 +23,7 @@
 		06ADAE227115BFC37CA3EB39 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E87688CB577983F43E550D /* OnboardingView.swift */; };
 		06D7AFDABCC054071C9DA405 /* CopyTitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 250387834E819E85E4CD966E /* CopyTitle.swift */; };
 		074D937EBB3DF5A34CCD9F10 /* LibrarySyncPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9970B31153A18CDD095323FB /* LibrarySyncPlanner.swift */; };
+		075ED3CFDC1D79B5D9F94E85 /* SimklModuleDownloadsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0CBC894AABB84BE53704387 /* SimklModuleDownloadsTests.swift */; };
 		0902679A7C53895A3E536DB3 /* DataSaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A304B304C482A8AAA10DB209 /* DataSaver.swift */; };
 		09AAAB9CD59D89923CBF3ABF /* SimklCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39077FFB4866E4944852E363 /* SimklCatalog.swift */; };
 		09BD0742F825E2C6890C1ED2 /* DiscoverySourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53E7756C8213511509BA7B15 /* DiscoverySourceTests.swift */; };
@@ -468,6 +469,7 @@
 		2CEC39E1CB0AE2E810941B3E /* SimklHomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 017A0CD3925511086F3B6099 /* SimklHomeViewModel.swift */; };
 		2E5933FB94F60E0C92018191 /* SimklResponseClassTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABBDC873D9F2269010B28586 /* SimklResponseClassTests.swift */; };
 		2F3D0C213DB0C943D3AE0083 /* TVDBLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74A691F1B345D1C7447C46B2 /* TVDBLogo.swift */; };
+		2F78CF8B54BC397D00C1CC79 /* SimklModuleDownloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E738809F65F961279E7FA7F /* SimklModuleDownloads.swift */; };
 		2FDD76CE9FEFA937C2D67423 /* SimklOAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2724D13591401331A3D0EA0 /* SimklOAuth.swift */; };
 		2FFBCDF78577F6947E176436 /* SimklLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 621EBD208F899A766571F32C /* SimklLibraryService.swift */; };
 		2FFDB0F7AE21B9B527B83D18 /* ShiroxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BE8F22DF8EF4BBAC15BAB79 /* ShiroxApp.swift */; };
@@ -659,6 +661,8 @@
 		7E6DF30054A1D49BC766BE2C /* QuickActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08C78D7A64AA2920DC0EC39B /* QuickActionTests.swift */; };
 		7EE70C3CFDDE5EF455EA4962 /* PageCurlPager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E80EC2A51A1C98B4BF1C3A43 /* PageCurlPager.swift */; };
 		7F3F7101EB137ED415D4A8C8 /* JSEngine+Manga.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15FDAB330588459FA8A0714 /* JSEngine+Manga.swift */; };
+		7F8BFE383A26E696BCE7D3B5 /* SimklModuleDownloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E738809F65F961279E7FA7F /* SimklModuleDownloads.swift */; };
+		8012BAD5ED6D8E584B8EB6A8 /* SimklModuleDownloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E738809F65F961279E7FA7F /* SimklModuleDownloads.swift */; };
 		813B8AE1CCAF1A004474A6E1 /* SimklLibraryMirror.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8E1AF23A6560161B35CFCA1 /* SimklLibraryMirror.swift */; };
 		81956D3CC3143A3C1EBD6C0D /* AniListMangaDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 411CE099883B23D8BFF554F8 /* AniListMangaDetailView.swift */; };
 		819E19615C97015436A0D005 /* HLSManifestParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7A8A35299253F63C43AAE9 /* HLSManifestParserTests.swift */; };
@@ -1203,6 +1207,7 @@
 		798AB494EC01E0CCE8CFB2D7 /* SimklLiveTrackingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklLiveTrackingTests.swift; sourceTree = "<group>"; };
 		7C9313A0054C5783AAFFF837 /* ProfileViewModelCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProfileViewModelCacheTests.swift; sourceTree = "<group>"; };
 		7E3C8D23E3797E6BC0B5EF3A /* PosterViewer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PosterViewer.swift; sourceTree = "<group>"; };
+		7E738809F65F961279E7FA7F /* SimklModuleDownloads.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklModuleDownloads.swift; sourceTree = "<group>"; };
 		7F8DF1638344A52ED8F86BD4 /* SimklBatchingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklBatchingTests.swift; sourceTree = "<group>"; };
 		810CED9585EB8327C0CF0AE2 /* HostBlocklist.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HostBlocklist.swift; sourceTree = "<group>"; };
 		810F26FD0F16F4ED0187F00D /* SimklModuleMatchTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklModuleMatchTests.swift; sourceTree = "<group>"; };
@@ -1324,6 +1329,7 @@
 		EE954610BF4D5511D8C184B8 /* SimklHomeRows.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklHomeRows.swift; sourceTree = "<group>"; };
 		EEFA93DA5617959381E10D85 /* BookmarkButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkButton.swift; sourceTree = "<group>"; };
 		EFFA5648772AF00F30DCBC7A /* SimklHomeViewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklHomeViewModelTests.swift; sourceTree = "<group>"; };
+		F0CBC894AABB84BE53704387 /* SimklModuleDownloadsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklModuleDownloadsTests.swift; sourceTree = "<group>"; };
 		F22BAD7B63A9CC4EC7C9F88A /* MangaMatchManagerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MangaMatchManagerTests.swift; sourceTree = "<group>"; };
 		F2A616692BA76443614DC5FE /* SimklActivationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklActivationTests.swift; sourceTree = "<group>"; };
 		F448D8EACA889534B3F509C6 /* MediaDestination.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MediaDestination.swift; sourceTree = "<group>"; };
@@ -1565,6 +1571,7 @@
 				74A691F1B345D1C7447C46B2 /* TVDBLogo.swift */,
 				06CCD3C16F73166AFC6E89C6 /* TMDBLogoService.swift */,
 				225725D9D612397018C48688 /* SimklBudget.swift */,
+				7E738809F65F961279E7FA7F /* SimklModuleDownloads.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1896,6 +1903,7 @@
 				DB3570B7715FA894013532F2 /* TMDBLogoTests.swift */,
 				16FDF45A836B6FA37E42008C /* SimklBudgetTests.swift */,
 				2B66C463943ED240E736D2D5 /* SimklAutomaticRequestTests.swift */,
+				F0CBC894AABB84BE53704387 /* SimklModuleDownloadsTests.swift */,
 			);
 			path = ShiroxTests;
 			sourceTree = SOURCE_ROOT;
@@ -2270,6 +2278,7 @@
 				1C366F1431CA797AB561D2B2 /* TMDBLogoTests.swift in Sources */,
 				96F6CEAA2C6F1AF7F8CF287C /* SimklBudgetTests.swift in Sources */,
 				F1FCC273C2EF887AA7CD7156 /* SimklAutomaticRequestTests.swift in Sources */,
+				075ED3CFDC1D79B5D9F94E85 /* SimklModuleDownloadsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2534,6 +2543,7 @@
 				01F3122EB1433A2760331D14 /* TMDBLogoService.swift in Sources */,
 				934AE75F262204E19E404EA7 /* SimklBudget.swift in Sources */,
 				351D3707B7A8748F53D6E0AC /* SimklBudgetRow.swift in Sources */,
+				2F78CF8B54BC397D00C1CC79 /* SimklModuleDownloads.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2799,6 +2809,7 @@
 				E6A17D4FDC74BED341041381 /* TMDBLogoService.swift in Sources */,
 				AF49BD67F4B37EF4B6477728 /* SimklBudget.swift in Sources */,
 				9FB43FCC80690D0E5411250D /* SimklBudgetRow.swift in Sources */,
+				7F8BFE383A26E696BCE7D3B5 /* SimklModuleDownloads.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3064,6 +3075,7 @@
 				E82F54DDE326D011BB70DB10 /* TMDBLogoService.swift in Sources */,
 				184E0FC7D0E02B7E0B78CC0E /* SimklBudget.swift in Sources */,
 				8B8EE897222FCEF728A80D0A /* SimklBudgetRow.swift in Sources */,
+				8012BAD5ED6D8E584B8EB6A8 /* SimklModuleDownloads.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
