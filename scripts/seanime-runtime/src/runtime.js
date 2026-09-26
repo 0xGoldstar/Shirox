@@ -87,3 +87,135 @@ if (globalThis.console) {
     }
   }
 }
+// ---- The wrapper: Shirox's module functions, answered by the provider ----
+let instance;
+function provider() {
+  // `Provider` is the provider's class, from the script the app evaluates after this one.
+  if (!instance) instance = new Provider(); // eslint-disable-line no-undef
+  return instance;
+}
+
+// Manga: raw values — Shirox's manga bridge JSON-encodes them itself.
+async function mangaSearch(keyword) {
+  const results = (await provider().search({ query: keyword })) || [];
+  return results.map((r) => ({ title: r.title, image: r.image || "", id: String(r.id) }));
+}
+
+function mangaDetails() {
+  return { description: "", tags: [] };
+}
+
+async function mangaChapters(id) {
+  const chapters = (await provider().findChapters(id)) || [];
+  const byLanguage = {};
+  for (const chapter of chapters) {
+    const language = String(chapter.language || "en").toLowerCase();
+    const version = { id: String(chapter.id), title: chapter.title || "", scanlation_group: chapter.scanlator || "" };
+    const number = parseFloat(chapter.chapter);
+    if (!Number.isNaN(number)) version.chapter = number;
+    (byLanguage[language] ||= []).push([String(chapter.chapter ?? ""), [version]]);
+  }
+  return byLanguage;
+}
+
+async function mangaImages(id) {
+  const pages = (await provider().findChapterPages(id)) || [];
+  return pages
+    .slice()
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    .map((page) => ({ url: page.url, headers: page.headers || {} }));
+}
+
+// Anime: JSON strings, as Shirox's streaming modules return.
+const EPISODE = "seanime-episode:";
+
+function searchMedia(query) {
+  const m = globalThis.__seanimeMedia || {};
+  return {
+    id: m.id ?? 0,
+    idMal: m.idMal ?? null,
+    status: m.status ?? "",
+    format: m.format ?? "",
+    englishTitle: m.englishTitle ?? query,
+    romajiTitle: m.romajiTitle ?? query,
+    episodeCount: m.episodeCount ?? null,
+    absoluteSeasonOffset: 0,
+    synonyms: m.synonyms ?? [],
+    isAdult: m.isAdult ?? false,
+    startDate: m.year ? { year: m.year } : null,
+  };
+}
+
+async function animeSearch(keyword) {
+  const media = searchMedia(keyword);
+  const results = (await provider().search({ query: keyword, dub: !!host().dub, year: media.startDate?.year, media })) || [];
+  return JSON.stringify(results.map((r) => ({ title: r.title, image: "", href: String(r.id) })));
+}
+
+function animeDetails() {
+  return JSON.stringify([{ description: "", aliases: "", airdate: "" }]);
+}
+
+async function animeEpisodes(id) {
+  const episodes = (await provider().findEpisodes(id)) || [];
+  return JSON.stringify(episodes.map((e) => ({ href: EPISODE + JSON.stringify(e), number: e.number })));
+}
+
+function withTimeout(promise, ms) {
+  if (typeof setTimeout !== "function") return promise;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out")), ms);
+    const stop = () => { if (typeof clearTimeout === "function") clearTimeout(timer); };
+    promise.then((value) => { stop(); resolve(value); }, (error) => { stop(); reject(error); });
+  });
+}
+
+async function animeStreams(href) {
+  const episode = href.startsWith(EPISODE) ? JSON.parse(href.slice(EPISODE.length)) : { id: href, number: 0, url: href };
+  const p = provider();
+  const settings = typeof p.getSettings === "function" ? p.getSettings() : null;
+  const servers = settings?.episodeServers?.length ? settings.episodeServers : ["default"];
+  const answers = await Promise.all(servers.map((server) =>
+    withTimeout(Promise.resolve().then(() => p.findEpisodeServer(episode, server)), 15000)
+      .then((answer) => ({ server, answer }), () => null)));
+
+  const streams = [];
+  const subtitles = [];
+  let subtitleHeaders;
+  for (const result of answers) {
+    if (!result || !result.answer) continue;
+    const { server, answer } = result;
+    const headers = answer.headers || {};
+    for (const source of answer.videoSources || []) {
+      if (!source || !source.url) continue;
+      streams.push({
+        title: [answer.server || server, source.label || source.quality].filter(Boolean).join(" · "),
+        streamUrl: source.url,
+        headers,
+      });
+      for (const sub of source.subtitles || []) {
+        if (!sub || !sub.url || subtitles.some((s) => s.url === sub.url)) continue;
+        const track = { url: sub.url, title: sub.language || "Subtitle" };
+        if (sub.isDefault) { subtitles.unshift(track); subtitleHeaders = headers; } else { subtitles.push(track); }
+        if (!subtitleHeaders) subtitleHeaders = headers;
+      }
+    }
+  }
+  if (!streams.length) throw new Error("None of this provider's servers answered for this episode.");
+  const out = { streams };
+  if (subtitles.length) {
+    out.subtitle = subtitles[0].url;
+    out.allSubtitles = subtitles;
+    out.subtitleHeaders = subtitleHeaders || {};
+  }
+  return JSON.stringify(out);
+}
+
+Object.assign(globalThis, {
+  searchResults: (keyword) => (host().kind === "anime" ? animeSearch(keyword) : mangaSearch(keyword)),
+  extractDetails: (id) => (host().kind === "anime" ? animeDetails(id) : mangaDetails(id)),
+  extractChapters: mangaChapters,
+  extractImages: mangaImages,
+  extractEpisodes: animeEpisodes,
+  extractStreamUrl: animeStreams,
+});
