@@ -54,6 +54,8 @@ struct Media: Identifiable, Codable, Equatable, Hashable, Sendable {
     /// A Simkl show's TVDB series or movie's TVDB movie, for its logo. Anime reach TVDB through
     /// their AniList or MyAnimeList id instead.
     var tvdbID: Int? = nil
+    /// A Simkl show's or movie's TMDB record, for a logo TVDB doesn't have.
+    var tmdbID: Int? = nil
 
     var uniqueId: String {
         // A Simkl show or movie is keyed by Simkl id, and "simkl-52991" is already a Simkl anime

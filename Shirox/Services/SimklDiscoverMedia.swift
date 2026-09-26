@@ -32,7 +32,7 @@ enum SimklDiscoverMedia {
                 episodes: kind == .tv ? item.totalEpisodes : nil, status: nil, averageScore: score,
                 genres: genres, season: nil, seasonYear: nil, nextAiringEpisode: nil, relations: nil,
                 type: kind == .tv ? Media.simklTVType : Media.simklMovieType, format: nil,
-                runtime: item.runtime, tvdbID: item.ids.tvdb)
+                runtime: item.runtime, tvdbID: item.ids.tvdb, tmdbID: item.ids.tmdb)
         case .anime, .manga:
             let provider: ProviderType = tracker == .mal ? .mal : .anilist
             let id = provider == .mal

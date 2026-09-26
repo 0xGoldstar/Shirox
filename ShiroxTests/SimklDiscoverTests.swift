@@ -42,7 +42,7 @@ final class SimklDiscoverTests: XCTestCase {
         """#).first)
         XCTAssertEqual(item.runtime, 100)
         XCTAssertEqual(item.genres, ["Action", "Adventure"])
-        XCTAssertEqual(item.ids, SimklDiscoverItem.IDs(simkl: 2123791, mal: nil, anilist: nil))
+        XCTAssertEqual(item.ids, SimklDiscoverItem.IDs(simkl: 2123791, mal: nil, anilist: nil, tmdb: 1101383))
     }
 
     func testACalendarEntryHasItsListedDayAndZeroMeansUnranked() throws {
@@ -116,6 +116,7 @@ final class SimklDiscoverTests: XCTestCase {
          {"title":"No TVDB","ids":{"simkl_id":1}}]
         """#)
         XCTAssertEqual(items.map(\.ids.tvdb), [376098, 346729, nil])
+        XCTAssertEqual(items.map(\.ids.tmdb), [95350, nil, nil])
     }
 
     func testAnEntryWithoutASimklIdIsSkipped() throws {

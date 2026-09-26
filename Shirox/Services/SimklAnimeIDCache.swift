@@ -43,7 +43,7 @@ final class SimklAnimeIDCache {
             guard item.ids.mal == nil, item.ids.anilist == nil, let entry = known[item.ids.simkl] else { return item }
             var filled = item
             filled.ids = SimklDiscoverItem.IDs(simkl: item.ids.simkl, mal: entry.mal, anilist: entry.anilist,
-                                               tvdb: item.ids.tvdb)
+                                               tvdb: item.ids.tvdb, tmdb: item.ids.tmdb)
             return filled
         }
     }

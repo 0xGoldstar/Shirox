@@ -10,7 +10,7 @@ final class TVDBLogoTests: XCTestCase {
                     includesText: nil, score: score)
     }
 
-    private func logo(season: [TVDBArtwork] = [], _ record: [TVDBArtwork], _ kind: TVDBRecord = .series,
+    private func logo(season: [TVDBArtwork] = [], _ record: [TVDBArtwork], _ kind: TitleRecord = .series,
                       original: String? = "eng") -> String? {
         TVDBLogo.pick(season: season, record: record, kind: kind, originalLanguage: original)
     }
@@ -65,29 +65,31 @@ final class TVDBLogoTests: XCTestCase {
     }
 
     func testAKindsRecord() {
-        XCTAssertEqual(TVDBRecord(kind: .tv), .series)
-        XCTAssertEqual(TVDBRecord(kind: .anime), .series)
-        XCTAssertEqual(TVDBRecord(kind: .movie), .movie)
+        XCTAssertEqual(TitleRecord(kind: .tv), .series)
+        XCTAssertEqual(TitleRecord(kind: .anime), .series)
+        XCTAssertEqual(TitleRecord(kind: .movie), .movie)
     }
 
     // MARK: - Keeping the answer
 
     func testAFoundLogoIsKept() {
         let now = Date()
-        let entry = TVDBTitleLogoEntry(path: "logo.png", checked: now.addingTimeInterval(-90 * 24 * 60 * 60))
+        let entry = LogoCacheEntry(path: "logo.png", checked: now.addingTimeInterval(-90 * 24 * 60 * 60))
         XCTAssertEqual(entry.answer(now: now), .known("logo.png"))
     }
 
     func testNoLogoIsAskedAgainAfterThreeDays() {
         let now = Date()
-        XCTAssertEqual(TVDBTitleLogoEntry(path: nil, checked: now.addingTimeInterval(-2 * 24 * 60 * 60)).answer(now: now),
+        XCTAssertEqual(LogoCacheEntry(path: nil, checked: now.addingTimeInterval(-2 * 24 * 60 * 60)).answer(now: now),
                        .known(nil))
-        XCTAssertEqual(TVDBTitleLogoEntry(path: nil, checked: now.addingTimeInterval(-4 * 24 * 60 * 60)).answer(now: now),
+        XCTAssertEqual(LogoCacheEntry(path: nil, checked: now.addingTimeInterval(-4 * 24 * 60 * 60)).answer(now: now),
                        .askAgain)
     }
 
     func testTheKeyNamesTheRecord() {
-        XCTAssertEqual(TVDBTitleLogoEntry.key(tvdbID: 376098, record: .series), "series-376098")
-        XCTAssertEqual(TVDBTitleLogoEntry.key(tvdbID: 346729, record: .movie), "movie-346729")
+        XCTAssertEqual(LogoCacheEntry.tvdbKey(376098, record: .series), "series-376098")
+        XCTAssertEqual(LogoCacheEntry.tvdbKey(346729, record: .movie), "movie-346729")
+        XCTAssertEqual(LogoCacheEntry.tmdbKey(95350, record: .series), "tmdb-tv-95350")
+        XCTAssertEqual(LogoCacheEntry.tmdbKey(1101383, record: .movie), "tmdb-movie-1101383")
     }
 }

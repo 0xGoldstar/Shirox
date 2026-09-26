@@ -284,6 +284,19 @@ struct SettingsView: View {
                         }
                     }
 
+                    // TMDB's terms ask for its logo and this notice in an About or Credits section.
+                    VStack(alignment: .leading, spacing: 8) {
+                        Image("TMDBLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 12)
+                            .accessibilityLabel("TMDB")
+                        Text("This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+
                     LabeledContent("Version") {
                         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
                         let build   = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—"

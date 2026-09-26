@@ -5,3 +5,6 @@ APP_NAME = Shirox
 DEVELOPMENT_TEAM = YOUR_TEAM_ID
 PRODUCT_BUNDLE_IDENTIFIER = com.yourname.shirox
 CODE_SIGN_STYLE = Automatic
+
+// Optional: TMDB's API key (themoviedb.org → Settings → API), for title logos TVDB doesn't have.
+// TMDB_API_KEY = your_key

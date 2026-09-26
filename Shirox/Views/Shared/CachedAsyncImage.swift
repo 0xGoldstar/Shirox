@@ -373,9 +373,7 @@ struct TVDBTitleLogoView: View {
     @State private var tvdbLogoURL: String?
 
     private var immediateLogoURL: String? {
-        if let tvdbID = media.tvdbID, let kind = media.simklTitleKind {
-            return TVDBMappingService.shared.cachedTitleLogo(tvdbID: tvdbID, kind: kind)
-        }
+        if media.simklTitleKind != nil { return SimklTitleLogo.cached(for: media) }
         guard media.usesTVDBArtwork else { return nil }
         let direct = TVDBMappingService.shared.getCachedArtwork(for: media.id, provider: media.provider).logo
         if let direct, !direct.isEmpty { return direct }
@@ -408,10 +406,8 @@ struct TVDBTitleLogoView: View {
         .allowsHitTesting(false)
         .task(id: media.uniqueId) {
             tvdbLogoURL = immediateLogoURL
-            if let tvdbID = media.tvdbID, let kind = media.simklTitleKind {
-                if let logo = await TVDBMappingService.shared.titleLogo(tvdbID: tvdbID, kind: kind) {
-                    tvdbLogoURL = logo
-                }
+            if media.simklTitleKind != nil {
+                if let logo = await SimklTitleLogo.find(for: media) { tvdbLogoURL = logo }
                 return
             }
             guard media.usesTVDBArtwork else { return }

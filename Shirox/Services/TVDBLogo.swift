@@ -19,8 +19,9 @@ struct TVDBArtwork: Decodable, Equatable, Sendable {
     }
 }
 
-/// Which kind of TVDB record a title is — a series' artwork types differ from a movie's.
-enum TVDBRecord: String, Sendable {
+/// Whether a title is a series or a movie — TVDB and TMDB keep the two apart, with different
+/// paths and, on TVDB, different artwork types.
+enum TitleRecord: String, Sendable {
     case series, movie
 
     init(kind: MediaKind) { self = kind == .movie ? .movie : .series }
@@ -31,17 +32,32 @@ enum TVDBRecord: String, Sendable {
     var clearArtType: Int { self == .movie ? 24 : 22 }
 
     /// The record's path in TVDB's API.
-    var path: String { self == .movie ? "movies" : "series" }
+    var tvdbPath: String { self == .movie ? "movies" : "series" }
+    /// The record's path in TMDB's API.
+    var tmdbPath: String { self == .movie ? "movie" : "tv" }
+}
+
+/// Which logos can be read: one in English, else in the title's own language (so an anime keeps
+/// its Japanese logo), else one without a language. One only in some other language is no
+/// logo — an English film shows its title rather than a Chinese logo.
+enum LogoLanguage {
+    /// Most readable first. TVDB writes languages in three letters ("eng", "jpn"), TMDB in two
+    /// ("en", "ja"); a title's own language comes from the same service as its logos.
+    static func tiers(originalLanguage: String?) -> [(String?) -> Bool] {
+        [
+            { $0 == "eng" || $0 == "en" },
+            { originalLanguage != nil && $0 == originalLanguage },
+            { $0 == nil },
+        ]
+    }
 }
 
 /// A title's logo among its TVDB artwork.
 enum TVDBLogo {
 
-    /// A ClearLogo, or failing that a ClearArt — the season's before the series'. Within each, one
-    /// in English, else in the title's own language (so an anime keeps its Japanese logo), else
-    /// one without a language. A logo only in some other language is no logo: an English film
-    /// shows its title rather than a Chinese logo.
-    static func pick(season: [TVDBArtwork] = [], record: [TVDBArtwork], kind: TVDBRecord,
+    /// A ClearLogo, or failing that a ClearArt — the season's before the series'. Within each, the
+    /// most readable (`LogoLanguage`), then the best scored and largest.
+    static func pick(season: [TVDBArtwork] = [], record: [TVDBArtwork], kind: TitleRecord,
                      originalLanguage: String?) -> String? {
         for type in [kind.clearLogoType, kind.clearArtType] {
             for artworks in [season, record] {
@@ -54,13 +70,8 @@ enum TVDBLogo {
     }
 
     private static func best(_ artworks: [TVDBArtwork], originalLanguage: String?) -> String? {
-        let readable: [(TVDBArtwork) -> Bool] = [
-            { $0.language == "eng" || $0.language == "en" },
-            { originalLanguage != nil && $0.language == originalLanguage },
-            { $0.language == nil },
-        ]
-        for isReadable in readable {
-            if let artwork = artworks.filter(isReadable).sorted(by: TVDBArtwork.bySizeOrScore).first {
+        for isReadable in LogoLanguage.tiers(originalLanguage: originalLanguage) {
+            if let artwork = artworks.filter({ isReadable($0.language) }).sorted(by: TVDBArtwork.bySizeOrScore).first {
                 return artwork.image
             }
         }
@@ -68,9 +79,9 @@ enum TVDBLogo {
     }
 }
 
-/// What's known of a Simkl show's or movie's TVDB logo.
-struct TVDBTitleLogoEntry: Codable, Equatable {
-    /// nil: TVDB had none.
+/// What's known of a title's logo from one source.
+struct LogoCacheEntry: Codable, Equatable {
+    /// nil: the source had none.
     let path: String?
     let checked: Date
 
@@ -79,8 +90,8 @@ struct TVDBTitleLogoEntry: Codable, Equatable {
         case askAgain
     }
 
-    /// A logo found is kept. TVDB is asked again about one it had none for after this long —
-    /// logos are added after a title's release.
+    /// A logo found is kept. The source is asked again about one it had none for after this
+    /// long — logos are added after a title's release.
     static let retryAfter: TimeInterval = 3 * 24 * 60 * 60
 
     func answer(now: Date = Date()) -> Answer {
@@ -88,5 +99,6 @@ struct TVDBTitleLogoEntry: Codable, Equatable {
         return .askAgain
     }
 
-    static func key(tvdbID: Int, record: TVDBRecord) -> String { "\(record.rawValue)-\(tvdbID)" }
+    static func tvdbKey(_ tvdbID: Int, record: TitleRecord) -> String { "\(record.rawValue)-\(tvdbID)" }
+    static func tmdbKey(_ tmdbID: Int, record: TitleRecord) -> String { "tmdb-\(record.tmdbPath)-\(tmdbID)" }
 }

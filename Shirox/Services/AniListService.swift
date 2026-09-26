@@ -819,7 +819,7 @@ enum BrowseCategory: String, CaseIterable, Hashable {
     private let apiKey = "4cd66d53-3c21-45a7-9dd2-e4a9c2ed20a8"
     private let cacheKey = "tvdb_mappings_cache_v4"
     private let malCacheKey = "tvdb_mal_mappings_cache_v1"
-    private let bulkFetchedAtKey = "anira_all_mappings_fetchedAt_v1"
+    private let bulkFetchedAtKey = "anira_all_mappings_fetchedAt_v2"
     /// How long a cached /mappings/all snapshot is considered fresh before re-fetching.
     private let bulkTTL: TimeInterval = 60 * 60 * 24  // 1 day
 
@@ -843,8 +843,8 @@ enum BrowseCategory: String, CaseIterable, Hashable {
     private var malEpisodeCache: [Int: [AniMapEpisode]] = [:]
     private var aniraEpisodeCache: [String: AniraEpisodeResponse] = [:]
     private var watchOrderCache: [Int: [AniraMediaEntry]] = [:]
-    /// Simkl shows' and movies' logos, keyed by `TVDBTitleLogoEntry.key`.
-    private var titleLogos: [String: TVDBTitleLogoEntry] = [:]
+    /// Simkl shows' and movies' logos, keyed by `LogoCacheEntry.tvdbKey`.
+    private var titleLogos: [String: LogoCacheEntry] = [:]
     private var titleLogoTasks: [String: Task<String?, Never>] = [:]
     private let titleLogoKey = "tvdb_title_logos_v1"
 
@@ -863,6 +863,15 @@ enum BrowseCategory: String, CaseIterable, Hashable {
         let tvdb_id: Int?
         let tvdb_season: Int?
         let tvdb_epoffset: Int?
+        var tmdb_show_id: Int? = nil
+        var tmdb_movie_id: Int? = nil
+
+        /// Where TMDB keeps the anime's logo: a film's own record, else the show a season is part of.
+        var tmdbTitle: (id: Int, record: TitleRecord)? {
+            if let movie = tmdb_movie_id { return (movie, .movie) }
+            if let show = tmdb_show_id { return (show, .series) }
+            return nil
+        }
     }
 
     struct AniraEpisodeResponse: Decodable {
@@ -913,7 +922,7 @@ enum BrowseCategory: String, CaseIterable, Hashable {
             self.malCache = decoded
         }
         if let data = UserDefaults.standard.data(forKey: titleLogoKey),
-           let decoded = try? JSONDecoder().decode([String: TVDBTitleLogoEntry].self, from: data) {
+           let decoded = try? JSONDecoder().decode([String: LogoCacheEntry].self, from: data) {
             self.titleLogos = decoded
         }
     }
@@ -1080,22 +1089,37 @@ enum BrowseCategory: String, CaseIterable, Hashable {
 
     private var bulkFileURL: URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("anira_all_mappings_v2.json")
+    }
+
+    /// Kept before the snapshot held TMDB ids.
+    private var oldBulkFileURL: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("anira_all_mappings_v1.json")
     }
 
     private func saveBulkToDisk(_ entries: [BulkMapping]) {
         guard let url = bulkFileURL else { return }
+        let oldURL = oldBulkFileURL
         Task.detached(priority: .background) {
             guard let data = try? JSONEncoder().encode(entries) else { return }
             try? data.write(to: url, options: .atomic)
+            if let oldURL { try? FileManager.default.removeItem(at: oldURL) }
         }
     }
 
+    /// The saved snapshot — the v1 copy, without TMDB ids, until the first v2 one is saved, so
+    /// anime stay mapped offline meanwhile. v2's fetch time is unset then, so it's replaced.
     private func loadBulkFromDisk() async -> [BulkMapping]? {
-        guard let url = bulkFileURL else { return nil }
+        let urls = [bulkFileURL, oldBulkFileURL].compactMap { $0 }
         return await Task.detached(priority: .utility) {
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            return try? JSONDecoder().decode([BulkMapping].self, from: data)
+            for url in urls {
+                if let data = try? Data(contentsOf: url),
+                   let entries = try? JSONDecoder().decode([BulkMapping].self, from: data) {
+                    return entries
+                }
+            }
+            return nil
         }.value
     }
 
@@ -1234,11 +1258,21 @@ enum BrowseCategory: String, CaseIterable, Hashable {
         return nil
     }
 
+    /// A logo for an anime whose TVDB record has none: an earlier season's, else TMDB's — which
+    /// has logos TVDB lacks, and titles anira can't place on TVDB at all.
+    private func fallbackLogo(for id: Int, provider: ProviderType) async -> String? {
+        if let parentLogo = await resolveParentLogo(for: id, provider: provider) { return parentLogo }
+        await loadAllMappings()
+        let index = provider == .mal ? malMappingIndex : anilistMappingIndex
+        guard let title = index[id]?.tmdbTitle else { return nil }
+        return await TMDBLogoService.shared.logo(tmdbID: title.id, record: title.record)
+    }
+
     func getArtwork(for id: Int, provider: ProviderType = .anilist) async -> (poster: String?, fanart: String?, logo: String?, textlessPoster: String?) {
         if let c = tvdbCache(for: provider)[id], c.posterPath != nil || c.fanartPath != nil || c.logoPath != nil || c.textlessPosterPath != nil {
             var logo = c.logoPath
             if logo == nil || logo?.isEmpty == true {
-                if let parentLogo = await resolveParentLogo(for: id, provider: provider) {
+                if let parentLogo = await fallbackLogo(for: id, provider: provider) {
                     logo = parentLogo
                     if provider == .mal {
                         var entry = malCache[id] ?? c
@@ -1256,7 +1290,7 @@ enum BrowseCategory: String, CaseIterable, Hashable {
             return (formatURL(c.posterPath), formatURL(c.fanartPath), formatURL(logo), formatURL(c.textlessPosterPath))
         }
         guard let mapping = await getTVDBId(for: id, provider: provider), mapping.id > 0 else {
-            if let parentLogo = await resolveParentLogo(for: id, provider: provider) {
+            if let parentLogo = await fallbackLogo(for: id, provider: provider) {
                 if provider == .mal {
                     var entry = malCache[id] ?? CachedData(tid: -1)
                     entry.logoPath = parentLogo
@@ -1275,7 +1309,7 @@ enum BrowseCategory: String, CaseIterable, Hashable {
         let artwork = await fetchTVDBIdArtwork(tid: mapping.id, targetSeason: mapping.season)
         var resolvedLogo = artwork.logo
         if resolvedLogo == nil || resolvedLogo?.isEmpty == true {
-            resolvedLogo = await resolveParentLogo(for: id, provider: provider)
+            resolvedLogo = await fallbackLogo(for: id, provider: provider)
         }
 
         if provider == .mal {
@@ -1538,15 +1572,15 @@ enum BrowseCategory: String, CaseIterable, Hashable {
 
     /// A Simkl show's or movie's logo, already known — shown at once, before any lookup.
     func cachedTitleLogo(tvdbID: Int, kind: MediaKind) -> String? {
-        let key = TVDBTitleLogoEntry.key(tvdbID: tvdbID, record: TVDBRecord(kind: kind))
+        let key = LogoCacheEntry.tvdbKey(tvdbID, record: TitleRecord(kind: kind))
         return formatURL(titleLogos[key]?.path)
     }
 
     /// A Simkl show's or movie's logo, from its TVDB series or movie. Simkl gives the TVDB id,
     /// so there's no anira mapping to go through — anira maps anime only.
     func titleLogo(tvdbID: Int, kind: MediaKind) async -> String? {
-        let record = TVDBRecord(kind: kind)
-        let key = TVDBTitleLogoEntry.key(tvdbID: tvdbID, record: record)
+        let record = TitleRecord(kind: kind)
+        let key = LogoCacheEntry.tvdbKey(tvdbID, record: record)
         if case .known(let path)? = titleLogos[key]?.answer() { return formatURL(path) }
         // The hero's logo and its preloader ask at once; one lookup answers both.
         let task = titleLogoTasks[key] ?? Task { await self.lookUpTitleLogo(tvdbID: tvdbID, record: record, key: key) }
@@ -1556,14 +1590,14 @@ enum BrowseCategory: String, CaseIterable, Hashable {
         return formatURL(path)
     }
 
-    private func lookUpTitleLogo(tvdbID: Int, record: TVDBRecord, key: String) async -> String? {
+    private func lookUpTitleLogo(tvdbID: Int, record: TitleRecord, key: String) async -> String? {
         struct Extended: Decodable {
             struct Data: Decodable { let artworks: [TVDBArtwork]?; let originalLanguage: String? }
             let data: Data
         }
         do {
             let token = try await authenticate()
-            var request = URLRequest(url: URL(string: "\(tvdbEndpoint)/\(record.path)/\(tvdbID)/extended")!)
+            var request = URLRequest(url: URL(string: "\(tvdbEndpoint)/\(record.tvdbPath)/\(tvdbID)/extended")!)
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             let (data, response) = try await Self.session.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -1575,7 +1609,7 @@ enum BrowseCategory: String, CaseIterable, Hashable {
                 path = TVDBLogo.pick(record: extended.data.artworks ?? [], kind: record,
                                      originalLanguage: extended.data.originalLanguage)
             }
-            titleLogos[key] = TVDBTitleLogoEntry(path: path, checked: Date())
+            titleLogos[key] = LogoCacheEntry(path: path, checked: Date())
             saveTitleLogos()
             return path
         } catch where (error as? URLError)?.code == .cancelled || error is CancellationError {

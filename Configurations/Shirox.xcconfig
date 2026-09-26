@@ -7,5 +7,9 @@ GITHUB_REPO = xibrox/Shirox
 // Swift concurrency checking level: minimal | targeted | complete
 SWIFT_STRICT_CONCURRENCY = targeted
 
+// TMDB's API key, for title logos TVDB doesn't have. Set it in Shirox.local.xcconfig, never
+// here — this file is committed. Left empty, the app uses TVDB's logos alone.
+TMDB_API_KEY =
+
 // Optional local overrides (ignored in Git)
 #include? "Shirox.local.xcconfig"
