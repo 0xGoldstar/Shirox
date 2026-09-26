@@ -350,6 +350,7 @@ struct AniListDetailView: View {
                     mediaId: media.id,
                     animeTitle: media.title.searchTitle,
                     episodeNumber: ep,
+                    seanimeMedia: SeanimeSearchMedia(media: media),
                     onDismiss: { vm.showStreamPicker = false }
                 ) { streams, selectedStream, showHref, availableCount, episodeHref in
                     vm.onStreamsLoaded(streams, selectedStream: selectedStream, episodeHref: showHref, availableCount: availableCount, actualEpisodeHref: episodeHref)

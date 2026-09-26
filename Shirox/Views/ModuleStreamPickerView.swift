@@ -8,10 +8,12 @@ private final class ModuleStreamVMStore: ObservableObject {
     var viewModels: [String: ModuleStreamRowViewModel] = [:]
 
     func get(for module: ModuleDefinition, mediaId: Int?, animeTitle: String, episodeNumber: Int,
-             seasonNumbering: ModuleSeasonNumbering? = nil) -> ModuleStreamRowViewModel {
+             seasonNumbering: ModuleSeasonNumbering? = nil,
+             seanimeMedia: SeanimeSearchMedia? = nil) -> ModuleStreamRowViewModel {
         if let vm = viewModels[module.id] { return vm }
         let vm = ModuleStreamRowViewModel(module: module, mediaId: mediaId, animeTitle: animeTitle,
-                                          targetEpisodeNumber: episodeNumber, seasonNumbering: seasonNumbering)
+                                          targetEpisodeNumber: episodeNumber, seasonNumbering: seasonNumbering,
+                                          seanimeMedia: seanimeMedia)
         viewModels[module.id] = vm
         return vm
     }
@@ -25,6 +27,8 @@ struct ModuleStreamPickerView: View {
     let episodeNumber: Int
     /// A Simkl season's numbering. Nil everywhere else, which leaves the picker exactly as it was.
     var seasonNumbering: ModuleSeasonNumbering? = nil
+    /// The show, for Seanime streaming providers' searches — from the anime page's AniList entry.
+    var seanimeMedia: SeanimeSearchMedia? = nil
     let onDismiss: () -> Void
     let onStreamsLoaded: ([StreamResult], StreamResult?, String?, Int?, String?) -> Void  // allStreams, selectedStream, showHref, availableCount, episodeHref
 
@@ -49,7 +53,8 @@ struct ModuleStreamPickerView: View {
                         animeTitle: animeTitle,
                         episodeNumber: episodeNumber,
                         rowVm: vmStore.get(for: module, mediaId: mediaId, animeTitle: animeTitle,
-                                           episodeNumber: episodeNumber, seasonNumbering: seasonNumbering)
+                                           episodeNumber: episodeNumber, seasonNumbering: seasonNumbering,
+                                           seanimeMedia: seanimeMedia)
                     ) { streams, selectedStream, showHref, availableCount, episodeHref in
                         moduleManager.selectModule(module)
                         onDismiss()
@@ -120,18 +125,20 @@ private final class ModuleStreamRowViewModel: ObservableObject {
     let originalAnimeTitle: String
     let targetEpisodeNumber: Int
     let seasonNumbering: ModuleSeasonNumbering?
+    let seanimeMedia: SeanimeSearchMedia?
 
     private var runner: ModuleJSRunner?
     private var currentTask: Task<Void, Never>?
     private var currentSearchResultHref: String?  // Track active search result for manual episode selection
 
     init(module: ModuleDefinition, mediaId: Int?, animeTitle: String, targetEpisodeNumber: Int,
-         seasonNumbering: ModuleSeasonNumbering? = nil) {
+         seasonNumbering: ModuleSeasonNumbering? = nil, seanimeMedia: SeanimeSearchMedia? = nil) {
         self.module = module
         self.mediaId = mediaId
         self.originalAnimeTitle = animeTitle
         self.targetEpisodeNumber = targetEpisodeNumber
         self.seasonNumbering = seasonNumbering
+        self.seanimeMedia = seanimeMedia
         
         // Load custom alias if available, otherwise fallback to original title
         if let alias = ModuleSearchAliasManager.shared.getAlias(mediaId: mediaId, animeTitle: animeTitle, moduleId: module.id) {
@@ -260,6 +267,7 @@ private final class ModuleStreamRowViewModel: ObservableObject {
 
         let r = ModuleJSRunner()
         runner = r
+        r.seanimeMedia = seanimeMedia
 
         do {
             try await r.load(module: module)

@@ -65,4 +65,17 @@ final class SeanimeEngineTests: XCTestCase {
         XCTAssertTrue(SeanimeProviderSettings.dub(for: "a", defaults: defaults))
         XCTAssertFalse(SeanimeProviderSettings.dub(for: "b", defaults: defaults))
     }
+
+    func testTheAnimePagesEntryBecomesTheShow() {
+        let media = Media(id: 154587, idMal: 52991, provider: .anilist,
+                          title: MediaTitle(romaji: "Sousou no Frieren", english: "Frieren", native: nil),
+                          coverImage: MediaCoverImage(large: nil, extraLarge: nil), bannerImage: nil, description: nil,
+                          episodes: 28, status: "FINISHED", averageScore: nil, genres: nil, season: nil, seasonYear: 2023,
+                          nextAiringEpisode: nil, relations: nil, type: "ANIME", format: "TV")
+        let show = SeanimeSearchMedia(media: media)
+        XCTAssertEqual(show.jsonObject["romajiTitle"] as? String, "Sousou no Frieren")
+        XCTAssertEqual(show.jsonObject["idMal"] as? Int, 52991)
+        XCTAssertEqual(show.jsonObject["year"] as? Int, 2023)
+        XCTAssertEqual(show.jsonObject["episodeCount"] as? Int, 28)
+    }
 }

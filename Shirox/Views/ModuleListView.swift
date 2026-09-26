@@ -80,6 +80,7 @@ struct ModuleListView: View {
                                 .listRowInsets(EdgeInsets())
                                 .listRowBackground(Color.clear)
                                 .contextMenu {
+                                    seanimeDubAction(module)
                                     shareModuleActions(module)
                                     Button(role: .destructive) {
                                         removeModule(module)
@@ -464,6 +465,12 @@ struct ModuleListView: View {
                             Text("·").font(.caption).foregroundStyle(.secondary)
                             Text(author.name).font(.caption).foregroundStyle(.secondary)
                         }
+                        if module.seanime != nil {
+                            Text("Seanime")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.secondary.opacity(0.15), in: Capsule())
+                        }
                     }
                 }
                 Spacer()
@@ -505,6 +512,21 @@ struct ModuleListView: View {
     }
 
     // MARK: - Actions
+
+    /// A Seanime streaming provider that dubs: Sub or Dub for its searches. Reloads it when active.
+    @ViewBuilder
+    private func seanimeDubAction(_ module: ModuleDefinition) -> some View {
+        if let info = module.seanime, info.kind == .anime, info.supportsDub {
+            let dub = SeanimeProviderSettings.dub(for: module.id)
+            Button {
+                SeanimeProviderSettings.setDub(!dub, for: module.id)
+                if moduleManager.activeModule?.id == module.id { moduleManager.selectModule(module) }
+            } label: {
+                if dub { Label("Dub", systemImage: "checkmark") } else { Text("Dub") }
+            }
+        }
+    }
+
     /// Copy / share actions for an installed module, so a source can be passed to someone else
     /// without them hunting down the original link.
     ///
