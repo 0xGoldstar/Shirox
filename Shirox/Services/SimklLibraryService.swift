@@ -21,6 +21,8 @@ enum SimklError: LocalizedError, Equatable {
     case dailyLimit
     /// The sign-in lacks `media:write`; only a new sign-in widens it.
     case readOnly
+    /// An automatic request held back: the day's last requests are kept for the user's own actions.
+    case budgetReserved
 
     var errorDescription: String? {
         switch self {
@@ -28,6 +30,8 @@ enum SimklError: LocalizedError, Equatable {
             return "Simkl's daily limit for your account has been reached. It resets at midnight US Eastern time."
         case .readOnly:
             return "Sign in to Simkl again to allow edits."
+        case .budgetReserved:
+            return "Simkl's last requests today are kept for your own actions."
         }
     }
 }
