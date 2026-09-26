@@ -32,14 +32,14 @@ final class SimklModuleLinkerTests: XCTestCase {
     }
 
     private func match(_ page: SimklModuleLinker.Page, signedIn: Bool = true, trackingOn: Bool = true,
-                       simklEpisodes: [SimklEpisode] = []) async -> SimklTitleLink? {
+                       simklEpisodes: [SimklEpisode] = [], now: Date = Date()) async -> SimklTitleLink? {
         await SimklModuleLinker.matchIfNeeded(
             page, store: store, signedIn: signedIn, trackingOn: trackingOn,
             search: { [unowned self] query, kind in
                 self.searches.append("\(query)|\(kind.rawValue)")
                 return try self.answer.get()
             },
-            episodes: { _ in simklEpisodes })
+            episodes: { _ in simklEpisodes }, now: now)
     }
 
     func testAnExactMatchIsLinkedAutomatically() async {
@@ -103,5 +103,38 @@ final class SimklModuleLinkerTests: XCTestCase {
         _ = await match(page())
         XCTAssertTrue(searches.isEmpty)
         XCTAssertEqual(store.links(for: key)?.simklTitle?.simklID, 1, "The user's link stands")
+    }
+
+    // MARK: - Re-matching
+
+    func testANoMatchIsSearchedAgainAfterThirtyDays() async {
+        let start = Date(timeIntervalSince1970: 1_790_000_000)
+        let day: TimeInterval = 24 * 60 * 60
+        answer = .success([])
+        _ = await match(page(), now: start)
+        XCTAssertEqual(store.links(for: key)?.simklNoMatchAt, start)
+        _ = await match(page(), now: start + 29 * day)
+        XCTAssertEqual(searches.count, 1, "Not before 30 days")
+        _ = await match(page(), now: start + 30 * day)
+        XCTAssertEqual(searches.count, 2)
+        XCTAssertEqual(store.links(for: key)?.simklNoMatchAt, start + 30 * day)
+    }
+
+    /// Unlinking in Tracking Links leaves the page searched with no date: never re-matched.
+    func testAPageTheUserUnlinkedIsntSearchedAgain() async {
+        store.update(key) { $0.simklSearched = true }
+        _ = await match(page(), now: Date().addingTimeInterval(365 * 24 * 60 * 60))
+        XCTAssertTrue(searches.isEmpty)
+    }
+
+    func testAMatchClearsTheDate() async {
+        store.update(key) {
+            $0.simklSearched = true
+            $0.simklNoMatchAt = Date(timeIntervalSince1970: 0)
+        }
+        answer = .success(items(#"[{"title":"Ted Lasso","year":2020,"ids":{"simkl_id":1359610}}]"#))
+        _ = await match(page())
+        XCTAssertNotNil(store.links(for: key)?.simklTitle)
+        XCTAssertNil(store.links(for: key)?.simklNoMatchAt)
     }
 }

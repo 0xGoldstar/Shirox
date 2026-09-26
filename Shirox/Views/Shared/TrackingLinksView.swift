@@ -424,6 +424,7 @@ struct TrackingLinksView: View {
             TrackingLinkStore.shared.update(key) {
                 $0.simklTitle = SimklTitleLink(simklID: candidate.id, kind: kind, season: season, automatic: false)
                 $0.simklSearched = true
+                $0.simklNoMatchAt = nil
             }
             message = "Linked Simkl to \(candidate.title)."
             idText = ""
@@ -447,6 +448,7 @@ struct TrackingLinksView: View {
         TrackingLinkStore.shared.update(key) {
             $0.simklTitle = nil
             $0.simklSearched = true
+            $0.simklNoMatchAt = nil
         }
         message = nil
         onChange()

@@ -26,9 +26,16 @@ enum SimklModuleLinker {
         UserDefaults.standard.object(forKey: "simklTrackingEnabled") as? Bool ?? true
     }
 
-    static func shouldSearch(_ page: Page, links: TrackingLinks?, signedIn: Bool, trackingOn: Bool) -> Bool {
-        signedIn && trackingOn && !page.hasConfidentAniListMatch
-            && links?.simklTitle == nil && links?.simklSearched != true
+    /// A page whose search found nothing is searched again after this long.
+    static let researchAfter: TimeInterval = 30 * 24 * 60 * 60
+
+    static func shouldSearch(_ page: Page, links: TrackingLinks?, signedIn: Bool, trackingOn: Bool,
+                             now: Date = Date()) -> Bool {
+        guard signedIn, trackingOn, !page.hasConfidentAniListMatch, links?.simklTitle == nil else { return false }
+        guard links?.simklSearched == true else { return true }
+        // Searched: again only when it found nothing 30 days ago. A page the user unlinked has no date.
+        guard let noMatchAt = links?.simklNoMatchAt else { return false }
+        return now.timeIntervalSince(noMatchAt) >= researchAfter
     }
 
     /// Searches once and saves what it finds: a link, or that nothing matched. A search that
@@ -37,13 +44,15 @@ enum SimklModuleLinker {
     static func matchIfNeeded(
         _ page: Page, store: TrackingLinkStore? = nil, signedIn: Bool? = nil, trackingOn: Bool? = nil,
         search: @escaping Search = { try await SimklCatalog.search($0, kind: $1) },
-        episodes: @escaping Episodes = { try await SimklCatalog.loadEpisodes(simklID: $0) }
+        episodes: @escaping Episodes = { try await SimklCatalog.loadEpisodes(simklID: $0) },
+        now: Date = Date()
     ) async -> SimklTitleLink? {
         // Defaults are read here: a default argument can't reach the main actor's state.
         let store = store ?? .shared
         let signedIn = signedIn ?? SimklAuthManager.shared.isLoggedIn
         let trackingOn = trackingOn ?? Self.trackingOn
-        guard shouldSearch(page, links: store.links(for: page.key), signedIn: signedIn, trackingOn: trackingOn),
+        guard shouldSearch(page, links: store.links(for: page.key), signedIn: signedIn, trackingOn: trackingOn,
+                           now: now),
               running.insert(page.key).inserted else { return nil }
         defer { running.remove(page.key) }
 
@@ -60,7 +69,10 @@ enum SimklModuleLinker {
         guard let found = SimklModuleMatch.match(title: page.title, aliases: page.aliases,
                                                  airdate: page.airdate, in: results),
               let simklID = found.simklID else {
-            store.update(page.key) { $0.simklSearched = true }
+            store.update(page.key) {
+                $0.simklSearched = true
+                $0.simklNoMatchAt = now
+            }
             return nil
         }
         var season: Int?
@@ -72,6 +84,7 @@ enum SimklModuleLinker {
         store.update(page.key) {
             $0.simklTitle = link
             $0.simklSearched = true
+            $0.simklNoMatchAt = nil
         }
         Logger.shared.log("[Simkl] Matched \(page.title) to \(found.title ?? "#\(simklID)")", type: "Provider")
         return link

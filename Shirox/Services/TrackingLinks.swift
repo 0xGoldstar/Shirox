@@ -9,14 +9,18 @@ struct TrackingLinks: Codable, Equatable {
     var simklTitle: SimklTitleLink?
     /// Module pages: the page has had its one automatic Simkl search, whatever it found.
     var simklSearched: Bool?
+    /// Module pages: when the automatic search last found nothing. Searched again 30 days on; nil
+    /// for a page the user unlinked, which is never searched again.
+    var simklNoMatchAt: Date?
 
     init(anilist: Int? = nil, mal: Int? = nil, simkl: Int? = nil,
-         simklTitle: SimklTitleLink? = nil, simklSearched: Bool? = nil) {
+         simklTitle: SimklTitleLink? = nil, simklSearched: Bool? = nil, simklNoMatchAt: Date? = nil) {
         self.anilist = anilist
         self.mal = mal
         self.simkl = simkl
         self.simklTitle = simklTitle
         self.simklSearched = simklSearched
+        self.simklNoMatchAt = simklNoMatchAt
     }
 
     /// A searched page keeps its record even with nothing linked, so it isn't searched again.

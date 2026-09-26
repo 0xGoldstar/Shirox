@@ -147,4 +147,11 @@ final class TrackingLinksTests: XCTestCase {
         TrackingLinkStore(defaults: defaults).update("module:m|/show") { $0.simklTitle = link }
         XCTAssertEqual(TrackingLinkStore(defaults: defaults).links(for: "module:m|/show")?.simklTitle, link)
     }
+
+    func testARecordSavedBeforeTheNoMatchDateStillDecodes() throws {
+        let json = #"{"simklSearched":true}"#
+        let links = try JSONDecoder().decode(TrackingLinks.self, from: Data(json.utf8))
+        XCTAssertEqual(links.simklSearched, true)
+        XCTAssertNil(links.simklNoMatchAt)
+    }
 }
