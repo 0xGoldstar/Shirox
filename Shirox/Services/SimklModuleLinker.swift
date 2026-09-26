@@ -50,7 +50,9 @@ enum SimklModuleLinker {
         let kind = SimklModuleMatch.searchKind(episodeCount: page.episodeCount)
         let results: [SimklCatalogItem]
         do {
-            results = try await search(page.title, kind)
+            results = try await SimklRequestPriority.$current.withValue(.automatic) {
+                try await search(page.title, kind)
+            }
         } catch {
             Logger.shared.log("[Simkl] Couldn't search for \(page.title): \(error)", type: "Error")
             return nil

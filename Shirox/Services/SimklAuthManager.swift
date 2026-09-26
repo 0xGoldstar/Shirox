@@ -42,6 +42,9 @@ final class SimklAuthManager: NSObject, ObservableObject {
     /// racing refreshes would each invalidate what the other just received.
     private var refreshTask: Task<Void, Error>?
 
+    /// Counts metered requests and holds them back per Simkl's daily allowance.
+    var budget: SimklBudget = .shared
+
     /// Carries every Simkl call, library reads included — `full` reads are large, hence 20 s.
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
@@ -178,8 +181,9 @@ final class SimklAuthManager: NSObject, ObservableObject {
     /// exception — no token went out at all, which refreshing cannot fix. `build` is called
     /// again for the retry so it picks up the new token.
     func send(_ build: () throws -> URLRequest) async throws -> (Data, HTTPURLResponse) {
+        try budget.permit(SimklRequestPriority.current)
         try await refreshIfNeeded(force: false)
-        var (data, http) = try await perform(try build())
+        var (data, http) = try await sendCounted(try build())
         guard http.statusCode == 401 else { return (data, http) }
 
         if SimklOAuth.errorCode(in: data) == "user_token_required" {
@@ -187,11 +191,25 @@ final class SimklAuthManager: NSObject, ObservableObject {
             throw ProviderError.unauthenticated
         }
         try await refreshIfNeeded(force: true)
-        (data, http) = try await perform(try build())
+        (data, http) = try await sendCounted(try build())
         if http.statusCode == 401 {
             Logger.shared.log("[Simkl] Still 401 after a refresh — signing out", type: "Error")
             signOutLocally()
             throw ProviderError.unauthenticated
+        }
+        return (data, http)
+    }
+
+    /// One metered request, counted once answered. Simkl's daily-limit answer marks the day spent,
+    /// so nothing more is sent until the reset. Token requests use `perform` directly and aren't
+    /// counted.
+    private func sendCounted(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (data, http) = try await perform(request)
+        budget.recordSent()
+        if http.statusCode == 429,
+           case .dailyLimit = SimklLibraryService.classify(
+            status: http.statusCode, body: data, retryAfter: http.value(forHTTPHeaderField: "Retry-After")) {
+            budget.markSpent()
         }
         return (data, http)
     }
@@ -374,6 +392,7 @@ final class SimklAuthManager: NSObject, ObservableObject {
                 if let previous = UserDefaults.standard.object(forKey: queueOwnerKey) as? Int, previous != id {
                     Logger.shared.log("[Simkl] Different account than before — dropping its queue and cache", type: "Info")
                     SimklLibraryService.shared.resetForAccountChange()
+                    budget.reset()
                 }
                 UserDefaults.standard.set(id, forKey: queueOwnerKey)
             }

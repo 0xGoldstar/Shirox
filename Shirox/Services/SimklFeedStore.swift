@@ -39,20 +39,24 @@ final class SimklFeedStore {
         let download = self.download
         // The calendar's v1 file stands in when v2 can't be had; the saved copy reads as either.
         let paths = [list.path(full: full)] + [list.fallbackPath(full: full)].compactMap { $0 }
-        let task = Task { () throws -> [SimklDiscoverItem] in
-            var failure: Error?
-            for path in paths {
-                do {
-                    let data = try await download(list, path)
-                    let items = try SimklDiscoverItem.decodeList(data)
-                    self.save(data, to: file)
-                    return items
-                } catch {
-                    failure = error
+        // Home loading a token list is automatic; a pull to refresh is the user's.
+        let priority: SimklRequestPriority = forceRefresh ? .own : .automatic
+        let task = SimklRequestPriority.$current.withValue(priority) {
+            Task { () throws -> [SimklDiscoverItem] in
+                var failure: Error?
+                for path in paths {
+                    do {
+                        let data = try await download(list, path)
+                        let items = try SimklDiscoverItem.decodeList(data)
+                        self.save(data, to: file)
+                        return items
+                    } catch {
+                        failure = error
+                    }
                 }
+                if let saved = self.read(file) { return saved }
+                throw failure ?? CancellationError()
             }
-            if let saved = self.read(file) { return saved }
-            throw failure ?? CancellationError()
         }
         inFlight[file] = task
         defer { inFlight[file] = nil }

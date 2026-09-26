@@ -350,7 +350,10 @@ final class SimklLibraryService {
                 "[Simkl] activation: away too briefly to check activities", type: "Provider")
             return
         }
-        await refreshNow(now: now)
+        // Returning to the app is the app's idea, not the user's: held back once the reserve is reached.
+        await SimklRequestPriority.$current.withValue(.automatic) {
+            await refreshNow(now: now)
+        }
     }
 
     /// An explicit user request — pull to refresh, or a sync the user started. Always checks,
