@@ -26,10 +26,6 @@ final class LibrarySyncService: ObservableObject {
     /// hammered back to back gets the account throttled — which mid-run looks exactly like
     /// data loss. (`Duration` would read better but is iOS 16+; this ships to iOS 15.)
     private static let writeIntervalNanos: UInt64 = 350_000_000
-    /// Simkl takes 1 POST/sec, and a burst of individual removals or un-marks at the 350 ms
-    /// the other services tolerate earns a throttling block. Queued writes are paced by
-    /// `SimklWriteQueue`; this is for the ones sent directly.
-    private static let simklDirectPostIntervalNanos: UInt64 = 1_100_000_000
 
     @Published private(set) var isRunning = false
     /// "Syncing 42 of 310" while a run is in flight, for the settings row.
@@ -93,6 +89,12 @@ final class LibrarySyncService: ObservableObject {
     /// corrected here. Which specific titles were in the failed batch is not recoverable, so the
     /// count comes off `advanced` before `created` — the totals stay truthful even though the
     /// attribution cannot be.
+    /// Moves removals that never reached Simkl out of `deleted` and into `failed`.
+    static func chargeUnsentRemovals(_ count: Int, to summary: inout LibrarySyncSummary) {
+        summary.failed += count
+        summary.deleted -= min(count, summary.deleted)
+    }
+
     static func chargeUndelivered(_ count: Int, to summary: inout LibrarySyncSummary) {
         summary.failed += count
         let fromAdvanced = min(count, summary.advanced)
@@ -153,6 +155,9 @@ final class LibrarySyncService: ObservableObject {
     /// overwrite run queued its writes and silently dropped them while reporting success.
     private func flushSimkl(for run: SyncRun, into summaries: inout [LibrarySide: LibrarySyncSummary]) async {
         guard run.writes(to: .simkl), summaries[.simkl] != nil else { return }
+        let unsent = await SimklLibraryService.shared.flushRemovals()
+        if unsent.removals > 0 { Self.chargeUnsentRemovals(unsent.removals, to: &summaries[.simkl]!) }
+        if unsent.unmarks > 0 { Self.chargeUndelivered(unsent.unmarks, to: &summaries[.simkl]!) }
         let undelivered = await SimklLibraryService.shared.flush()
         if undelivered > 0 { Self.chargeUndelivered(undelivered, to: &summaries[.simkl]!) }
 
@@ -299,19 +304,17 @@ final class LibrarySyncService: ObservableObject {
             case .mal:
                 try await MALLibraryService.shared.deleteEntry(malId: deletion.id)
             case .simkl:
-                // Whole-entry removal: history and watchlist entry both. `rawUnmarkEpisodes` is
-                // the other, much narrower one — see SimklLibraryService.
-                try await SimklLibraryService.shared.rawDeleteEntry(ids: ["mal": deletion.id])
+                // Whole-entry removal, sent with the run's other removals in `flushSimkl`.
+                SimklLibraryService.shared.queueRemoval(ids: ["mal": deletion.id], episodes: nil)
+                return .deleted
             }
-            try? await Task.sleep(nanoseconds: deletion.side == .simkl
-                                  ? Self.simklDirectPostIntervalNanos : Self.writeIntervalNanos)
+            try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
             return .deleted
         } catch {
             Logger.shared.log(
                 "[LibrarySync] Failed to delete \(deletion.title) from \(deletion.side.name): \(error)",
                 type: "Error")
-            try? await Task.sleep(nanoseconds: deletion.side == .simkl
-                                  ? Self.simklDirectPostIntervalNanos : Self.writeIntervalNanos)
+            try? await Task.sleep(nanoseconds: Self.writeIntervalNanos)
             return .failed
         }
     }
@@ -339,11 +342,9 @@ final class LibrarySyncService: ObservableObject {
             case .simkl:
                 let change = SimklPayloadBuilder.progressChange(
                     previous: previousProgress, previousStatus: previousStatus, to: progress)
-                if !change.unmark.isEmpty {
-                    // Overwrite runs may go backwards, and /sync/history only ever adds.
-                    try await SimklLibraryService.shared.rawUnmarkEpisodes(ids: ["mal": id], episodes: change.unmark)
-                    try? await Task.sleep(nanoseconds: Self.simklDirectPostIntervalNanos)
-                }
+                // Overwrite runs may go backwards, and /sync/history only ever adds. Sent in a batch
+                // before the run's additions.
+                SimklLibraryService.shared.queueRemoval(ids: ["mal": id], episodes: change.unmark)
                 // Queued rather than sent: Simkl allows 1 POST/sec and batches 50 items, so a
                 // per-title request here would be the exact pattern that gets throttled.
                 // `flush()` sends them after the run.

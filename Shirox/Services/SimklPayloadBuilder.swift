@@ -39,6 +39,12 @@ struct SimklProgressChange: Equatable {
     let unmark: [Int]
 }
 
+/// One removal or un-mark a sync run queued: `episodes` nil removes the title entirely.
+struct SimklRemoval: Equatable {
+    let ids: [String: Int]
+    let episodes: [Int]?
+}
+
 /// Every Simkl mapping decision, with no network and no state.
 ///
 /// Deliberately pure. Two of these rules are expensive to get wrong: the removal radius can
@@ -210,6 +216,15 @@ enum SimklPayloadBuilder {
             show["seasons"] = [["number": 1, "episodes": episodes.map { ["number": $0] }]]
         }
         return [Self.animeKey: [show]]
+    }
+
+    /// Several removals in one `/sync/history/remove` body, each item as `removalBody(ids:episodes:)`
+    /// shapes it alone.
+    static func removalBody(_ removals: [SimklRemoval]) -> [String: Any] {
+        let items = removals.flatMap { removal in
+            removalBody(ids: removal.ids, episodes: removal.episodes)[animeKey] as? [[String: Any]] ?? []
+        }
+        return [animeKey: items]
     }
 
     // MARK: - Batching

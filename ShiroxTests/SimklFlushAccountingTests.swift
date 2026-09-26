@@ -61,4 +61,13 @@ final class SimklFlushAccountingTests: XCTestCase {
         XCTAssertEqual(s.advanced, 396)
         XCTAssertEqual(s.failed, 0)
     }
+
+    /// Removals are batched too, and one that never reached Simkl mustn't be reported as done.
+    func testRemovalsThatNeverReachedSimklCountAsFailed() {
+        var summary = LibrarySyncSummary()
+        summary.deleted = 5
+        LibrarySyncService.chargeUnsentRemovals(2, to: &summary)
+        XCTAssertEqual(summary.deleted, 3)
+        XCTAssertEqual(summary.failed, 2)
+    }
 }

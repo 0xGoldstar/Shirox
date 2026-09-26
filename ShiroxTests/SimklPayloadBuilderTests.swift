@@ -240,4 +240,17 @@ final class SimklPayloadBuilderTests: XCTestCase {
         XCTAssertEqual(SimklPayloadBuilder.progressChange(previous: 12, previousStatus: .completed, to: 5),
                        SimklProgressChange(markFrom: 0, unmark: []))
     }
+
+    /// A sync run's removals and un-marks go 50 to a request, each item shaped as a single one.
+    func testSeveralRemovalsInOneBody() {
+        let body = SimklPayloadBuilder.removalBody([
+            SimklRemoval(ids: ["mal": 1], episodes: [3, 4]),
+            SimklRemoval(ids: ["mal": 2], episodes: nil),
+        ])
+        let shows = body[SimklPayloadBuilder.animeKey] as? [[String: Any]]
+        XCTAssertEqual(shows?.count, 2)
+        XCTAssertEqual(shows?.first?["ids"] as? [String: Int], ["mal": 1])
+        XCTAssertNotNil(shows?.first?["seasons"], "An un-mark names its episodes")
+        XCTAssertNil(shows?.last?["seasons"], "A removal takes the whole title")
+    }
 }

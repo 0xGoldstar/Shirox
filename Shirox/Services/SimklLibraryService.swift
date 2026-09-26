@@ -716,6 +716,33 @@ final class SimklLibraryService {
         try await post("/sync/history/remove", body: body)
     }
 
+    /// A sync run's removals and un-marks, waiting for `flushRemovals`.
+    private var pendingRemovals: [SimklRemoval] = []
+
+    func queueRemoval(ids: [String: Int], episodes: [Int]?) {
+        if let episodes, episodes.isEmpty { return }
+        pendingRemovals.append(SimklRemoval(ids: ids, episodes: episodes))
+    }
+
+    /// Sends the queued removals 50 to a request, 1.1 s apart. The run calls this before sending
+    /// its additions, so a title taken back is un-marked before its new progress lands. Returns
+    /// how many of each weren't sent.
+    func flushRemovals() async -> (unmarks: Int, removals: Int) {
+        let batches = SimklPayloadBuilder.batches(pendingRemovals)
+        pendingRemovals = []
+        var unsent: [SimklRemoval] = []
+        for (index, batch) in batches.enumerated() {
+            if index > 0 { try? await Task.sleep(nanoseconds: 1_100_000_000) }
+            do {
+                try await post("/sync/history/remove", body: SimklPayloadBuilder.removalBody(batch))
+            } catch {
+                Logger.shared.log("[Simkl] A batch of \(batch.count) removals failed: \(error)", type: "Error")
+                unsent += batch
+            }
+        }
+        return (unsent.filter { $0.episodes != nil }.count, unsent.filter { $0.episodes == nil }.count)
+    }
+
     /// Titles Simkl answered `not_found` for in the last flush — nothing was stored for them.
     var lastNotFoundCount: Int { queue.notFoundCount }
 
