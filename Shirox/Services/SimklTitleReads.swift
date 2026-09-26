@@ -125,7 +125,8 @@ enum SimklTitleReads {
             bannerImage: nil, description: nil, episodes: episodes, status: nil,
             averageScore: nil, genres: nil, season: nil, seasonYear: year,
             nextAiringEpisode: nil, relations: nil,
-            type: kind == .movie ? Media.simklMovieType : Media.simklTVType, format: nil,
+            type: kind == .movie ? Media.simklMovieType : kind == .anime ? Media.simklAnimeType : Media.simklTVType,
+            format: nil,
             runtime: runtime)
     }
 

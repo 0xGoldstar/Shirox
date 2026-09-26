@@ -37,7 +37,7 @@ enum SimklTitleCopy {
             id: simklID,
             media: SimklTitleReads.titleMedia(simklID: simklID, kind: kind, title: title, posterURL: posterURL,
                                               year: year, runtime: runtime,
-                                              episodes: kind == .tv ? totalEpisodes : nil),
+                                              episodes: kind.hasSimklEpisodes ? totalEpisodes : nil),
             status: status, progress: 0, score: 0, timesRewatched: nil)
     }
 }
@@ -63,13 +63,13 @@ extension SimklLibraryService {
             try await postRemoval(SimklPayloadBuilder.titleRemovalBody(kind: kind, ids: ids, seasons: unmarks))
         }
 
-        var copy = cachedLibrary(kind) ?? []
+        var copy = titleCopy(kind)
         if let newEntry, !copy.contains(where: { $0.id == simklID }) {
             copy = SimklTitleCopy.inserting(newEntry, into: copy)
         }
         let known = copy.first { $0.id == simklID }
-        store(SimklTitleCopy.updating(copy, simklID: simklID, status: status, score: score,
-                                      watched: plan?.watched), kind: kind)
+        storeTitleCopy(SimklTitleCopy.updating(copy, simklID: simklID, status: status, score: score,
+                                               watched: plan?.watched), kind: kind)
 
         let marks = plan?.marks ?? []
         enqueue(SimklWrite(
@@ -84,6 +84,16 @@ extension SimklLibraryService {
     /// The title out of the user's Simkl library entirely — history, list entry and rating.
     func removeTitle(_ simklID: Int, kind: MediaKind) async throws {
         try await postRemoval(SimklPayloadBuilder.titleRemovalBody(kind: kind, ids: ["simkl": simklID], seasons: nil))
-        store(SimklTitleCopy.removing(simklID, from: cachedLibrary(kind) ?? []), kind: kind)
+        storeTitleCopy(SimklTitleCopy.removing(simklID, from: titleCopy(kind)), kind: kind)
+    }
+
+    /// The saved copy a Simkl title's page and writes use: its kind's list — except an anime, which
+    /// is a Simkl-only one and kept apart from the synced anime copy.
+    func titleCopy(_ kind: MediaKind) -> [LibraryEntry] {
+        kind == .anime ? SimklOnlyAnimeStore.shared.entries : (cachedLibrary(kind) ?? [])
+    }
+
+    func storeTitleCopy(_ entries: [LibraryEntry], kind: MediaKind) {
+        if kind == .anime { SimklOnlyAnimeStore.shared.replace(entries) } else { store(entries, kind: kind) }
     }
 }

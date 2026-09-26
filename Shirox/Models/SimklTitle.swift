@@ -83,4 +83,7 @@ extension MediaKind {
     /// The array a write for this kind goes under. Anime shares `shows`; see
     /// `SimklPayloadBuilder.animeKey`.
     var simklWriteKey: String { self == .movie ? "movies" : "shows" }
+
+    /// Whether a Simkl title of this kind has episodes: shows, and anime opened as Simkl titles.
+    var hasSimklEpisodes: Bool { self == .tv || self == .anime }
 }

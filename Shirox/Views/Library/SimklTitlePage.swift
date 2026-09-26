@@ -30,7 +30,7 @@ struct SimklTitlePage: View {
     private var service: SimklLibraryService { .shared }
     private var title: String { details?.title ?? seedTitle }
     private var posterURL: String? { details?.posterURL ?? seedPosterURL }
-    private var simklURL: URL { URL(string: "https://simkl.com/\(kind == .movie ? "movies" : "tv")/\(simklID)")! }
+    private var simklURL: URL { URL(string: "https://simkl.com/\(kind == .movie ? "movies" : kind == .anime ? "anime" : "tv")/\(simklID)")! }
 
     private var watched: Set<SimklEpisodeRef> {
         SimklEpisodePlanner.watched(status: entry?.status ?? .planning, recorded: entry?.watchedEpisodes,
@@ -74,7 +74,7 @@ struct SimklTitlePage: View {
                         .padding(.bottom, 8)
                     entryLine
                         .padding(.horizontal, 16)
-                    if kind == .tv { episodesSection }
+                    if kind.hasSimklEpisodes { episodesSection }
                 }
                 .padding(.leading, leadingInset)
                 .padding(.bottom, 32)
@@ -256,7 +256,7 @@ struct SimklTitlePage: View {
             .foregroundStyle(.primary)
         }
         .buttonStyle(.plain)
-        .disabled(kind == .tv && target == nil)
+        .disabled(kind.hasSimklEpisodes && target == nil)
     }
 
     private func circleButton(systemImage: String, action: @escaping () -> Void) -> some View {
@@ -424,7 +424,7 @@ struct SimklTitlePage: View {
         let searchTitle = SimklPlayNumbering.searchTitle(title, season: episode.season)
         picker = PlayRequest(
             play: SimklPlayback.Request(
-                ref: SimklPlayRef(simklID: simklID, kind: .tv, season: episode.season), number: episode.episode,
+                ref: SimklPlayRef(simklID: simklID, kind: kind, season: episode.season), number: episode.episode,
                 mediaTitle: searchTitle, imageURL: posterURL ?? "",
                 thumbnailURL: episodes.first { $0.ref == episode }?.imageURL,
                 totalEpisodes: SimklPlayNumbering.seasonCount(episode.season, in: episodes),
@@ -469,7 +469,7 @@ struct SimklTitlePage: View {
     private func load() async {
         reloadEntry()
         if details == nil { details = SimklCatalogCache.shared.details(kind, simklID: simklID) }
-        if kind == .tv, episodes.isEmpty, let saved = SimklCatalogCache.shared.episodes(simklID: simklID) {
+        if kind.hasSimklEpisodes, episodes.isEmpty, let saved = SimklCatalogCache.shared.episodes(simklID: simklID) {
             episodes = saved
             pickSeason()
         }
@@ -479,7 +479,7 @@ struct SimklTitlePage: View {
         } catch {
             if details == nil { detailsFailed = true }
         }
-        if kind == .tv, let fresh = try? await SimklCatalog.loadEpisodes(simklID: simklID) {
+        if kind.hasSimklEpisodes, let fresh = try? await SimklCatalog.loadEpisodes(simklID: simklID) {
             episodes = fresh
             pickSeason()
         }
@@ -493,7 +493,7 @@ struct SimklTitlePage: View {
     }
 
     private func reloadEntry() {
-        entry = service.cachedLibrary(kind)?.first { $0.id == simklID }
+        entry = service.titleCopy(kind).first { $0.id == simklID }
     }
 
     private func mark(_ ref: SimklEpisodeRef, watched marking: Bool) async {

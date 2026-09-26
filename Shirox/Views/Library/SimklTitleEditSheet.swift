@@ -47,7 +47,7 @@ struct SimklTitleEditSheet: View {
                     }
                     .pickerStyle(.menu)
                 }
-                if kind == .tv, status != .completed {
+                if kind.hasSimklEpisodes, status != .completed {
                     progressSection
                 }
                 Section("Score") {
@@ -131,7 +131,7 @@ struct SimklTitleEditSheet: View {
     }
 
     private func loadEpisodes() async {
-        guard kind == .tv, episodesState != .loaded else { return }
+        guard kind.hasSimklEpisodes, episodesState != .loaded else { return }
         do {
             episodes = try await SimklCatalog.loadEpisodes(simklID: entry.id)
             let furthest = SimklEpisodePlanner.furthest(watched)
@@ -151,7 +151,7 @@ struct SimklTitleEditSheet: View {
         }
         isSaving = true
         defer { isSaving = false }
-        let plan = kind == .tv && episodesState == .loaded
+        let plan = kind.hasSimklEpisodes && episodesState == .loaded
             ? SimklEpisodePlanner.edit(status: status, watched: watched, upTo: upTo,
                                        initialUpTo: initialUpTo, episodes: episodes)
             : nil

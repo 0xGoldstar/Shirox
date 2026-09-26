@@ -35,8 +35,8 @@ enum SimklPlayTracker {
         guard enabled, auth.isLoggedIn, !auth.needsReauthorization else { return }
 
         let service = SimklLibraryService.shared
-        let entry = service.cachedLibrary(ref.kind)?.first { $0.id == ref.simklID }
-        let episodes = ref.kind == .tv ? ((try? await SimklCatalog.loadEpisodes(simklID: ref.simklID)) ?? []) : []
+        let entry = service.titleCopy(ref.kind).first { $0.id == ref.simklID }
+        let episodes = ref.kind.hasSimklEpisodes ? ((try? await SimklCatalog.loadEpisodes(simklID: ref.simklID)) ?? []) : []
         guard let change = change(for: ref, number: number, entry: entry, episodes: episodes) else {
             Logger.shared.log("[Simkl] Nothing to mark for \(title) #\(number)", type: "Provider")
             return

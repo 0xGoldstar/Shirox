@@ -433,6 +433,7 @@ final class SimklLibraryService {
         for kind in MediaKind.simklKinds {
             LibraryCacheStore.shared.save(entries: [], provider: .simkl, mediaType: kind)
         }
+        SimklOnlyAnimeStore.shared.clear()
         invalidateCache()
     }
 

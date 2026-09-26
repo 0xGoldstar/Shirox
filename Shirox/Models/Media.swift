@@ -108,13 +108,17 @@ extension Media {
     /// `type` of a Simkl TV show or movie, whose `id` is its Simkl id.
     static let simklTVType = "TV"
     static let simklMovieType = "MOVIE"
+    /// `type` of an anime opened as a Simkl title — one without the id the app's anime page needs.
+    static let simklAnimeType = "SIMKL_ANIME"
 
-    /// A Simkl show's or movie's kind; nil for everything else, Simkl anime included.
+    /// A Simkl show's, movie's or Simkl-only anime's kind; nil for everything else, anime keyed by
+    /// AniList or MyAnimeList included.
     var simklTitleKind: MediaKind? {
         guard provider == .simkl else { return nil }
         switch type {
         case Self.simklTVType:    return .tv
         case Self.simklMovieType: return .movie
+        case Self.simklAnimeType: return .anime
         default:                  return nil
         }
     }
