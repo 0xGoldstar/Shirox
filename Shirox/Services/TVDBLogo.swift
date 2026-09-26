@@ -19,6 +19,18 @@ struct TVDBArtwork: Decodable, Equatable, Sendable {
     }
 }
 
+/// Another database's id for a TVDB series or movie, as its extended record lists them.
+struct TVDBRemoteID: Decodable, Equatable, Sendable {
+    let id: String
+    let type: Int?
+    let sourceName: String?
+
+    /// The title's TMDB id among them — type 12, "TheMovieDB.com".
+    static func tmdbID(in remoteIDs: [TVDBRemoteID]) -> Int? {
+        remoteIDs.first { $0.type == 12 || $0.sourceName == "TheMovieDB.com" }.flatMap { Int($0.id) }
+    }
+}
+
 /// Whether a title is a series or a movie — TVDB and TMDB keep the two apart, with different
 /// paths and, on TVDB, different artwork types.
 enum TitleRecord: String, Sendable {

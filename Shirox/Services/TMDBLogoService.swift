@@ -167,7 +167,12 @@ enum SimklTitleLogo {
         if let tvdbID = media.tvdbID, let logo = await TVDBMappingService.shared.titleLogo(tvdbID: tvdbID, kind: kind) {
             return logo
         }
-        guard let tmdbID = media.tmdbID else { return nil }
+        // Simkl's files carry the TMDB id; when one doesn't, TVDB's record may list it.
+        var tmdbID = media.tmdbID
+        if tmdbID == nil, let tvdbID = media.tvdbID {
+            tmdbID = await TVDBMappingService.shared.tmdbID(forTVDB: tvdbID, record: TitleRecord(kind: kind))
+        }
+        guard let tmdbID else { return nil }
         return await TMDBLogoService.shared.logo(tmdbID: tmdbID, record: TitleRecord(kind: kind))
     }
 }

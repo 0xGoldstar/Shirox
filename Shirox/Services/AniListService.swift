@@ -847,6 +847,9 @@ enum BrowseCategory: String, CaseIterable, Hashable {
     private var titleLogos: [String: LogoCacheEntry] = [:]
     private var titleLogoTasks: [String: Task<String?, Never>] = [:]
     private let titleLogoKey = "tvdb_title_logos_v1"
+    /// TMDB ids TVDB lists, keyed by `LogoCacheEntry.tvdbKey`; -1 for none.
+    private var tmdbIDsByTVDB: [String: Int] = [:]
+    private let tmdbIDsKey = "tvdb_tmdb_ids_v1"
 
     // Bulk ID-mapping snapshot from anira's /mappings/all — resolved locally instead of
     // hitting the per-id endpoint once per show. Seeded from disk on first use, refreshed
@@ -924,6 +927,10 @@ enum BrowseCategory: String, CaseIterable, Hashable {
         if let data = UserDefaults.standard.data(forKey: titleLogoKey),
            let decoded = try? JSONDecoder().decode([String: LogoCacheEntry].self, from: data) {
             self.titleLogos = decoded
+        }
+        if let data = UserDefaults.standard.data(forKey: tmdbIDsKey),
+           let decoded = try? JSONDecoder().decode([String: Int].self, from: data) {
+            self.tmdbIDsByTVDB = decoded
         }
     }
 
@@ -1259,13 +1266,18 @@ enum BrowseCategory: String, CaseIterable, Hashable {
     }
 
     /// A logo for an anime whose TVDB record has none: an earlier season's, else TMDB's — which
-    /// has logos TVDB lacks, and titles anira can't place on TVDB at all.
+    /// has logos TVDB lacks, and titles anira can't place on TVDB at all. The TMDB id is anira's,
+    /// else the one TVDB lists for the anime's show.
     private func fallbackLogo(for id: Int, provider: ProviderType) async -> String? {
         if let parentLogo = await resolveParentLogo(for: id, provider: provider) { return parentLogo }
         await loadAllMappings()
         let index = provider == .mal ? malMappingIndex : anilistMappingIndex
-        guard let title = index[id]?.tmdbTitle else { return nil }
-        return await TMDBLogoService.shared.logo(tmdbID: title.id, record: title.record)
+        if let title = index[id]?.tmdbTitle {
+            return await TMDBLogoService.shared.logo(tmdbID: title.id, record: title.record)
+        }
+        guard let tvdb = await getTVDBId(for: id, provider: provider), tvdb.id > 0,
+              let tmdbID = await tmdbID(forTVDB: tvdb.id, record: .series) else { return nil }
+        return await TMDBLogoService.shared.logo(tmdbID: tmdbID, record: .series)
     }
 
     func getArtwork(for id: Int, provider: ProviderType = .anilist) async -> (poster: String?, fanart: String?, logo: String?, textlessPoster: String?) {
@@ -1592,7 +1604,9 @@ enum BrowseCategory: String, CaseIterable, Hashable {
 
     private func lookUpTitleLogo(tvdbID: Int, record: TitleRecord, key: String) async -> String? {
         struct Extended: Decodable {
-            struct Data: Decodable { let artworks: [TVDBArtwork]?; let originalLanguage: String? }
+            struct Data: Decodable {
+                let artworks: [TVDBArtwork]?; let originalLanguage: String?; let remoteIds: [TVDBRemoteID]?
+            }
             let data: Data
         }
         do {
@@ -1608,6 +1622,7 @@ enum BrowseCategory: String, CaseIterable, Hashable {
             if status == 200, let extended = try? JSONDecoder().decode(Extended.self, from: data) {
                 path = TVDBLogo.pick(record: extended.data.artworks ?? [], kind: record,
                                      originalLanguage: extended.data.originalLanguage)
+                rememberTMDBID(TVDBRemoteID.tmdbID(in: extended.data.remoteIds ?? []), tvdbID: tvdbID, record: record)
             }
             titleLogos[key] = LogoCacheEntry(path: path, checked: Date())
             saveTitleLogos()
@@ -1617,6 +1632,50 @@ enum BrowseCategory: String, CaseIterable, Hashable {
         } catch {
             Logger.shared.log("TVDB title logo error (\(record.rawValue) \(tvdbID)): \(error)", type: "Error")
             return nil
+        }
+    }
+
+    // MARK: - TMDB ids from TVDB
+
+    /// The TMDB id TVDB lists for a series or movie — for a logo TVDB doesn't have, when anira
+    /// or Simkl gave none. Kept from any full record the app downloads; asked for otherwise.
+    func tmdbID(forTVDB tvdbID: Int, record: TitleRecord) async -> Int? {
+        let key = LogoCacheEntry.tvdbKey(tvdbID, record: record)
+        if let known = tmdbIDsByTVDB[key] { return known > 0 ? known : nil }
+        struct Short: Decodable {
+            struct Data: Decodable { let remoteIds: [TVDBRemoteID]? }
+            let data: Data
+        }
+        do {
+            let token = try await authenticate()
+            var request = URLRequest(url: URL(string: "\(tvdbEndpoint)/\(record.tvdbPath)/\(tvdbID)/extended?short=true")!)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, response) = try await Self.session.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200 || status == 404 else { return nil }
+            let short = status == 200 ? try? JSONDecoder().decode(Short.self, from: data) : nil
+            let id = TVDBRemoteID.tmdbID(in: short?.data.remoteIds ?? [])
+            rememberTMDBID(id, tvdbID: tvdbID, record: record)
+            return id
+        } catch where (error as? URLError)?.code == .cancelled || error is CancellationError {
+            return nil
+        } catch {
+            Logger.shared.log("TVDB remote ids error (\(record.rawValue) \(tvdbID)): \(error)", type: "Error")
+            return nil
+        }
+    }
+
+    /// -1 records that TVDB lists none, so it isn't asked again.
+    private func rememberTMDBID(_ tmdbID: Int?, tvdbID: Int, record: TitleRecord) {
+        let key = LogoCacheEntry.tvdbKey(tvdbID, record: record)
+        let value = tmdbID ?? -1
+        guard tmdbIDsByTVDB[key] != value else { return }
+        tmdbIDsByTVDB[key] = value
+        let snapshot = tmdbIDsByTVDB
+        let storageKey = tmdbIDsKey
+        Task.detached(priority: .background) {
+            guard let encoded = try? JSONEncoder().encode(snapshot) else { return }
+            UserDefaults.standard.set(encoded, forKey: storageKey)
         }
     }
 
@@ -1644,7 +1703,10 @@ enum BrowseCategory: String, CaseIterable, Hashable {
         struct SeasonType: Decodable { let id: Int; let type: String? }
         struct Season: Decodable { let id: Int; let number: Int; let type: SeasonType? }
         struct SeriesExtended: Decodable {
-            struct Data: Decodable { let artworks: [Artwork]?; let seasons: [Season]?; let originalLanguage: String? }
+            struct Data: Decodable {
+                let artworks: [Artwork]?; let seasons: [Season]?; let originalLanguage: String?
+                let remoteIds: [TVDBRemoteID]?
+            }
             let data: Data
         }
         struct SeasonExtended: Decodable {
@@ -1672,6 +1734,7 @@ enum BrowseCategory: String, CaseIterable, Hashable {
             }
 
             guard let seriesData = await fetchSeriesExtended() else { return (nil, nil, nil, nil) }
+            rememberTMDBID(TVDBRemoteID.tmdbID(in: seriesData.remoteIds ?? []), tvdbID: tid, record: .series)
             let artworks = seriesData.artworks ?? []
             let bySizeOrScore = TVDBArtwork.bySizeOrScore
 

@@ -80,3 +80,19 @@ final class TMDBLogoTests: XCTestCase {
                      "A snapshot saved before still reads")
     }
 }
+
+/// The TMDB id a TVDB record lists, for titles anira or Simkl gave none for.
+final class TVDBRemoteIDTests: XCTestCase {
+    func testTheTMDBIdAmongTheRecordsOthers() throws {
+        let json = #"[{"id":"tt31248034","type":2,"sourceName":"IMDB"},{"id":"296286","type":12,"sourceName":"TheMovieDB.com"}]"#
+        let ids = try JSONDecoder().decode([TVDBRemoteID].self, from: Data(json.utf8))
+        XCTAssertEqual(TVDBRemoteID.tmdbID(in: ids), 296286)
+    }
+
+    func testNoTMDBId() {
+        XCTAssertNil(TVDBRemoteID.tmdbID(in: [TVDBRemoteID(id: "tt1", type: 2, sourceName: "IMDB")]))
+        XCTAssertNil(TVDBRemoteID.tmdbID(in: []))
+        XCTAssertNil(TVDBRemoteID.tmdbID(in: [TVDBRemoteID(id: "", type: 12, sourceName: "TheMovieDB.com")]),
+                     "An empty id is none")
+    }
+}
