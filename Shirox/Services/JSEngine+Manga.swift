@@ -56,10 +56,12 @@ extension JSEngine {
     func mangaImages(url: String) async throws -> [String] {
         let json = try await callAsyncJS("__shiroxCallJSON", args: ["extractImages", [url]])
         guard let data = json.data(using: .utf8),
-              let array = try JSONSerialization.jsonObject(with: data) as? [String] else {
+              let array = try JSONSerialization.jsonObject(with: data) as? [Any] else {
             throw JSEngineError.parseError("Could not parse manga pages")
         }
-        return array.filter { !$0.isEmpty }
+        let pages = Self.parseMangaPages(array)
+        for page in pages { MangaPageHeaders.shared.record(page.headers, for: page.url) }
+        return pages.map(\.url)
     }
 
     // MARK: - Pure parsers (nonisolated so tests can call them directly)
@@ -71,6 +73,15 @@ extension JSEngine {
                   !href.isEmpty else { return nil }
             let image = (item["imageURL"] as? String) ?? (item["image"] as? String) ?? ""
             return SearchItem(title: title, image: image, href: href)
+        }
+    }
+
+    /// A page is its address, or — from a Seanime provider — `{url, headers}`.
+    nonisolated static func parseMangaPages(_ array: [Any]) -> [(url: String, headers: [String: String])] {
+        array.compactMap { item in
+            if let url = item as? String { return url.isEmpty ? nil : (url, [:]) }
+            guard let object = item as? [String: Any], let url = object["url"] as? String, !url.isEmpty else { return nil }
+            return (url, object["headers"] as? [String: String] ?? [:])
         }
     }
 

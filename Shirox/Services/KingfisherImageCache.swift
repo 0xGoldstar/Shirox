@@ -39,6 +39,10 @@ enum KingfisherImageCache {
         if let cookieHeader, !cookieHeader.isEmpty {
             h["Cookie"] = cookieHeader
         }
+        // A page's own headers, when its module gave some, win — a Seanime provider's Referer.
+        if let page = MangaPageHeaders.shared.headers(for: url.absoluteString) {
+            h.merge(page) { _, own in own }
+        }
         return h
     }
 }
