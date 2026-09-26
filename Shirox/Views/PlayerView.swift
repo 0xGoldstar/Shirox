@@ -146,6 +146,7 @@ struct PlayerView: View {
     @State private var playbackSpeed: Double = 1.0
     @State private var volume: Float = 1.0
     @State private var showSubtitleSettings = false
+    @State private var showSubtitleImporter = false
     /// True while a bottom-bar pull-down menu is open, so the whole controls overlay is
     /// pinned visible (scheduleHide is gated on this). Set by onMenuOpen (the menu button's
     /// deferred element); cleared on didBecomeKey when the menu is dismissed (see body).
@@ -605,20 +606,18 @@ struct PlayerView: View {
                 settings: subtitleSettings,
                 availableTracks: subtitleTracks,
                 selectedTrack: $selectedSubtitleTrack,
-                // Two different meanings of "local" live in this file. `PlayerContext
-                // .isLocalPlayback` is narrow — a file the user picked themselves — while the
-                // player's own `isLocalPlayback` also covers a downloaded episode (file:// or
-                // the localhost HLS proxy). Gating import on the narrow one meant a downloaded
-                // episode with missing or wrong subtitles had no way to take a supplied file.
-                allowLocalImport: currentContext?.isLocalPlayback == true || isLocalPlayback,
-                onImport: { track in
-                    var tracks = subtitleTracks ?? []
-                    tracks.append(track)
-                    subtitleTracks = tracks
-                    selectedSubtitleTrack = track
-                }
+                allowLocalImport: canImportSubtitles,
+                onImport: addImportedSubtitle
             )
             .id(subtitleTracks?.count ?? 0)            .adaptivePresentationDetents([.medium, .large])
+        }
+        .fileImporter(isPresented: $showSubtitleImporter,
+                      allowedContentTypes: PlayerSubtitleSettingsView.subtitleTypes,
+                      allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let url = urls.first,
+               let track = LocalPlaybackCoordinator.shared.importSubtitle(from: url) {
+                addImportedSubtitle(track)
+            }
         }
         .onChangeOf(selectedSubtitleTrack) { loadSubtitles() }
         .sheet(isPresented: $showNextEpisodePicker, onDismiss: {
@@ -945,8 +944,10 @@ struct PlayerView: View {
             isFilled: isFilled,
             onSkip85: { skip(by: Double(skipLong)) },
             skipLongAmount: skipLong,
-            onSubtitleSettingsTap: { showSubtitleSettings = true },
-            hasSubtitles: currentStream.subtitle != nil,
+            subtitleMenu: subtitleMenu,
+            // With tracks but no default, or with none yet on a video that can take a file,
+            // the menu is the only way to choose one or import one.
+            hasSubtitles: currentStream.subtitle != nil || !(subtitleTracks ?? []).isEmpty || canImportSubtitles,
             audioTrackCount: audioGroup?.options.count ?? 0,
             audioMenuItems: audioMenuItems,
             streamCount: availableStreams.count,
@@ -2771,6 +2772,37 @@ struct PlayerView: View {
         return group.options.map { option in
             PlayerMenuItem(title: option.displayName, isOn: option == selected) { item.select(option, in: group) }
         }
+    }
+
+    private func subtitleMenu() -> [PlayerMenuElement] {
+        let settings = subtitleSettings
+        return PlayerSubtitleMenu.elements(
+            enabled: settings.enabled, delay: settings.delaySeconds, fontSize: settings.fontSize,
+            tracks: subtitleTracks ?? [], selected: selectedSubtitleTrack,
+            actions: PlayerSubtitleMenu.Actions(
+                setEnabled: { settings.enabled = $0 },
+                currentDelay: { settings.delaySeconds },
+                setDelay: { settings.delaySeconds = $0 },
+                setFontSize: { settings.fontSize = $0 },
+                selectTrack: { selectedSubtitleTrack = $0 },
+                importFile: canImportSubtitles ? { showSubtitleImporter = true } : nil,
+                moreSettings: { showSubtitleSettings = true }))
+    }
+
+    /// Two different meanings of "local" live in this file. `PlayerContext.isLocalPlayback` is
+    /// narrow — a file the user picked themselves — while the player's own `isLocalPlayback` also
+    /// covers a downloaded episode (file:// or the localhost HLS proxy). Gating import on the
+    /// narrow one meant a downloaded episode with missing or wrong subtitles had no way to take
+    /// a supplied file.
+    private var canImportSubtitles: Bool {
+        currentContext?.isLocalPlayback == true || isLocalPlayback
+    }
+
+    private func addImportedSubtitle(_ track: SubtitleTrack) {
+        var tracks = subtitleTracks ?? []
+        tracks.append(track)
+        subtitleTracks = tracks
+        selectedSubtitleTrack = track
     }
 
     private func sourceMenuItems() -> [PlayerMenuItem] {

@@ -123,7 +123,8 @@ struct PlayerSubtitleSettingsView: View {
         }
     }
 
-    private static var subtitleTypes: [UTType] {
+    /// Also used by the subtitles menu's import row.
+    static var subtitleTypes: [UTType] {
         var types: [UTType] = [.plainText, .text, .data]
         if let vtt = UTType(filenameExtension: "vtt") { types.insert(vtt, at: 0) }
         if let srt = UTType(filenameExtension: "srt") { types.insert(srt, at: 0) }

@@ -21,7 +21,8 @@ struct PlayerBottomBar: View {
     var isFilled: Bool = false
     var onSkip85: () -> Void
     var skipLongAmount: Int = 85
-    var onSubtitleSettingsTap: () -> Void
+    /// Rows for the subtitles menu (native pull-down; its last row opens the full settings sheet).
+    var subtitleMenu: (() -> [PlayerMenuElement])? = nil
     var hasSubtitles: Bool = false
     var audioTrackCount: Int = 0
     /// Menu rows for the audio-track chooser (native pull-down, not a sheet). Rebuilt on open.
@@ -162,14 +163,15 @@ struct PlayerBottomBar: View {
                 .frame(width: buttonWidth, height: height)
                 .contentShape(Rectangle())
             }
-            if hasSubtitles {
-                Button(action: onSubtitleSettingsTap) {
-                    Image(systemName: "captions.bubble.fill")
-                        .font(.system(size: iconSize, weight: .medium))
-                        .foregroundStyle(.white)
-                        .frame(width: buttonWidth, height: height)
-                }
-                .buttonStyle(.plain)
+            if hasSubtitles, let subtitleMenu {
+                PlayerMenuButton(
+                    menuTitle: "Subtitles",
+                    label: .symbol("captions.bubble.fill", size: iconSize, weight: .medium),
+                    elements: subtitleMenu,
+                    onOpen: onMenuOpen
+                )
+                .frame(width: buttonWidth, height: height)
+                .contentShape(Rectangle())
             }
             Button(action: onFillTap) {
                 Image(systemName: isFilled ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
@@ -242,8 +244,7 @@ struct PlayerBottomBar_Previews: PreviewProvider {
                     duration: 1440,
                     playbackSpeed: .constant(1.0),
                     onSeek: { _ in },
-                    onSkip85: {},
-                    onSubtitleSettingsTap: {}
+                    onSkip85: {}
                 )
             }
         }
@@ -259,7 +260,7 @@ struct PlayerBottomBar_Previews: PreviewProvider {
                     playbackSpeed: .constant(1.5),
                     onSeek: { _ in },
                     onSkip85: {},
-                    onSubtitleSettingsTap: {},
+                    subtitleMenu: { [] },
                     hasSubtitles: true
                 )
             }

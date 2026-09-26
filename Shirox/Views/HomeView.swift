@@ -288,6 +288,9 @@ private struct FeaturedCarousel: View {
                 let progress = RefreshCircleGeometry.progress(pull: minY)
 
                 let isWideCard = isIPad && geo.size.width > baseHeight
+                // Where a page rests, so each page's parallax is measured from there — not from
+                // the screen's edge, which the iPad sidebar moves.
+                let carouselMidX = geo.frame(in: .global).midX
 
                 ZStack(alignment: .bottom) {
                     TabView(selection: $selectedTab) {
@@ -297,7 +300,8 @@ private struct FeaturedCarousel: View {
                                     media: displayItems[index % displayCount],
                                     isWide: isWideCard,
                                     width: geo.size.width,
-                                    height: baseHeight
+                                    height: baseHeight,
+                                    carouselMidX: carouselMidX
                                 )
                                 .frame(width: geo.size.width, height: baseHeight)
                                 .clipped()
@@ -582,11 +586,29 @@ private struct PageIndicator: View {
 
 // MARK: - Featured Card (platform‑specific layout)
 
+/// How far a carousel page's artwork slides against the swipe, so it trails the page.
+///
+/// The artwork is wider than the page by `overscan` and sits centred at rest. A phone's poster
+/// moves a quarter of the page's distance; iPad's wide fanart, half its overscan over a page.
+/// Either way the artwork covers whatever part of the page is on screen.
+enum HeroParallax {
+    static func overscan(isWide: Bool) -> CGFloat { isWide ? 80 : 100 }
+
+    /// `distance`: how far the page has slid from where it rests, positive to the right.
+    static func offset(distance: CGFloat, pageWidth: CGFloat, isWide: Bool) -> CGFloat {
+        let extra = overscan(isWide: isWide)
+        let rate = isWide ? extra / (2 * max(pageWidth, 1)) : 0.25
+        return -(extra / 2) - distance * rate
+    }
+}
+
 private struct FeaturedCard: View {
     let media: Media
     var isWide: Bool = false
     var width: CGFloat? = nil
     var height: CGFloat? = nil
+    /// The carousel's centre on screen, where a page rests. nil: no parallax.
+    var carouselMidX: CGFloat? = nil
 
     private var aspectRatio: CGFloat {
         #if os(iOS) && !targetEnvironment(macCatalyst)
@@ -602,11 +624,20 @@ private struct FeaturedCard: View {
             Color.clear
                 .frame(width: width, height: height)
                 .overlay {
-                    // A Simkl show or movie has no textless poster, and its poster is too small to
-                    // fill the hero; its fanart does, cropped.
-                    TVDBPosterImage(media: media, type: isWide || media.simklTitleKind != nil ? .fanart : .textlessPoster)
-                        .frame(width: width, height: height)
-                        .clipped()
+                    // Inside the fixed frame, so reading the page's position can't change its
+                    // size — the carousel's pages keep the sizes that stop iPad paging freezing.
+                    GeometryReader { geo in
+                        let frame = geo.frame(in: .global)
+                        let distance = carouselMidX.map { frame.midX - $0 } ?? 0
+                        let extra = carouselMidX == nil ? 0 : HeroParallax.overscan(isWide: isWide)
+                        artwork
+                            .frame(width: geo.size.width + extra, height: geo.size.height)
+                            .offset(x: carouselMidX == nil
+                                    ? 0
+                                    : HeroParallax.offset(distance: distance, pageWidth: geo.size.width, isWide: isWide))
+                    }
+                    .frame(width: width, height: height)
+                    .clipped()
                 }
                 .clipped()
                 .contentShape(Rectangle())
@@ -644,6 +675,14 @@ private struct FeaturedCard: View {
             #endif
         }
     }
+
+    #if os(iOS) && !targetEnvironment(macCatalyst)
+    /// A Simkl show or movie has no textless poster, and its poster is too small to fill the
+    /// hero; its fanart does, cropped.
+    private var artwork: some View {
+        TVDBPosterImage(media: media, type: isWide || media.simklTitleKind != nil ? .fanart : .textlessPoster)
+    }
+    #endif
 
     // MARK: - Banner Background (macOS only)
     @ViewBuilder
