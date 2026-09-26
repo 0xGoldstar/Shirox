@@ -2,18 +2,23 @@ import SwiftUI
 
 /// An anime from a Simkl search. Search results carry only Simkl's own id, so the page first
 /// finds the anime's AniList or MyAnimeList id in Simkl's free record, then becomes the app's
-/// anime page.
+/// anime page — or the Simkl page, when the anime isn't on the user's tracker.
 struct SimklAnimeOpener: View {
     /// The search card: Simkl id, title and poster.
     let seed: Media
 
     @State private var target: Media?
     @State private var failure: String?
+    /// Not on the user's tracker: opened as a Simkl title.
+    @State private var simklOnly = false
 
     var body: some View {
         Group {
             if let target {
                 AniListDetailView(mediaId: target.id, preloadedMedia: target)
+            } else if simklOnly {
+                SimklTitlePage(simklID: seed.id, kind: .anime, seedTitle: seed.title.displayTitle,
+                               seedPosterURL: seed.coverImage.large)
             } else if let failure {
                 ContentUnavailableView("Can't Open", systemImage: "questionmark.circle", description: Text(failure))
             } else {
@@ -22,7 +27,7 @@ struct SimklAnimeOpener: View {
             }
         }
         .task {
-            if target == nil && failure == nil { await resolve() }
+            if target == nil && failure == nil && !simklOnly { await resolve() }
         }
     }
 
@@ -38,7 +43,8 @@ struct SimklAnimeOpener: View {
                 mapped = await TVDBMappingService.shared.anilistId(forMalId: mal)
             }
             guard let found = SimklSearch.animeTarget(ids, tracker: tracker, anilistForMAL: mapped) else {
-                failure = "This anime isn't on \(tracker.displayName)."
+                // Not on the tracker: opened as a Simkl title instead.
+                simklOnly = true
                 return
             }
             target = Media(

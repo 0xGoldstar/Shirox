@@ -94,16 +94,18 @@ final class SimklHomeRowsTests: XCTestCase {
         XCTAssertTrue(layout.hero.isEmpty, "The hero is Trending Today, which didn't load")
     }
 
-    func testAnimeWithoutTheTrackersIdDropOut() {
+    /// Anime without the tracker's id stay in the row, as Simkl titles keyed by Simkl id.
+    func testAnimeWithoutTheTrackersIdAreSimklTitles() {
         let files: [SimklFeedList: [SimklDiscoverItem]] = [
             .calendar(.anime): [entry(1, mal: 10, day: today), entry(2, mal: 20, day: today), entry(3, day: today)],
         ]
         let forAniList = SimklHomeRows.layout(kind: .anime, files: files, today: today, tracker: .anilist,
                                               anilistForMAL: [10: 100], rowLength: 20)
-        XCTAssertEqual(forAniList.rows.first?.items.map(\.id), [100])
+        XCTAssertEqual(forAniList.rows.first?.items.map(\.id), [100, 2, 3])
+        XCTAssertEqual(forAniList.rows.first?.items.map(\.simklTitleKind), [nil, .anime, .anime])
         let forMAL = SimklHomeRows.layout(kind: .anime, files: files, today: today, tracker: .mal,
                                           anilistForMAL: [:], rowLength: 20)
-        XCTAssertEqual(forMAL.rows.first?.items.map(\.id), [10, 20])
+        XCTAssertEqual(forMAL.rows.first?.items.map(\.id), [10, 20, 3])
     }
 
     func testAnEmptyRowIsLeftOut() {

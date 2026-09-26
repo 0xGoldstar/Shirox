@@ -67,15 +67,24 @@ final class SimklDiscoverMediaTests: XCTestCase {
     /// The calendar's anime come with a MAL id only; the app's mapping table fills in AniList's.
     func testAMissingAniListIdComesFromTheMap() throws {
         let calendarAnime = item(simkl: 3200766, mal: 64710, anilist: nil)
-        XCTAssertNil(SimklDiscoverMedia.media(calendarAnime, kind: .anime, tracker: .anilist))
+        XCTAssertEqual(SimklDiscoverMedia.media(calendarAnime, kind: .anime, tracker: .anilist)?.simklTitleKind, .anime,
+                       "Without the map's id, it opens as a Simkl title")
         let media = try XCTUnwrap(SimklDiscoverMedia.media(calendarAnime, kind: .anime, tracker: .anilist,
                                                            anilistForMAL: [64710: 999]))
         XCTAssertEqual(media.id, 999)
         XCTAssertEqual(media.idMal, 64710)
     }
 
-    func testAnAnimeWithoutTheTrackersIdIsLeftOut() {
-        XCTAssertNil(SimklDiscoverMedia.media(item(simkl: 5, mal: nil, anilist: 42), kind: .anime, tracker: .mal))
+    /// Without the id the anime page needs, an anime opens as a Simkl title rather than being left out.
+    func testAnAnimeWithoutTheTrackersIdIsASimklTitle() throws {
+        let media = try XCTUnwrap(SimklDiscoverMedia.media(item(simkl: 3209096, mal: nil, anilist: 42, tvdb: 9, tmdb: 8),
+                                                           kind: .anime, tracker: .mal))
+        XCTAssertEqual(media.provider, .simkl)
+        XCTAssertEqual(media.id, 3209096)
+        XCTAssertEqual(media.simklTitleKind, .anime)
+        XCTAssertEqual(media.tvdbID, 9)
+        XCTAssertEqual(media.tmdbID, 8)
+        XCTAssertEqual(media.episodes, 44)
     }
 
     func testOnlyAnimeWithoutAnAniListIdNeedLookingUp() {

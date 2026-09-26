@@ -4,7 +4,8 @@ import Foundation
 ///
 /// A show or movie becomes a Simkl title, keyed by Simkl id, which opens the Simkl page. An anime
 /// becomes an AniList or MyAnimeList title — whichever is the user's tracker — so it opens the
-/// app's anime page with everything that has; one without that id is left out.
+/// app's anime page with everything that has; one without that id is a Simkl title of kind anime,
+/// opening the Simkl page.
 enum SimklDiscoverMedia {
     static func posterURL(_ path: String) -> String {
         "https://wsrv.nl/?url=https://simkl.in/posters/\(path)_m.webp&q=90"
@@ -38,7 +39,17 @@ enum SimklDiscoverMedia {
             let id = provider == .mal
                 ? item.ids.mal
                 : item.ids.anilist ?? item.ids.mal.flatMap { anilistForMAL[$0] }
-            guard let id else { return nil }
+            guard let id else {
+                // No id for the anime page: a Simkl title of kind anime, opening the Simkl page.
+                return Media(
+                    id: item.ids.simkl, idMal: item.ids.mal, provider: .simkl,
+                    title: MediaTitle(romaji: item.titleRomaji, english: item.title, native: nil),
+                    coverImage: cover, bannerImage: banner, description: item.overview,
+                    episodes: item.totalEpisodes, status: nil, averageScore: score, genres: genres,
+                    season: nil, seasonYear: nil, nextAiringEpisode: nil, relations: nil,
+                    type: Media.simklAnimeType, format: nil,
+                    runtime: item.runtime, tvdbID: item.ids.tvdb, tmdbID: item.ids.tmdb)
+            }
             return Media(
                 id: id, idMal: item.ids.mal, provider: provider,
                 title: MediaTitle(romaji: item.titleRomaji, english: item.title, native: nil),
