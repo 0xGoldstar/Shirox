@@ -203,6 +203,41 @@ final class SimklLibraryService {
         return (decoded.anime ?? []).compactMap(entry(from:))
     }
 
+    /// The anime in a read without a MyAnimeList or AniList id, as Simkl titles — `entry(from:)`
+    /// drops them from the synced copy, and the Library shows them apart from it.
+    nonisolated static func decodeSimklOnlyAnime(from data: Data) throws -> [LibraryEntry] {
+        let decoded = try JSONDecoder().decode(AllItemsResponse.self, from: data)
+        return (decoded.anime ?? []).compactMap(simklOnlyEntry(from:))
+    }
+
+    nonisolated static func simklOnlyEntry(from item: AllItemsResponse.Item) -> LibraryEntry? {
+        guard let show = item.show, let ids = show.ids, ids.mal?.value == nil, ids.anilist?.value == nil,
+              let simklID = ids.simkl?.value else { return nil }
+        let watched = item.watched_episodes_count ?? 0
+        let total = item.total_episodes_count
+        let status = Self.status(from: item.status, progress: watched, total: total)
+        let media = SimklTitleReads.titleMedia(simklID: simklID, kind: .anime, title: show.title,
+                                               posterURL: show.poster.map(SimklCatalogItem.posterURLString(_:)),
+                                               year: show.year?.value, runtime: nil, episodes: total)
+        return LibraryEntry(
+            id: simklID, media: media, status: status,
+            progress: Self.progress(watched: watched, total: total, status: status),
+            score: SimklPayloadBuilder.score(fromRating: item.user_rating, format: .point10),
+            timesRewatched: nil)
+    }
+
+    /// The Simkl-only anime from the same read: a full read replaces them, a delta adds and
+    /// updates, and a removals check keeps only those still on the list.
+    static func updateSimklOnly(_ store: SimklOnlyAnimeStore, read: SimklSyncPlan.Read,
+                                found: [LibraryEntry], present: Set<Int>?) {
+        switch read {
+        case .full: store.replace(found)
+        case .delta: store.merge(found)
+        case .upToDate: break
+        }
+        if let present { store.keep(simklIDs: present) }
+    }
+
     /// The user's library of one kind, following Simkl's two-phase sync policy.
     ///
     /// Their rules are explicit, and the penalty is not a throttle: *"Ensure you always use
@@ -249,19 +284,26 @@ final class SimklLibraryService {
             type: "Provider")
 
         var entries = copy ?? []
+        var simklOnly: [LibraryEntry] = []
         switch read {
         case .upToDate:
             break
         case .full:
-            entries = try await readLibrary(kind, since: nil)
+            let result = try await readLibrary(kind, since: nil)
+            entries = result.entries
+            simklOnly = result.simklOnly
         case .delta(let since):
-            entries = Self.merge(try await readLibrary(kind, since: since), into: entries)
+            let result = try await readLibrary(kind, since: since)
+            entries = Self.merge(result.entries, into: entries)
+            simklOnly = result.simklOnly
         }
 
         let checkRemovals = SimklSyncPlan.checkRemovals(saved: saved?.removed, current: current?.removed, read: read)
+        var present: Set<Int>?
         if checkRemovals {
-            let present = try await readSimklIDs(kind)
-            let kept = SimklSyncPlan.applyRemovals(keeping: present, to: entries,
+            let ids = try await readSimklIDs(kind)
+            present = ids
+            let kept = SimklSyncPlan.applyRemovals(keeping: ids, to: entries,
                                                    simklID: { Self.removalID(of: $0, kind: kind) })
             Logger.shared.log("[Simkl] \(kind.rawValue): removals check dropped \(entries.count - kept.count)",
                               type: "Provider")
@@ -269,6 +311,9 @@ final class SimklLibraryService {
         }
 
         if read != .upToDate || checkRemovals { store(entries, kind: kind) }
+        if kind == .anime {
+            Self.updateSimklOnly(SimklOnlyAnimeStore.shared, read: read, found: simklOnly, present: present)
+        }
         if let current { Self.saveStamps(current, for: kind) }
     }
 
@@ -389,7 +434,8 @@ final class SimklLibraryService {
     /// keeps per-provider snapshots on disk, and Simkl is a `ProviderType`, so it just works.
     func cachedLibrary(_ kind: MediaKind = .anime) -> [LibraryEntry]? {
         if let hit = cached[kind] { return hit }
-        guard Self.cacheIsCurrent(storedVersion: UserDefaults.standard.integer(forKey: Self.cacheVersionKey(kind)))
+        guard Self.cacheIsCurrent(storedVersion: UserDefaults.standard.integer(forKey: Self.cacheVersionKey(kind)),
+                                  kind: kind)
         else { return nil }
         let entries = LibraryCacheStore.shared.snapshot(provider: .simkl, mediaType: kind)?.entries
         cached[kind] = entries
@@ -399,7 +445,7 @@ final class SimklLibraryService {
     func store(_ entries: [LibraryEntry], kind: MediaKind = .anime) {
         cached[kind] = entries
         LibraryCacheStore.shared.save(entries: entries, provider: .simkl, mediaType: kind)
-        UserDefaults.standard.set(Self.cacheVersion, forKey: Self.cacheVersionKey(kind))
+        UserDefaults.standard.set(Self.cacheVersion(for: kind), forKey: Self.cacheVersionKey(kind))
     }
 
     /// Per kind: a Shows copy saved at the current version must not vouch for an anime copy saved
@@ -408,13 +454,15 @@ final class SimklLibraryService {
         kind == .anime ? "simkl_cache_version" : "simkl_cache_version_\(kind.rawValue)"
     }
 
-    /// Bumped when a read starts keeping a field it used to drop — 2: poster, year and type. A
-    /// cache written before has that field empty on every title, and a delta read only refreshes
-    /// titles that changed, so the one full read is taken again, once.
+    /// Bumped when a read starts keeping something it used to drop — a delta refreshes only titles
+    /// that changed, so the one full read is taken again, once. 2: poster, year and type. Anime 3:
+    /// the Simkl-only anime already on the list.
     nonisolated static let cacheVersion = 2
 
-    nonisolated static func cacheIsCurrent(storedVersion: Int) -> Bool {
-        storedVersion >= cacheVersion
+    nonisolated static func cacheVersion(for kind: MediaKind) -> Int { kind == .anime ? 3 : cacheVersion }
+
+    nonisolated static func cacheIsCurrent(storedVersion: Int, kind: MediaKind = .tv) -> Bool {
+        storedVersion >= cacheVersion(for: kind)
     }
 
     /// Drops the cache and the saved timestamp, forcing the next read back to Phase 1.
@@ -530,20 +578,24 @@ final class SimklLibraryService {
 
     /// One kind's list. TV asks for every show's recorded episodes, completed and dropped included:
     /// the watched ticks come from them.
-    private func readLibrary(_ kind: MediaKind, since: String?) async throws -> [LibraryEntry] {
+    private func readLibrary(_ kind: MediaKind, since: String?) async throws
+        -> (entries: [LibraryEntry], simklOnly: [LibraryEntry]) {
         var query = [URLQueryItem(name: "extended", value: Self.extendedMode)]
         if kind == .tv { query.append(URLQueryItem(name: "include_all_episodes", value: "original")) }
         // Passed back exactly as returned, which Simkl's guide calls out specifically.
         if let since { query.insert(URLQueryItem(name: "date_from", value: since), at: 0) }
         let data = try await get(Self.listPath(for: kind), query: query)
         let entries: [LibraryEntry]
+        var simklOnly: [LibraryEntry] = []
         switch kind {
         case .tv:    entries = try SimklTitleReads.decodeShows(from: data)
         case .movie: entries = try SimklTitleReads.decodeMovies(from: data)
-        default:     entries = try Self.decodeLibrary(from: data)
+        default:
+            entries = try Self.decodeLibrary(from: data)
+            simklOnly = (try? Self.decodeSimklOnlyAnime(from: data)) ?? []
         }
         logRead(entries, phase: "\(kind.rawValue) \(since == nil ? "full" : "delta")")
-        return entries
+        return (entries, simklOnly)
     }
 
     /// Just the Simkl ids of one kind — the cheapest read, for spotting deletions.

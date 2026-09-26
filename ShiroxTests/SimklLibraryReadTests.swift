@@ -83,4 +83,49 @@ final class SimklLibraryReadTests: XCTestCase {
     func testReadOnlySaysToSignInAgain() {
         XCTAssertEqual(SimklError.readOnly.localizedDescription, "Sign in to Simkl again to allow edits.")
     }
+
+    // MARK: - Anime without the tracker's ids
+
+    private let mixedRead = #"""
+    {"anime":[
+      {"show":{"title":"Frieren","poster":"12/abc","year":2023,"ids":{"simkl":1,"mal":"52991"}},
+       "status":"watching","watched_episodes_count":4,"total_episodes_count":28},
+      {"show":{"title":"Feng Tian Qi","poster":"34/def","year":2026,"ids":{"simkl":3226062}},
+       "status":"plantowatch","watched_episodes_count":0,"total_episodes_count":10,"user_rating":8}
+    ]}
+    """#
+
+    /// Anime without the tracker's ids stay out of the synced copy and come back as Simkl titles.
+    func testSimklOnlyAnimeAreReadApart() throws {
+        let data = Data(mixedRead.utf8)
+        XCTAssertEqual(try SimklLibraryService.decodeLibrary(from: data).map(\.media.id), [52991])
+        let only = try SimklLibraryService.decodeSimklOnlyAnime(from: data)
+        XCTAssertEqual(only.map(\.id), [3226062])
+        XCTAssertEqual(only.first?.media.simklTitleKind, .anime)
+        XCTAssertEqual(only.first?.media.id, 3226062)
+        XCTAssertEqual(only.first?.status, .planning)
+        XCTAssertEqual(only.first?.media.episodes, 10)
+        XCTAssertEqual(only.first?.score, 8)
+    }
+
+    /// The anime copy is read again in full once, so Simkl-only anime already listed turn up.
+    func testTheAnimeCopyIsReadAgainOnce() {
+        XCTAssertFalse(SimklLibraryService.cacheIsCurrent(storedVersion: 2, kind: .anime))
+        XCTAssertTrue(SimklLibraryService.cacheIsCurrent(storedVersion: 3, kind: .anime))
+        XCTAssertTrue(SimklLibraryService.cacheIsCurrent(storedVersion: 2, kind: .tv), "Shows and movies aren't")
+    }
+
+    @MainActor
+    func testAFullReadReplacesADeltaMergesARemovalsCheckKeeps() {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        let store = SimklOnlyAnimeStore(file: file)
+        let entries = (try? SimklLibraryService.decodeSimklOnlyAnime(from: Data(mixedRead.utf8))) ?? []
+        SimklLibraryService.updateSimklOnly(store, read: .full, found: entries, present: nil)
+        XCTAssertEqual(store.entries.map(\.id), [3226062])
+        SimklLibraryService.updateSimklOnly(store, read: .delta(since: "x"), found: [], present: nil)
+        XCTAssertEqual(store.entries.map(\.id), [3226062], "A delta without it leaves it")
+        SimklLibraryService.updateSimklOnly(store, read: .upToDate, found: [], present: [1])
+        XCTAssertTrue(store.entries.isEmpty, "Gone from the list")
+    }
 }

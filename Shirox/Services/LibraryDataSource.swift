@@ -94,20 +94,26 @@ extension LibrarySource {
 
     /// The copy; only a kind never checked is read.
     func fetchLibrary() async throws -> [LibraryEntry] {
-        try await service.displayLibrary(kind)
+        withSimklOnly(try await service.displayLibrary(kind))
     }
 
     /// Pull to refresh: the one activity check, whose failure the Library shows.
     func checkForChanges() async throws -> [LibraryEntry] {
-        try await service.checkNow(kind)
+        withSimklOnly(try await service.checkNow(kind))
+    }
+
+    /// The anime tab shows the Simkl-only anime beside the synced copy. Sync reads the service,
+    /// not this, so it never sees them.
+    private func withSimklOnly(_ entries: [LibraryEntry]) -> [LibraryEntry] {
+        kind == .anime ? entries + SimklOnlyAnimeStore.shared.entries : entries
     }
 
     func updateEntry(media: Media, status: MediaListStatus, progress: Int, score: Double) async throws {
         try Self.requireWriteAccess()
         // A show's episodes are edited in `SimklTitleEditSheet`; this path carries status and score —
         // a movie's swipe to Watched.
-        if kind != .anime {
-            let delivered = try await service.saveTitle(media.id, kind: kind, status: status, score: score)
+        if let titleKind = media.simklTitleKind {
+            let delivered = try await service.saveTitle(media.id, kind: titleKind, status: status, score: score)
             try Self.requireWriteAccess()
             if !delivered { SimklNotice.queued() }
             return
@@ -131,9 +137,9 @@ extension LibrarySource {
     /// The edit sheet's Remove: the whole entry, never an episode un-mark.
     func deleteEntry(_ entry: LibraryEntry) async throws {
         try Self.requireWriteAccess()
-        if kind != .anime {
+        if let titleKind = entry.media.simklTitleKind {
             do {
-                try await service.removeTitle(entry.id, kind: kind)
+                try await service.removeTitle(entry.id, kind: titleKind)
             } catch {
                 try Self.requireWriteAccess()
                 throw error
