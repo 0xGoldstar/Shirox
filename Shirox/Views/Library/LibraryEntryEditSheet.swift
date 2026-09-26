@@ -11,6 +11,7 @@ struct LibraryEntryEditSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var anilistAuth = AniListAuthManager.shared
     @ObservedObject private var local = LocalLibraryManager.shared
+    @State private var automaticTracking: Bool
     @State private var status: MediaListStatus
     @State private var progress: Int
 
@@ -57,6 +58,7 @@ struct LibraryEntryEditSheet: View {
         self.onDelete = onDelete
         self.scoreFormatOverride = scoreFormatOverride
         self.progressUnit = progressUnit
+        _automaticTracking = State(initialValue: AniListMappingManager.shared.automaticTrackingEnabled(for: media))
         _status = State(initialValue: entry?.status ?? .planning)
         _progress = State(initialValue: entry?.progress ?? 0)
         // Local entries convert from their canonical score into the active format;
@@ -169,6 +171,16 @@ struct LibraryEntryEditSheet: View {
                     ScoreInputView(score: $score, format: scoreFormat)
                 }
 
+                if progressUnit == "episode", media.provider != .local {
+                    Section("Tracking") {
+                        Toggle("Automatically Track", isOn: $automaticTracking)
+                            .tint(.secondary)
+                        Text("Update online progress as you watch. Turn off to update this anime manually.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 privacySection
                 notesSection
 
@@ -248,6 +260,9 @@ struct LibraryEntryEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        if progressUnit == "episode", media.provider != .local {
+                            AniListMappingManager.shared.setAutomaticTracking(automaticTracking, for: media)
+                        }
                         let finalProgress = status == .completed ? (media.episodes ?? progress) : progress
                         onSave(status, finalProgress, score)
                         // Sent separately from `onSave`, which is the shared write used by both

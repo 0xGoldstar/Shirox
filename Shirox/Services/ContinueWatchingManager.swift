@@ -1001,7 +1001,11 @@ struct SimklTrackWrite: Equatable {
 
     /// Pushes episode progress to AniList and MAL, replicating the player's full tracking logic.
     /// Handles .completed (rewatch), .repeating, and .current status correctly for both services.
-    func pushRemoteProgress(ep rawEp: Int, context: MarkContext) async {
+    func pushRemoteProgress(ep rawEp: Int, context: MarkContext, automatic: Bool = false) async {
+        if automatic, !(await automaticTrackingAllowed(aniListID: context.aniListID, malID: context.malID)) {
+            LocalLibraryManager.shared.recordWatched(context: context, episode: rawEp)
+            return
+        }
         let aniListEnabled = Self.trackingPref("aniListTrackingEnabled", default: true)
         let malEnabled     = Self.trackingPref("malTrackingEnabled", default: true)
         let simklEnabled   = Self.trackingPref("simklTrackingEnabled", default: true)
@@ -1037,6 +1041,11 @@ struct SimklTrackWrite: Equatable {
         aniListID = linked.anilist
         malID = linked.mal
         let simklID = linked.simkl
+
+        if automatic, !(await automaticTrackingAllowed(aniListID: aniListID, malID: malID)) {
+            LocalLibraryManager.shared.recordWatched(context: context, episode: rawEp)
+            return
+        }
 
         // An airing show is never "completed": even if a stale module reports
         // totalEpisodes as the currently-aired count, more episodes are still coming.
@@ -1156,6 +1165,24 @@ struct SimklTrackWrite: Equatable {
         if aniListWillWrite || malWillWrite {
             NotificationCenter.default.post(name: .remoteLibraryProgressDidPush, object: nil)
         }
+    }
+
+    private func automaticTrackingAllowed(aniListID: Int?, malID: Int?) async -> Bool {
+        var aniListID = aniListID
+        var malID = malID
+        if aniListID == nil, let mid = malID {
+            aniListID = await IDMappingService.shared.anilistId(forMALId: mid)
+        } else if malID == nil, let aid = aniListID {
+            malID = await IDMappingService.shared.malId(forAnilistId: aid)
+        }
+        let preferences = AniListMappingManager.shared
+        if let aid = aniListID, !preferences.automaticTrackingEnabled(provider: .anilist, mediaId: aid) {
+            return false
+        }
+        if let mid = malID, !preferences.automaticTrackingEnabled(provider: .mal, mediaId: mid) {
+            return false
+        }
+        return true
     }
 
     // MARK: - Migrations
