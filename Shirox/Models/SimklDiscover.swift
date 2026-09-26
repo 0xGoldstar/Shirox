@@ -7,6 +7,8 @@ struct SimklDiscoverItem: Equatable, Sendable {
         let simkl: Int
         let mal: Int?
         let anilist: Int?
+        /// A show's TVDB series or a movie's TVDB movie, where its logo comes from.
+        var tvdb: Int? = nil
     }
 
     let title: String
@@ -44,6 +46,7 @@ extension SimklDiscoverItem: Decodable {
         let simkl: SimklLibraryService.FlexibleID?
         let mal: SimklLibraryService.FlexibleID?
         let anilist: SimklLibraryService.FlexibleID?
+        let tvdb: SimklLibraryService.FlexibleID?
     }
 
     private struct Episode: Decodable {
@@ -65,7 +68,7 @@ extension SimklDiscoverItem: Decodable {
         guard let simkl = raw.simkl_id?.value ?? raw.simkl?.value else {
             throw DecodingError.dataCorruptedError(forKey: .ids, in: c, debugDescription: "No Simkl id")
         }
-        ids = IDs(simkl: simkl, mal: raw.mal?.value, anilist: raw.anilist?.value)
+        ids = IDs(simkl: simkl, mal: raw.mal?.value, anilist: raw.anilist?.value, tvdb: raw.tvdb?.value)
         title = try c.decode(String.self, forKey: .title)
         titleRomaji = optional(String.self, .title_romaji)
         poster = optional(String.self, .poster)

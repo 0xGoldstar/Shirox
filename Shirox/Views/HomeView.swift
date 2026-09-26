@@ -409,7 +409,9 @@ private struct FeaturedCarousel: View {
                         .frame(width: 1, height: 1)
                         .opacity(0)
                         .allowsHitTesting(false)
-                    TVDBPosterImage(media: displayItems[i], type: .logo)
+                    // The hero's own logo view, so a Simkl show's or movie's logo — found by its
+                    // TVDB id, not the anime lookup — is ready before it's swiped to.
+                    TVDBTitleLogoView(media: displayItems[i])
                         .frame(width: 1, height: 1)
                         .opacity(0)
                         .allowsHitTesting(false)

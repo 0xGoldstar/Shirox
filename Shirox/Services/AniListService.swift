@@ -843,6 +843,10 @@ enum BrowseCategory: String, CaseIterable, Hashable {
     private var malEpisodeCache: [Int: [AniMapEpisode]] = [:]
     private var aniraEpisodeCache: [String: AniraEpisodeResponse] = [:]
     private var watchOrderCache: [Int: [AniraMediaEntry]] = [:]
+    /// Simkl shows' and movies' logos, keyed by `TVDBTitleLogoEntry.key`.
+    private var titleLogos: [String: TVDBTitleLogoEntry] = [:]
+    private var titleLogoTasks: [String: Task<String?, Never>] = [:]
+    private let titleLogoKey = "tvdb_title_logos_v1"
 
     // Bulk ID-mapping snapshot from anira's /mappings/all — resolved locally instead of
     // hitting the per-id endpoint once per show. Seeded from disk on first use, refreshed
@@ -907,6 +911,10 @@ enum BrowseCategory: String, CaseIterable, Hashable {
         if let data = UserDefaults.standard.data(forKey: malCacheKey),
            let decoded = try? JSONDecoder().decode([Int: CachedData].self, from: data) {
             self.malCache = decoded
+        }
+        if let data = UserDefaults.standard.data(forKey: titleLogoKey),
+           let decoded = try? JSONDecoder().decode([String: TVDBTitleLogoEntry].self, from: data) {
+            self.titleLogos = decoded
         }
     }
 
@@ -1526,6 +1534,67 @@ enum BrowseCategory: String, CaseIterable, Hashable {
         }
     }
 
+    // MARK: - Simkl shows' and movies' logos
+
+    /// A Simkl show's or movie's logo, already known — shown at once, before any lookup.
+    func cachedTitleLogo(tvdbID: Int, kind: MediaKind) -> String? {
+        let key = TVDBTitleLogoEntry.key(tvdbID: tvdbID, record: TVDBRecord(kind: kind))
+        return formatURL(titleLogos[key]?.path)
+    }
+
+    /// A Simkl show's or movie's logo, from its TVDB series or movie. Simkl gives the TVDB id,
+    /// so there's no anira mapping to go through — anira maps anime only.
+    func titleLogo(tvdbID: Int, kind: MediaKind) async -> String? {
+        let record = TVDBRecord(kind: kind)
+        let key = TVDBTitleLogoEntry.key(tvdbID: tvdbID, record: record)
+        if case .known(let path)? = titleLogos[key]?.answer() { return formatURL(path) }
+        // The hero's logo and its preloader ask at once; one lookup answers both.
+        let task = titleLogoTasks[key] ?? Task { await self.lookUpTitleLogo(tvdbID: tvdbID, record: record, key: key) }
+        titleLogoTasks[key] = task
+        let path = await task.value
+        titleLogoTasks[key] = nil
+        return formatURL(path)
+    }
+
+    private func lookUpTitleLogo(tvdbID: Int, record: TVDBRecord, key: String) async -> String? {
+        struct Extended: Decodable {
+            struct Data: Decodable { let artworks: [TVDBArtwork]?; let originalLanguage: String? }
+            let data: Data
+        }
+        do {
+            let token = try await authenticate()
+            var request = URLRequest(url: URL(string: "\(tvdbEndpoint)/\(record.path)/\(tvdbID)/extended")!)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, response) = try await Self.session.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            // Not found is an answer — TVDB has no such title, so no logo. Anything else (a
+            // server error, an expired token) is asked again next time.
+            guard status == 200 || status == 404 else { return nil }
+            var path: String?
+            if status == 200, let extended = try? JSONDecoder().decode(Extended.self, from: data) {
+                path = TVDBLogo.pick(record: extended.data.artworks ?? [], kind: record,
+                                     originalLanguage: extended.data.originalLanguage)
+            }
+            titleLogos[key] = TVDBTitleLogoEntry(path: path, checked: Date())
+            saveTitleLogos()
+            return path
+        } catch where (error as? URLError)?.code == .cancelled || error is CancellationError {
+            return nil
+        } catch {
+            Logger.shared.log("TVDB title logo error (\(record.rawValue) \(tvdbID)): \(error)", type: "Error")
+            return nil
+        }
+    }
+
+    private func saveTitleLogos() {
+        let snapshot = titleLogos
+        let key = titleLogoKey
+        Task.detached(priority: .background) {
+            guard let encoded = try? JSONEncoder().encode(snapshot) else { return }
+            UserDefaults.standard.set(encoded, forKey: key)
+        }
+    }
+
     private func saveMALCache() {
         let snapshot = malCache
         let key = malCacheKey
@@ -1537,19 +1606,11 @@ enum BrowseCategory: String, CaseIterable, Hashable {
 
     /// Shared TVDB artwork fetch used by both AniList and MAL paths.
     private func fetchTVDBIdArtwork(tid: Int, targetSeason: Int?) async -> (poster: String?, fanart: String?, logo: String?, textlessPoster: String?) {
-        struct Artwork: Decodable {
-            let image: String
-            let type: Int
-            let language: String?
-            let width: Int?
-            let height: Int?
-            let includesText: Bool?
-            let score: Double?
-        }
+        typealias Artwork = TVDBArtwork
         struct SeasonType: Decodable { let id: Int; let type: String? }
         struct Season: Decodable { let id: Int; let number: Int; let type: SeasonType? }
         struct SeriesExtended: Decodable {
-            struct Data: Decodable { let artworks: [Artwork]?; let seasons: [Season]? }
+            struct Data: Decodable { let artworks: [Artwork]?; let seasons: [Season]?; let originalLanguage: String? }
             let data: Data
         }
         struct SeasonExtended: Decodable {
@@ -1578,12 +1639,7 @@ enum BrowseCategory: String, CaseIterable, Hashable {
 
             guard let seriesData = await fetchSeriesExtended() else { return (nil, nil, nil, nil) }
             let artworks = seriesData.artworks ?? []
-            let bySizeOrScore: (Artwork, Artwork) -> Bool = { a, b in
-                let scoreA = a.score ?? 0
-                let scoreB = b.score ?? 0
-                if scoreA != scoreB { return scoreA > scoreB }
-                return ((a.width ?? 0) * (a.height ?? 0)) > ((b.width ?? 0) * (b.height ?? 0))
-            }
+            let bySizeOrScore = TVDBArtwork.bySizeOrScore
 
             let fanart = artworks.filter { $0.type == 3 }.sorted(by: bySizeOrScore).first?.image
 
@@ -1619,23 +1675,8 @@ enum BrowseCategory: String, CaseIterable, Hashable {
                 textlessPoster = poster
             }
 
-            // Logo: Strict priority on ClearLogo (23, 14), fallback to ClearArt (22, 24, 25) only if no ClearLogo exists.
-            // Check season-specific logos first, then fall back to series logos.
-            let seasonLogos = seasonArtworks.filter { $0.type == 23 || $0.type == 14 }
-            let seriesLogos = artworks.filter { $0.type == 23 || $0.type == 14 }
-            let clearLogoArtworks = !seasonLogos.isEmpty ? seasonLogos : seriesLogos
-            let englishClearLogo = clearLogoArtworks.filter { $0.language == "eng" || $0.language == "en" }.sorted(by: bySizeOrScore).first?.image
-            let anyClearLogo = clearLogoArtworks.sorted(by: bySizeOrScore).first?.image
-            let clearLogo = englishClearLogo ?? anyClearLogo
-
-            let seasonArt = seasonArtworks.filter { $0.type == 22 || $0.type == 24 || $0.type == 25 }
-            let seriesArt = artworks.filter { $0.type == 22 || $0.type == 24 || $0.type == 25 }
-            let clearArtArtworks = !seasonArt.isEmpty ? seasonArt : seriesArt
-            let englishClearArt = clearArtArtworks.filter { $0.language == "eng" || $0.language == "en" }.sorted(by: bySizeOrScore).first?.image
-            let anyClearArt = clearArtArtworks.sorted(by: bySizeOrScore).first?.image
-            let clearArt = englishClearArt ?? anyClearArt
-
-            let logo = clearLogo ?? clearArt
+            let logo = TVDBLogo.pick(season: seasonArtworks, record: artworks, kind: .series,
+                                     originalLanguage: seriesData.originalLanguage)
 
             return (poster, fanart, logo, textlessPoster)
         } catch {

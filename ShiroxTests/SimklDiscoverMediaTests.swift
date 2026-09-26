@@ -3,9 +3,11 @@ import XCTest
 
 /// Simkl entries as the app's titles: shows and movies open the Simkl page, anime the app's own.
 final class SimklDiscoverMediaTests: XCTestCase {
-    private func item(simkl: Int = 1359610, mal: Int? = nil, anilist: Int? = nil, title: String = "Ted Lasso",
+    private func item(simkl: Int = 1359610, mal: Int? = nil, anilist: Int? = nil, tvdb: Int? = nil,
+                      title: String = "Ted Lasso",
                       rating: Double? = 8.54, runtime: Int? = 33, episodes: Int? = 44) -> SimklDiscoverItem {
-        SimklDiscoverItem(title: title, titleRomaji: nil, ids: .init(simkl: simkl, mal: mal, anilist: anilist),
+        SimklDiscoverItem(title: title, titleRomaji: nil,
+                          ids: .init(simkl: simkl, mal: mal, anilist: anilist, tvdb: tvdb),
                           poster: "11/116270662d150894ff", fanart: "10/100607388512169211",
                           overview: "A coach moves to England.", genres: ["Comedy", "Drama"], rating: rating,
                           runtime: runtime, totalEpisodes: episodes, rank: 194, airDay: nil)
@@ -33,6 +35,15 @@ final class SimklDiscoverMediaTests: XCTestCase {
         XCTAssertEqual(media.simklTitleKind, .movie)
         XCTAssertNil(media.episodes)
         XCTAssertEqual(media.runtime, 100)
+    }
+
+    /// A show or movie finds its logo on TVDB by this id. An anime finds its own through its
+    /// AniList or MyAnimeList id, as every anime does.
+    func testAShowOrMovieCarriesItsTVDBId() throws {
+        XCTAssertEqual(SimklDiscoverMedia.media(item(tvdb: 383203), kind: .tv, tracker: .anilist)?.tvdbID, 383203)
+        XCTAssertEqual(SimklDiscoverMedia.media(item(tvdb: 346729), kind: .movie, tracker: .anilist)?.tvdbID, 346729)
+        XCTAssertNil(SimklDiscoverMedia.media(item(mal: 59741, anilist: 180136, tvdb: 453028),
+                                              kind: .anime, tracker: .anilist)?.tvdbID)
     }
 
     func testAnAnimeOpensByItsAniListIdForAniListUsers() throws {

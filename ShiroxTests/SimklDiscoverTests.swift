@@ -19,7 +19,7 @@ final class SimklDiscoverTests: XCTestCase {
           "runtime":"25m","status":"ongoing","anime_type":"tv","total_episodes":26,
           "overview":"Born into a prestigious family.","genres":["Action","Adventure","Fantasy"]}]
         """#).first)
-        XCTAssertEqual(item.ids, SimklDiscoverItem.IDs(simkl: 2573730, mal: 59741, anilist: 180136))
+        XCTAssertEqual(item.ids, SimklDiscoverItem.IDs(simkl: 2573730, mal: 59741, anilist: 180136, tvdb: 453028))
         XCTAssertEqual(item.title, "The Exiled Heavy Knight Knows How to Game the System")
         XCTAssertEqual(item.titleRomaji, "Tsuihou Sareta Tensei Juu Kishi wa Game Chishiki de Musou Suru")
         XCTAssertEqual(item.poster, "20/20276613600d378d41")
@@ -106,6 +106,16 @@ final class SimklDiscoverTests: XCTestCase {
         let newYork = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
         XCTAssertEqual(try SimklDiscoverItem.decodeList(Data(json.utf8), timeZone: newYork).map(\.airDay),
                        ["2026-09-23", "2026-09-24"], "The same airings on New York's days")
+    }
+
+    /// Where its TVDB logo comes from: a show's TVDB series, a movie's TVDB movie.
+    func testAShowOrMovieKeepsItsTVDBId() throws {
+        let items = try decode(#"""
+        [{"title":"Lanterns","ids":{"simkl_id":1247732,"imdb":"tt26545992","tmdb":"95350","tvdb":"376098"}},
+         {"title":"Project Hail Mary","ids":{"simkl_id":2014312,"tvdb":346729}},
+         {"title":"No TVDB","ids":{"simkl_id":1}}]
+        """#)
+        XCTAssertEqual(items.map(\.ids.tvdb), [376098, 346729, nil])
     }
 
     func testAnEntryWithoutASimklIdIsSkipped() throws {
