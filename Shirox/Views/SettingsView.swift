@@ -427,6 +427,9 @@ struct AccountsSettingsView: View {
                     .buttonStyle(.plain)
                     #endif
                 }
+                if simklAuth.isLoggedIn {
+                    SimklBudgetRow()
+                }
                 Text("Tracks your anime library on Simkl alongside AniList and MyAnimeList. "
                      + "Simkl has no manga, so manga tracking is unaffected.")
                     .font(.caption)

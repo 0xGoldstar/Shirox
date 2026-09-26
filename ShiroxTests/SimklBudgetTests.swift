@@ -87,4 +87,18 @@ final class SimklBudgetTests: XCTestCase {
         }
         XCTAssertEqual(SimklRequestPriority.current, .own)
     }
+
+    func testTheSummaryGivesTheResetInLocalTime() {
+        let summary = SimklBudget.summary(used: 42, resetsAt: Self.date("2026-09-27T04:00:00Z"),
+                                          timeZone: TimeZone(identifier: "Europe/Berlin")!,
+                                          locale: Locale(identifier: "en_GB"))
+        XCTAssertEqual(summary, "Requests today: 42 of 500 · resets at 06:00")
+    }
+
+    func testTheNoteSaysWhatsPaused() {
+        XCTAssertNil(SimklBudget.note(used: 399, spent: false))
+        XCTAssertEqual(SimklBudget.note(used: 400, spent: false), "Automatic checks are paused until then.")
+        XCTAssertEqual(SimklBudget.note(used: 500, spent: true),
+                       "Today's allowance is used up. Changes are sent after the reset.")
+    }
 }

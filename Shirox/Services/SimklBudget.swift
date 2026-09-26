@@ -105,6 +105,24 @@ final class SimklBudget: ObservableObject {
     }
 
     var automaticPaused: Bool { spent || used >= Self.automaticCeiling }
+
+    /// "Requests today: 42 of 500 · resets at 06:00" — the reset in the viewer's own time.
+    nonisolated static func summary(used: Int, resetsAt: Date, timeZone: TimeZone = .current,
+                                    locale: Locale = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return "Requests today: \(min(used, limit)) of \(limit) · resets at \(formatter.string(from: resetsAt))"
+    }
+
+    /// What's held back, if anything.
+    nonisolated static func note(used: Int, spent: Bool) -> String? {
+        if spent { return "Today's allowance is used up. Changes are sent after the reset." }
+        if used >= automaticCeiling { return "Automatic checks are paused until then." }
+        return nil
+    }
     var resetsAt: Date { Self.reset(after: now()) }
 
     private func save() {
