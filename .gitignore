@@ -48,3 +48,6 @@ docs/*
 !docs/screenshots
 conductor/
 .worktrees
+
+# Seanime runtime build dependencies (the built bundles in Shirox/Resources are committed)
+scripts/seanime-runtime/node_modules/

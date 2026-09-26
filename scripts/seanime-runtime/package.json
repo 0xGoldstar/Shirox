@@ -1,0 +1,13 @@
+{
+  "name": "shirox-seanime-runtime",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/runtime.js --target=browser --format=iife --minify --banner='/* Seanime runtime for Shirox. Bundles cheerio (MIT) and buffer (MIT); see scripts/seanime-runtime/README.md. */' --outfile=../../Shirox/Resources/SeanimeRuntime.js && bun build src/install.js --target=browser --format=iife --minify --banner='/* Seanime install tools for Shirox. Bundles sucrase (MIT); see scripts/seanime-runtime/README.md. */' --outfile=../../Shirox/Resources/SeanimeInstall.js"
+  },
+  "dependencies": {
+    "buffer": "6.0.3",
+    "cheerio": "1.2.0",
+    "sucrase": "3.35.1"
+  }
+}
