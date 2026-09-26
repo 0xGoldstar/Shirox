@@ -1216,7 +1216,7 @@ struct PlayerView: View {
             isAiring: ctx.isAiring
         )
         Task {
-            await ContinueWatchingManager.shared.pushRemoteProgress(ep: ctx.episodeNumber, context: context)
+            await ContinueWatchingManager.shared.pushRemoteProgress(ep: ctx.episodeNumber, context: context, automatic: true)
         }
         let last = isLastEpisodeNow
         let totalStr = ctx.totalEpisodes.map(String.init) ?? "nil"
