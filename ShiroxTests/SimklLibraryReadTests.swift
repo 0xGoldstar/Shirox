@@ -128,4 +128,19 @@ final class SimklLibraryReadTests: XCTestCase {
         SimklLibraryService.updateSimklOnly(store, read: .upToDate, found: [], present: [1])
         XCTAssertTrue(store.entries.isEmpty, "Gone from the list")
     }
+
+    /// An anime added from search is shaped as a read gives it: Simkl's id as the entry's, the
+    /// MyAnimeList id — else AniList's — as the media's, the one sync pairs on.
+    func testAnAnimeAddedFromSearch() {
+        let entry = SimklLibraryService.addedAnimeEntry(simklID: 1, mal: 52991, anilist: 154587, title: "Frieren",
+                                                        posterURL: nil, year: 2023, status: .planning)
+        XCTAssertEqual(entry?.id, 1)
+        XCTAssertEqual(entry?.media.id, 52991)
+        XCTAssertEqual(entry?.media.idMal, 52991)
+        XCTAssertEqual(entry?.status, .planning)
+        XCTAssertEqual(SimklLibraryService.addedAnimeEntry(simklID: 1, mal: nil, anilist: 154587, title: "Frieren",
+                                                           posterURL: nil, year: nil, status: .current)?.media.id, 154587)
+        XCTAssertNil(SimklLibraryService.addedAnimeEntry(simklID: 1, mal: nil, anilist: nil, title: "",
+                                                         posterURL: nil, year: nil, status: .current))
+    }
 }

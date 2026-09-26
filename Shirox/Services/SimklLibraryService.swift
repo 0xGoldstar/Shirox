@@ -536,6 +536,28 @@ final class SimklLibraryService {
         store(entries)
     }
 
+    /// An anime added from search, as a read would give it. Nil without a MyAnimeList or AniList
+    /// id — that one is a Simkl-only anime, saved through `saveTitle`.
+    nonisolated static func addedAnimeEntry(simklID: Int, mal: Int?, anilist: Int?, title: String,
+                                            posterURL: String?, year: Int?, status: MediaListStatus) -> LibraryEntry? {
+        guard let id = mal ?? anilist else { return nil }
+        let media = Media(
+            id: id, idMal: mal, provider: .simkl,
+            title: MediaTitle(romaji: title, english: title, native: nil),
+            coverImage: MediaCoverImage(large: posterURL, extraLarge: posterURL),
+            bannerImage: nil, description: nil, episodes: nil, status: nil, averageScore: nil, genres: nil,
+            season: nil, seasonYear: year, nextAiringEpisode: nil, relations: nil, type: nil, format: nil)
+        return LibraryEntry(id: simklID, media: media, status: status, progress: 0, score: 0, timesRewatched: nil)
+    }
+
+    /// Puts an anime added from search in the copy at once — `noteWritten` only updates titles
+    /// already there.
+    func noteAdded(_ entry: LibraryEntry) {
+        guard var entries = cachedLibrary(), !entries.contains(where: { $0.id == entry.id }) else { return }
+        entries.append(entry)
+        store(entries)
+    }
+
     func noteDeleted(malId: Int?, anilistId: Int?, simklId: Int? = nil) {
         guard var entries = cachedLibrary(),
               let hit = Self.entry(in: entries, malId: malId, anilistId: anilistId, simklId: simklId) else { return }

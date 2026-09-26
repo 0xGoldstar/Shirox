@@ -281,10 +281,10 @@ struct LibraryView: View {
         return .afterSignOut(primary: providerManager.primary?.providerType, signedIn: signedIn)
     }
 
-    /// The Simkl search the Shows and Movies views offer for what's in the search bar.
+    /// The Simkl search the Simkl list's tabs offer for what's in the search bar.
     private var simklSearchRequest: SimklSearchRequest? {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard vm.source == .simkl, vm.mediaType == .tv || vm.mediaType == .movie, !query.isEmpty else { return nil }
+        guard vm.source == .simkl, MediaKind.simklKinds.contains(vm.mediaType), !query.isEmpty else { return nil }
         return SimklSearchRequest(query: query, kind: vm.mediaType)
     }
 

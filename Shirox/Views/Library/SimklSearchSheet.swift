@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Simkl search results for TV shows or movies, run once, when the user asks.
+/// Simkl search results for anime, TV shows or movies, run once, when the user asks.
 struct SimklSearchSheet: View {
     let kind: MediaKind
     let query: String
@@ -46,7 +46,7 @@ struct SimklSearchSheet: View {
             if results.isEmpty {
                 ContentUnavailableView(
                     "No Results", systemImage: "magnifyingglass",
-                    description: Text("Simkl has no \(kind == .movie ? "movie" : "show") matching “\(query)”."))
+                    description: Text("Simkl has no \(kind == .movie ? "movie" : kind == .anime ? "anime" : "show") matching “\(query)”."))
             } else {
                 List(results, id: \.simklID) { item in
                     row(item)
@@ -59,8 +59,7 @@ struct SimklSearchSheet: View {
     private func row(_ item: SimklCatalogItem) -> some View {
         let id = item.simklID ?? 0
         return HStack(spacing: 12) {
-            NavigationLink(destination: SimklTitlePage(simklID: id, kind: kind, seedTitle: item.title ?? "",
-                                                       seedPosterURL: item.posterURL?.absoluteString)) {
+            NavigationLink(destination: destination(for: item, id: id)) {
                 HStack(spacing: 12) {
                     CachedAsyncImage(urlString: item.posterURL?.absoluteString ?? "")
                         .frame(width: 46, height: 69)
@@ -96,6 +95,18 @@ struct SimklSearchSheet: View {
         }
     }
 
+    /// An anime opens the app's anime page (or its Simkl page when it isn't on the tracker); a show
+    /// or movie its Simkl page.
+    @ViewBuilder
+    private func destination(for item: SimklCatalogItem, id: Int) -> some View {
+        if kind == .anime, let seed = SimklSearch.cardMedia(item, kind: .anime) {
+            SimklAnimeOpener(seed: seed)
+        } else {
+            SimklTitlePage(simklID: id, kind: kind, seedTitle: item.title ?? "",
+                           seedPosterURL: item.posterURL?.absoluteString)
+        }
+    }
+
     private func search() async {
         state = .loading
         do {
@@ -109,7 +120,10 @@ struct SimklSearchSheet: View {
     }
 
     private func refreshBadges() {
-        let copy = SimklLibraryService.shared.cachedLibrary(kind) ?? []
+        let service = SimklLibraryService.shared
+        // The anime tab lists the synced copy and the Simkl-only anime, both keyed by Simkl id.
+        let copy = kind == .anime ? (service.cachedLibrary(.anime) ?? []) + service.titleCopy(.anime)
+                                  : service.titleCopy(kind)
         inLibrary = Dictionary(copy.map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first })
     }
 
@@ -123,13 +137,34 @@ struct SimklSearchSheet: View {
                                          posterURL: item.posterURL?.absoluteString, year: item.year,
                                          runtime: nil, totalEpisodes: nil, status: status)
         do {
-            let delivered = try await SimklLibraryService.shared.saveTitle(id, kind: kind, status: status,
-                                                                           score: 0, ifAbsent: entry)
+            let delivered = kind == .anime
+                ? try await addAnime(item, simklID: id, as: status)
+                : try await SimklLibraryService.shared.saveTitle(id, kind: kind, status: status, score: 0, ifAbsent: entry)
             refreshBadges()
             onChange()
             if !delivered { SimklNotice.queued() }
         } catch {
             SimklNotice.failed(error)
         }
+    }
+
+    /// An anime goes to Simkl's anime list with every id Simkl's free record gives, and into the
+    /// copy at once. One the tracker doesn't have is a Simkl-only anime, saved as a Simkl title.
+    private func addAnime(_ item: SimklCatalogItem, simklID: Int, as status: MediaListStatus) async throws -> Bool {
+        let service = SimklLibraryService.shared
+        let ids = try await SimklCatalog.animeIDs(simklID: simklID)
+        guard let added = SimklLibraryService.addedAnimeEntry(
+            simklID: simklID, mal: ids?.mal, anilist: ids?.anilist, title: item.title ?? "",
+            posterURL: item.posterURL?.absoluteString, year: item.year, status: status) else {
+            let entry = SimklTitleCopy.entry(simklID: simklID, kind: .anime, title: item.title ?? "",
+                                             posterURL: item.posterURL?.absoluteString, year: item.year,
+                                             runtime: nil, totalEpisodes: nil, status: status)
+            return try await service.saveTitle(simklID, kind: .anime, status: status, score: 0, ifAbsent: entry)
+        }
+        let delivered = await service.writeNow(malId: ids?.mal, anilistId: ids?.anilist, simklId: simklID,
+                                               status: status, progress: 0, score: 0, format: .point10,
+                                               title: item.title)
+        service.noteAdded(added)
+        return delivered
     }
 }
