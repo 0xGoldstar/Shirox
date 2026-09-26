@@ -48,6 +48,16 @@ enum SimklPlayNumbering {
         return ModuleSeasonNumbering(offset: offset, seasonCount: seasonCount(season, in: episodes))
     }
 
+    /// Up Next's number for a play from a Simkl page: the next module episode counted within the
+    /// play's season — from 1 on the season's own page, from the season's start on a page listing
+    /// every season — as the page's own Up Next reports it (`SimklPlayback`).
+    static func upNextNumber(moduleNumber: Int, index: Int, in list: [EpisodeLink],
+                             season: Int, simklEpisodes: [SimklEpisode]) -> Int {
+        let offset = numbering(for: season, in: simklEpisodes)?.offset(forListCount: list.count) ?? 0
+        return EpisodeNavigator.seasonRelativeNumber(moduleNumber: moduleNumber, index: index,
+                                                     in: list, seasonOffset: offset)
+    }
+
     /// The Simkl episode a play is on. `number` counts from the start of `season` and may run past
     /// its end — Up Next on a page listing every season — into the next season.
     static func episode(season: Int, number: Int, in episodes: [SimklEpisode]) -> SimklEpisodeRef? {

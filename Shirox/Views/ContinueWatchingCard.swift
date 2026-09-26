@@ -205,7 +205,16 @@ struct ContinueWatchingSection: View {
 
                     guard !streams.isEmpty else { return nil }
                     currentHref = nextEp.href
-                    return (streams: streams, episodeNumber: Int(nextEp.number), episodeHref: nextEp.href)
+                    // A play from a Simkl page counts within its season; on a page listing every season
+                    // the module's own number would be read as that season's episode 16.
+                    var number = Int(nextEp.number)
+                    if let ref = item.simklTitle, ref.kind != .movie, let season = ref.season,
+                       let index = episodes.firstIndex(where: { $0.href == nextEp.href }) {
+                        let simklEpisodes = (try? await SimklCatalog.loadEpisodes(simklID: ref.simklID)) ?? []
+                        number = SimklPlayNumbering.upNextNumber(moduleNumber: number, index: index, in: episodes,
+                                                                 season: season, simklEpisodes: simklEpisodes)
+                    }
+                    return (streams: streams, episodeNumber: number, episodeHref: nextEp.href)
                 } catch {
                     Logger.shared.log("[ContinueWatching] Next episode failed (module): \(error)", type: "Error")
                     return nil
