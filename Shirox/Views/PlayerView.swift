@@ -1163,7 +1163,17 @@ struct PlayerView: View {
             if let play {
                 Task { await SimklPlayTracker.finished(play.ref, number: play.number, title: title) }
             } else {
-                Logger.shared.log("[Simkl] \(title): this episode's place on its page isn't known — not marked", type: "Provider")
+                // A new episode, or a list never remembered: the page is fetched and the episode placed.
+                let moduleId = ctx.moduleId, detailHref = ctx.detailHref, episodeHref = ctx.episodeHref
+                Task {
+                    if let play = await SimklModuleTracker.placeByFetching(
+                        moduleId: moduleId, detailHref: detailHref, episodeHref: episodeHref) {
+                        await SimklPlayTracker.finished(play.ref, number: play.number, title: title)
+                    } else {
+                        Logger.shared.log("[Simkl] \(title): this episode's place on its page isn't known — not marked",
+                                          type: "Provider")
+                    }
+                }
             }
             return
         }

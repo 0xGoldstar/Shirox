@@ -84,4 +84,43 @@ final class SimklModuleTrackingTests: XCTestCase {
         XCTAssertNil(pages.position(of: "/e1", in: "module:other|/page"))
         XCTAssertEqual(SimklModulePages(file: file).position(of: "/e3", in: key), 3, "Remembered across launches")
     }
+
+    // MARK: - An episode the remembered list doesn't hold
+
+    private struct Offline: Error {}
+
+    private func tempPages() -> SimklModulePages {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        return SimklModulePages(file: file)
+    }
+
+    private let seasonLink = TrackingLinks(simklTitle: SimklTitleLink(simklID: 7, kind: .tv, season: 2, automatic: true))
+
+    func testAnUnplacedEpisodeIsPlacedByFetchingItsPage() async {
+        let pages = tempPages()
+        let play = await SimklModuleTracker.placeByFetching(
+            moduleId: "m", detailHref: "/show", episodeHref: "/e3", pages: pages,
+            links: { _ in self.seasonLink }, fetch: { _, _ in ["/e1", "/e2", "/e3"] })
+        XCTAssertEqual(play, SimklModuleTracker.Play(ref: SimklPlayRef(simklID: 7, kind: .tv, season: 2), number: 3))
+        XCTAssertEqual(pages.position(of: "/e3", in: "module:m|/show"), 3, "Remembered for next time")
+    }
+
+    func testAPageThatCantBeFetchedLeavesItUnmarked() async {
+        let pages = tempPages()
+        let play = await SimklModuleTracker.placeByFetching(
+            moduleId: "m", detailHref: "/show", episodeHref: "/e3", pages: pages,
+            links: { _ in self.seasonLink }, fetch: { _, _ in throw Offline() })
+        XCTAssertNil(play)
+        XCTAssertNil(pages.position(of: "/e3", in: "module:m|/show"))
+    }
+
+    func testAnUnlinkedPageIsntFetched() async {
+        var fetched = false
+        let play = await SimklModuleTracker.placeByFetching(
+            moduleId: "m", detailHref: "/show", episodeHref: "/e3", pages: tempPages(),
+            links: { _ in nil }, fetch: { _, _ in fetched = true; return ["/e3"] })
+        XCTAssertNil(play)
+        XCTAssertFalse(fetched)
+    }
 }
