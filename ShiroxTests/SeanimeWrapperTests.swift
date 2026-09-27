@@ -105,6 +105,19 @@ final class SeanimeWrapperTests: XCTestCase {
         XCTAssertEqual(media?["synonyms"] as? [String], [])
     }
 
+    func testEpisodesListedNewestFirstComeOutInOrder() {
+        let provider = """
+        class Provider {
+          async findEpisodes(id) { return [3, 2, 1].map((n) => ({ id: "e" + n, number: n, url: "https://site/e" + n })); }
+        }
+        """
+        let context = SeanimeJSHarness.context(provider: provider, kind: "anime")
+        guard case .success(let json) = SeanimeJSHarness.call(context, "extractEpisodes", ["a1"]),
+              let episodes = SeanimeJSHarness.json(json) as? [[String: Any]] else { return XCTFail("episodes failed") }
+        XCTAssertEqual(episodes.map { $0["number"] as? Int }, [1, 2, 3])
+        XCTAssertTrue((episodes.first?["href"] as? String)?.contains(#""id":"e1""#) == true)
+    }
+
     func testEpisodesRoundTripAndStreamsComeFromEveryServerThatAnswers() {
         let context = SeanimeJSHarness.context(provider: anime, kind: "anime")
         guard case .success(let json) = SeanimeJSHarness.call(context, "extractEpisodes", ["a1"]),

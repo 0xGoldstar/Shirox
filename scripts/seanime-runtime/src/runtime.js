@@ -181,7 +181,9 @@ function animeDetails() {
 
 async function animeEpisodes(id) {
   const episodes = (await provider().findEpisodes(id)) || [];
-  return JSON.stringify(episodes.map((e) => ({ href: EPISODE + JSON.stringify(e), number: e.number })));
+  // Some sites list newest first; Shirox reads a drop in number as a new season.
+  const ordered = episodes.slice().sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
+  return JSON.stringify(ordered.map((e) => ({ href: EPISODE + JSON.stringify(e), number: e.number })));
 }
 
 function withTimeout(promise, ms) {
