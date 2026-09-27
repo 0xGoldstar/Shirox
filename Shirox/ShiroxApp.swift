@@ -343,6 +343,9 @@ private struct RootTabView: View {
                     Tab("Settings", systemImage: "gearshape.fill", value: 3) {
                         SettingsView()
                     }
+                    // `.prominent` is in the iOS 27 SDK only (Xcode 27, Swift 6.4); the nightly
+                    // build still uses Xcode 26, which has no such role.
+                    #if compiler(>=6.4)
                     if #available(iOS 27, tvOS 27, *) {
                         // iOS 27 gives a search tab its own circle only when tapping it opens search
                         // at once; as the prominent tab it keeps the circle and opens as a page.
@@ -354,6 +357,11 @@ private struct RootTabView: View {
                             SearchView()
                         }
                     }
+                    #else
+                    Tab(value: 4, role: .search) {
+                        SearchView()
+                    }
+                    #endif
                 }
                 .tabViewStyle(.sidebarAdaptable)
                 .toolbarBackgroundHidden()
