@@ -343,8 +343,16 @@ private struct RootTabView: View {
                     Tab("Settings", systemImage: "gearshape.fill", value: 3) {
                         SettingsView()
                     }
-                    Tab(value: 4, role: .search) {
-                        SearchView()
+                    if #available(iOS 27, tvOS 27, *) {
+                        // iOS 27 gives a search tab its own circle only when tapping it opens search
+                        // at once; as the prominent tab it keeps the circle and opens as a page.
+                        Tab("Search", systemImage: "magnifyingglass", value: 4, role: .prominent) {
+                            SearchView()
+                        }
+                    } else {
+                        Tab(value: 4, role: .search) {
+                            SearchView()
+                        }
                     }
                 }
                 .tabViewStyle(.sidebarAdaptable)
