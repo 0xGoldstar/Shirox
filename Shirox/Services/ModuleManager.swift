@@ -53,6 +53,8 @@ final class ModuleManager: ObservableObject {
                 await cacheAssets(for: &module)
             }
 
+            if isAdult(module) { throw ModuleLinkError.adult }
+
             // Avoid duplicates
             if modules.contains(where: { $0.id == module.id }) {
                 modules.removeAll { $0.id == module.id }
@@ -68,6 +70,19 @@ final class ModuleManager: ObservableObject {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// Adult modules installed before Shirox refused them. Run once the host list has loaded,
+    /// so the sites they reach are checked too.
+    func removeAdultModules() {
+        for module in modules where isAdult(module) {
+            Logger.shared.log("[ModuleManager] Removed adult module \(module.sourceName)", type: "Info")
+            removeModule(module)
+        }
+    }
+
+    private func isAdult(_ module: ModuleDefinition) -> Bool {
+        AdultModuleCheck.isAdult(module) { HostBlocklist.shared.isBlocked(host: $0) }
     }
 
     // MARK: - Remove Module
@@ -184,7 +199,9 @@ final class ModuleManager: ObservableObject {
                 // Cache fresh assets
                 await cacheAssets(for: &fresh)
             }
-            
+            // An update that turns a module adult isn't taken.
+            guard !isAdult(fresh) else { continue }
+
             let wasActive = activeModule?.id == modules[i].id
             modules[i] = fresh
             if wasActive { selectModule(fresh) }

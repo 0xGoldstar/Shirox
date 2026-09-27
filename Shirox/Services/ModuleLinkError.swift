@@ -9,6 +9,7 @@ enum ModuleLinkError: LocalizedError, Equatable {
     case script
     case seanimeList
     case notAModule
+    case adult
 
     var errorDescription: String? {
         switch self {
@@ -24,6 +25,8 @@ enum ModuleLinkError: LocalizedError, Equatable {
             return "That link is a list of modules. Adding a whole list isn't supported yet — paste one module's .json link."
         case .notAModule:
             return "That link isn't a module Shirox can add."
+        case .adult:
+            return "Shirox doesn't add adult modules."
         }
     }
 

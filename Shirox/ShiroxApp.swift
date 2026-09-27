@@ -134,7 +134,10 @@ struct ShiroxApp: App {
         SyncTargets.migrateIfNeeded()
         PendingWriteQueue.shared.register(sink: LibraryWriteSink())
         LocalLibraryManager.shared.syncFromContinueWatching()
-        HostBlocklist.shared.loadIfNeeded()
+        // Adult modules installed before Shirox refused them go, once their sites can be checked.
+        HostBlocklist.shared.loadIfNeeded {
+            Task { @MainActor in ModuleManager.shared.removeAdultModules() }
+        }
         #if os(iOS)
         configureGlobalBarAppearances()
         #endif

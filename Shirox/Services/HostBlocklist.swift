@@ -50,22 +50,28 @@ final class HostBlocklist {
 
     func isBlocked(_ url: URL) -> Bool {
         guard let host = url.host else { return false }
-        return Self.isHostBlocked(host, in: hosts)
+        return isBlocked(host: host)
+    }
+
+    func isBlocked(host: String) -> Bool {
+        Self.isHostBlocked(host, in: hosts)
     }
 
     /// Loads the bundled snapshot once, off the main thread. Safe to call at launch.
-    func loadIfNeeded() {
-        guard !isLoaded else { return }
+    /// `then` runs on the main queue once the list is in (at once if it already is).
+    func loadIfNeeded(then loaded: (@Sendable () -> Void)? = nil) {
+        guard !isLoaded else { loaded?(); return }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let url = Bundle.main.url(forResource: "adult_hosts", withExtension: "txt"),
                   let contents = try? String(contentsOf: url, encoding: .utf8) else {
-                DispatchQueue.main.async { self?.isLoaded = true }   // fail-open if missing
+                DispatchQueue.main.async { self?.isLoaded = true; loaded?() }   // fail-open if missing
                 return
             }
             let parsed = Self.parse(contents)
             DispatchQueue.main.async {
                 self?.hosts = parsed
                 self?.isLoaded = true
+                loaded?()
             }
         }
     }
