@@ -777,12 +777,63 @@ final class WebKitFetchEngine: NSObject, WKNavigationDelegate {
         return WKWebView(frame: .zero, configuration: config)
     }()
 
+    typealias Answer = (data: Data, statusCode: Int, headers: [String: String], finalURL: String)
+
+    /// The request before this one: requests take turns, since each puts the one web view on its site.
+    private var previous: Task<Void, Never>?
+    private var pageLoad: CheckedContinuation<Void, Error>?
+
     func fetch(
         url: URL,
         method: String = "GET",
         headers: [String: String] = [:],
         body: String? = nil
-    ) async throws -> (data: Data, statusCode: Int, headers: [String: String], finalURL: String) {
+    ) async throws -> Answer {
+        let before = previous
+        let turn = Task { () throws -> Answer in
+            await before?.value
+            try await self.showSite(of: url)
+            return try await self.perform(url: url, method: method, headers: headers, body: body)
+        }
+        previous = Task { _ = try? await turn.value }
+        return try await turn.value
+    }
+
+    /// Puts the web view on the site's origin (an empty page, no request made), so its `fetch`
+    /// is same-origin: no CORS refusal, and the site's cookies go along.
+    private func showSite(of url: URL) async throws {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host else { return }
+        var origin = URLComponents()
+        origin.scheme = scheme
+        origin.host = host
+        origin.port = url.port
+        origin.path = "/"
+        guard let base = origin.url, webView.url?.scheme != scheme || webView.url?.host != host
+                || webView.url?.port != url.port else { return }
+        webView.navigationDelegate = self
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            pageLoad = continuation
+            webView.loadHTMLString("<!doctype html><title></title>", baseURL: base)
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        pageLoad?.resume()
+        pageLoad = nil
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        pageLoad?.resume(throwing: error)
+        pageLoad = nil
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        pageLoad?.resume(throwing: error)
+        pageLoad = nil
+    }
+
+    private func perform(url: URL, method: String, headers: [String: String], body: String?) async throws -> Answer {
         let escapedURL = JSEngine.jsStringLiteral(url.absoluteString)
         let headersData = (try? JSONSerialization.data(withJSONObject: headers)) ?? Data()
         let headersJSON = String(data: headersData, encoding: .utf8) ?? "{}"
@@ -793,11 +844,12 @@ final class WebKitFetchEngine: NSObject, WKNavigationDelegate {
             bodyScript = ""
         }
 
+        // callAsyncJavaScript runs this as a function body: without `return`, the answer is lost.
         let js = """
-        (async function() {
+        return (async function() {
             try {
                 const res = await fetch(\(escapedURL), {
-                    method: '\(method)',
+                    method: \(JSEngine.jsStringLiteral(method)),
                     headers: \(headersJSON),
                     \(bodyScript)
                     credentials: 'include'

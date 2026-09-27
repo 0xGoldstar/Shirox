@@ -904,6 +904,7 @@
 		E40ED5A5A03F9A3ECCE3BEC7 /* FreshInstallKeychainPurge.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF9A299B7B1F54AA1675478F /* FreshInstallKeychainPurge.swift */; };
 		E4203D3CAE16695490890C1C /* MangaDownloadPlanningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00F7945A220799EBCB4893BD /* MangaDownloadPlanningTests.swift */; };
 		E47395E4C41916F4EDFCC2C1 /* LibraryCollapsingHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D6742C550B97293CCFDC834 /* LibraryCollapsingHeader.swift */; };
+		E4B78C84C272EB891557EB8C /* WebKitFetchEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C386255B788C3F8696A643 /* WebKitFetchEngineTests.swift */; };
 		E5D5B685A50F1A5217A365A4 /* QuickActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4071A0ACA228C759CA67D5A0 /* QuickActions.swift */; };
 		E61D02E112750BADFF12D354 /* PlayerMenuButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F3726264F1BB3C79BD4B966 /* PlayerMenuButton.swift */; };
 		E6A17D4FDC74BED341041381 /* TMDBLogoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06CCD3C16F73166AFC6E89C6 /* TMDBLogoService.swift */; };
@@ -1285,6 +1286,7 @@
 		A27BE91A41E067C81A857EB2 /* AniListSeasonTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AniListSeasonTests.swift; sourceTree = "<group>"; };
 		A304B304C482A8AAA10DB209 /* DataSaver.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DataSaver.swift; sourceTree = "<group>"; };
 		A30AD37FF3D0361891996A82 /* UpcomingCalendarView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UpcomingCalendarView.swift; sourceTree = "<group>"; };
+		A4C386255B788C3F8696A643 /* WebKitFetchEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WebKitFetchEngineTests.swift; sourceTree = "<group>"; };
 		A58F85F7A144420BF90D4570 /* TrackingLinksTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrackingLinksTests.swift; sourceTree = "<group>"; };
 		A62D2F08E475CE2C530B479E /* ProfileCacheStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProfileCacheStore.swift; sourceTree = "<group>"; };
 		A6D4488D593D0B711FA06E32 /* LibrarySyncService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LibrarySyncService.swift; sourceTree = "<group>"; };
@@ -1972,6 +1974,7 @@
 				5507C974E32C5C64D76B9755 /* ModuleLinkErrorTests.swift */,
 				F9BC33D61B80B1A9FDCE7496 /* ModuleArtworkTests.swift */,
 				5A7C9F96D91D3EE1B7AB622D /* AdultModuleCheckTests.swift */,
+				A4C386255B788C3F8696A643 /* WebKitFetchEngineTests.swift */,
 			);
 			path = ShiroxTests;
 			sourceTree = SOURCE_ROOT;
@@ -2364,6 +2367,7 @@
 				AF1FD896A7C78D39AD5CF284 /* ModuleLinkErrorTests.swift in Sources */,
 				4219B57C9E69F1FCE6FDC83E /* ModuleArtworkTests.swift in Sources */,
 				AF57CB87C782A85CFF72EC50 /* AdultModuleCheckTests.swift in Sources */,
+				E4B78C84C272EB891557EB8C /* WebKitFetchEngineTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
