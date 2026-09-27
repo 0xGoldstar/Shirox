@@ -225,8 +225,8 @@ final class ModuleJSRunner {
     }
 
     private func setupFetchV2(_ ctx: JSContext) {
-        let fetchNative: @convention(block) (String, JSValue, JSValue, JSValue, JSValue, JSValue) -> Void =
-        { [weak self] urlString, headersVal, methodVal, bodyVal, resolve, reject in
+        let fetchNative: @convention(block) (String, JSValue, JSValue, JSValue, JSValue, JSValue, JSValue) -> Void =
+        { [weak self] urlString, headersVal, methodVal, bodyVal, extraVal, resolve, reject in
             guard let self else {
                 reject.call(withArguments: ["ModuleJSRunner deallocated"])
                 return
@@ -242,14 +242,107 @@ final class ModuleJSRunner {
 
             let method = (methodVal.isNull || methodVal.isUndefined) ? "GET" : (methodVal.toString() ?? "GET")
             let body: String? = (bodyVal.isNull || bodyVal.isUndefined) ? nil : bodyVal.toString()
+            var jsHeaders: [String: String] = [:]
+            if !headersVal.isUndefined, !headersVal.isNull {
+                if let dict = headersVal.toDictionary() as? [String: String] {
+                    jsHeaders = dict
+                }
+            }
+
+            var impersonateTarget: BrowserTarget? = nil
+            var useWebView = false
+
+            if !extraVal.isUndefined && !extraVal.isNull {
+                if extraVal.isBoolean {
+                    if extraVal.toBool() { impersonateTarget = .auto }
+                } else if extraVal.isString {
+                    let str = extraVal.toString()?.lowercased()
+                    if str == "webview" {
+                        useWebView = true
+                    } else if let target = BrowserTarget(rawValue: str ?? "") {
+                        impersonateTarget = target
+                    } else {
+                        impersonateTarget = .auto
+                    }
+                } else if extraVal.isObject {
+                    let dict = extraVal.toDictionary()
+                    if let impVal = dict?["impersonate"] {
+                        if let boolVal = impVal as? Bool, boolVal {
+                            impersonateTarget = .auto
+                        } else if let strVal = impVal as? String {
+                            let low = strVal.lowercased()
+                            if low == "webview" {
+                                useWebView = true
+                            } else if let target = BrowserTarget(rawValue: low) {
+                                impersonateTarget = target
+                            } else {
+                                impersonateTarget = .auto
+                            }
+                        }
+                    }
+                    if let engine = dict?["engine"] as? String, engine.lowercased() == "webview" {
+                        useWebView = true
+                    }
+                }
+            }
+
+            if impersonateTarget == nil && !useWebView {
+                if let imp = jsHeaders["impersonate"] {
+                    jsHeaders.removeValue(forKey: "impersonate")
+                    if imp.lowercased() == "webview" {
+                        useWebView = true
+                    } else if let target = BrowserTarget(rawValue: imp.lowercased()) {
+                        impersonateTarget = target
+                    } else {
+                        impersonateTarget = .auto
+                    }
+                }
+            }
+
+            #if !os(tvOS)
+            if useWebView {
+                Task {
+                    do {
+                        let (data, status, headersDict, finalURL) = try await WebKitFetchEngine.shared.fetch(
+                            url: url,
+                            method: method,
+                            headers: jsHeaders,
+                            body: body
+                        )
+                        let responseText = String(data: data, encoding: .utf8) ?? ""
+                        let responseObj = JSValue(newObjectIn: ctx)!
+                        responseObj.setValue(status, forProperty: "status")
+                        responseObj.setValue(status >= 200 && status < 300, forProperty: "ok")
+                        responseObj.setValue(finalURL, forProperty: "url")
+                        responseObj.setValue(headersDict, forProperty: "headers")
+
+                        let textFn: @convention(block) () -> String = { responseText }
+                        responseObj.setObject(textFn, forKeyedSubscript: "text" as NSString)
+
+                        let jsonFn: @convention(block) () -> JSValue = {
+                            let escaped = JSEngine.jsStringLiteral(responseText)
+                            return ctx.evaluateScript("JSON.parse(\(escaped))") ?? JSValue(undefinedIn: ctx)
+                        }
+                        responseObj.setObject(jsonFn, forKeyedSubscript: "json" as NSString)
+
+                        resolve.call(withArguments: [responseObj])
+                    } catch {
+                        reject.call(withArguments: [error.localizedDescription])
+                    }
+                }
+                return
+            }
+            #endif
 
             var request = URLRequest(url: url)
             request.httpMethod = method
             request.setValue(self.userAgent, forHTTPHeaderField: "User-Agent")
 
-            if !headersVal.isUndefined, !headersVal.isNull {
-                if let dict = headersVal.toDictionary() as? [String: String] {
-                    for (key, value) in dict { request.setValue(value, forHTTPHeaderField: key) }
+            if let impersonateTarget {
+                BrowserImpersonator.apply(to: &request, target: impersonateTarget, customHeaders: jsHeaders)
+            } else {
+                for (key, value) in jsHeaders {
+                    request.setValue(value, forHTTPHeaderField: key)
                 }
             }
 
@@ -283,10 +376,6 @@ final class ModuleJSRunner {
                     // CF reactive retry: bypass the final redirect destination, retry directly against it
                     if JSEngine.isTurnstileResponse(status: httpResponse.statusCode, body: responseText) {
                         let cfResponseURL = httpResponse.url ?? url
-                        // Retry the final URL directly with our solved session (live WebView cookies
-                        // or a persisted cookie+UA after relaunch) — only fall back to prompting the
-                        // user if we have no session or it's itself walled. Avoids re-popping the
-                        // bypass sheet on every request once a host has been solved.
                         let recovered = await CloudflareBypassManager.shared.retryWithSolvedSession(
                             for: cfResponseURL,
                             method: request.httpMethod ?? "GET",
@@ -334,9 +423,32 @@ final class ModuleJSRunner {
 
         ctx.setObject(fetchNative, forKeyedSubscript: "fetchv2Native" as NSString)
         ctx.evaluateScript("""
-        function fetchv2(url, headers, method, body) {
+        function fetchv2(url, headers, method, body, extra) {
+            var h = headers || {};
+            var m = method || 'GET';
+            var b = body || null;
+            var opt = extra || null;
+
+            if (typeof headers === 'boolean' || typeof headers === 'string') {
+                opt = { impersonate: headers };
+                h = {};
+            } else if (typeof headers === 'object' && headers !== null && (headers.method || headers.headers || headers.body || headers.impersonate !== undefined || headers.engine !== undefined)) {
+                h = headers.headers || {};
+                m = headers.method || (typeof method === 'string' ? method : 'GET');
+                b = headers.body || (typeof body === 'string' ? body : null);
+                opt = headers;
+            } else if (typeof extra === 'boolean') {
+                opt = { impersonate: extra };
+            } else if (typeof method === 'boolean') {
+                opt = { impersonate: method };
+                m = 'GET';
+            } else if (typeof body === 'boolean') {
+                opt = { impersonate: body };
+                b = null;
+            }
+
             return new Promise(function(resolve, reject) {
-                fetchv2Native(url, headers || {}, method || 'GET', body || null, resolve, reject);
+                fetchv2Native(url, h, m, b, opt || {}, resolve, reject);
             });
         }
         """)
@@ -348,13 +460,14 @@ final class ModuleJSRunner {
     private func setupFetchAliases(_ ctx: JSContext) {
         ctx.evaluateScript("""
         function soraFetch(url, options) {
-            var headers = {}, method = 'GET', body = null;
-            if (options) {
+            var headers = {}, method = 'GET', body = null, extra = null;
+            if (options && typeof options === 'object') {
                 headers = options.headers || {};
                 method  = options.method  || 'GET';
                 body    = options.body    || null;
+                extra   = options;
             }
-            return fetchv2(url, headers, method, body);
+            return fetchv2(url, headers, method, body, extra);
         }
         function fetch(url, options) {
             return soraFetch(url, options);
