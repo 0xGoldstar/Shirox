@@ -134,5 +134,6 @@ final class SeanimeWrapperTests: XCTestCase {
             return XCTFail("Expected an error")
         }
         XCTAssertTrue(failure.message.contains("servers"))
+        XCTAssertTrue(failure.message.contains("a: down"), "Each server's reason is kept, for App Logs")
     }
 }

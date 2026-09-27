@@ -175,9 +175,13 @@ async function animeStreams(href) {
   const p = provider();
   const settings = typeof p.getSettings === "function" ? p.getSettings() : null;
   const servers = settings?.episodeServers?.length ? settings.episodeServers : ["default"];
+  const failures = [];
   const answers = await Promise.all(servers.map((server) =>
     withTimeout(Promise.resolve().then(() => p.findEpisodeServer(episode, server)), 15000)
-      .then((answer) => ({ server, answer }), () => null)));
+      .then((answer) => ({ server, answer }), (error) => {
+        failures.push(`${server}: ${(error && error.message) || error}`);
+        return null;
+      })));
 
   const streams = [];
   const subtitles = [];
@@ -201,7 +205,10 @@ async function animeStreams(href) {
       }
     }
   }
-  if (!streams.length) throw new Error("None of this provider's servers answered for this episode.");
+  if (!streams.length) {
+    const why = failures.length ? ` (${failures.join("; ")})` : "";
+    throw new Error(`None of this provider's servers answered for this episode${why}.`);
+  }
   const out = { streams };
   if (subtitles.length) {
     out.subtitle = subtitles[0].url;
