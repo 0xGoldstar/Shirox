@@ -35,10 +35,26 @@ final class DetailViewModel: ObservableObject {
     /// The page's AniList match has settled: known up front, found, guessed, or none.
     @Published private(set) var aniListMatchSettled = false
 
-    /// A match the user chose, or cleared.
+    /// A match the user chose, or cleared. The poster and synopsis borrowed for a module that
+    /// sends none follow it.
     func setAniListMatch(_ id: Int?) {
         aniListID = id
         aniListMatchIsGuess = false
+        if let id {
+            fetchAniListMetadata(id: id)
+        } else if let moduleDetail {
+            aniListMedia = nil
+            detail = moduleDetail
+        }
+    }
+
+    /// The detail as the module sent it, before anything is borrowed from the AniList match.
+    private var moduleDetail: MediaDetail?
+
+    /// Shows the module's detail, with the poster and synopsis it lacks taken from the match.
+    private func show(_ fetched: MediaDetail) {
+        moduleDetail = fetched
+        detail = fetched.borrowing(from: aniListMedia)
     }
 
     /// Set by loadOffline. Tells load() to treat snapshot data as authoritative for
@@ -104,7 +120,7 @@ final class DetailViewModel: ObservableObject {
                 } else if let existing = detail, d.episodes.isEmpty {
                     d.episodes = existing.episodes
                 }
-                detail = d
+                show(d)
                 isLoadingDetail = false
 
                 isLoadingEpisodes = true
@@ -118,7 +134,7 @@ final class DetailViewModel: ObservableObject {
                     && (!hydratedFromSnapshot || fetched.allSatisfy { $0.number > 0 })
                 if looksValid {
                     d.episodes = fetched
-                    detail = d
+                    show(d)
                 }
             } catch {
                 // If we already rendered something (e.g. from an offline snapshot),
@@ -207,8 +223,10 @@ final class DetailViewModel: ObservableObject {
     private func fetchAniListMetadata(id: Int) {
         Task {
             isLoadingAniListMedia = true
-            if let raw = try? await AniListService.shared.detail(id: id) {
+            // A newer match may have been chosen while this one loaded.
+            if let raw = try? await AniListService.shared.detail(id: id), aniListID == id {
                 self.aniListMedia = AniListProvider.shared.mapMedia(raw)
+                if let moduleDetail { detail = moduleDetail.borrowing(from: aniListMedia) }
             }
             isLoadingAniListMedia = false
         }

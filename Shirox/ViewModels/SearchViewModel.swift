@@ -75,6 +75,17 @@ final class SearchViewModel: ObservableObject {
                         moduleResults = await NSFWContentFilter.shared.filter(deduped, keyword: q)
                         aniListResults = []
                     }
+                    // Results with no image (every Seanime anime provider) get AniList's covers,
+                    // after the grid is already showing.
+                    let bare = moduleResults.filter { $0.image.isEmpty }.map(\.title)
+                    if !bare.isEmpty, !Task.isCancelled {
+                        isLoading = false
+                        let manga = ModuleManager.shared.activeModule?.isManga == true
+                        if let covers = try? await AniListService.shared.covers(for: bare, manga: manga),
+                           !Task.isCancelled {
+                            moduleResults = Self.withPosters(moduleResults, covers: covers)
+                        }
+                    }
                 } else if DiscoverySource.shared.usesSimkl {
                     let outcome = await SimklSearch.run(q)
                     if !Task.isCancelled {
@@ -125,5 +136,18 @@ final class SearchViewModel: ObservableObject {
     var hasResults: Bool { !moduleResults.isEmpty || !aniListResults.isEmpty || !simklSections.isEmpty }
     var resultCount: Int {
         moduleResults.count + aniListResults.count + simklSections.reduce(0) { $0 + $1.items.count }
+    }
+}
+
+extension SearchViewModel {
+    /// Results that came without an image take AniList's cover for their title. Each row is
+    /// changed in place, keeping its identity, so the grid doesn't redraw it.
+    static func withPosters(_ items: [SearchItem], covers: [String: String]) -> [SearchItem] {
+        items.map { item in
+            guard item.image.isEmpty, let cover = covers[item.title] else { return item }
+            var filled = item
+            filled.image = cover
+            return filled
+        }
     }
 }

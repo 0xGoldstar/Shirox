@@ -153,6 +153,46 @@ final class AniListService {
         return try await fetchPage(query: query, variables: ["search": keyword])
     }
 
+    /// Covers for titles that came without one — a module's search results, say — in one
+    /// request, each title a Page of its own via aliasing. A title AniList doesn't know is
+    /// left out. Keyed by the title as given.
+    func covers(for titles: [String], manga: Bool) async throws -> [String: String] {
+        var seen = Set<String>()
+        let titles = Array(titles.filter { seen.insert($0).inserted }.prefix(25))
+        guard !titles.isEmpty else { return [:] }
+        let type = manga ? "MANGA" : "ANIME"
+        let declarations = titles.indices.map { "$t\($0): String" }.joined(separator: ", ")
+        let pages = titles.indices.map {
+            "t\($0): Page(perPage: 1) { media(search: $t\($0), type: \(type), sort: SEARCH_MATCH, isAdult: false) { coverImage { large } } }"
+        }.joined(separator: "\n  ")
+        var variables: [String: Any] = [:]
+        for (index, title) in titles.enumerated() { variables["t\(index)"] = Self.coverSearchTerm(title) }
+        let data = try await post(query: "query (\(declarations)) {\n  \(pages)\n}", variables: variables)
+        return Self.covers(from: data, titles: titles)
+    }
+
+    /// A title as AniList would know it: without the "(Dub)" or "[Sub]" a site adds.
+    static func coverSearchTerm(_ title: String) -> String {
+        title.replacingOccurrences(of: #"\s*[\(\[](dub|sub|dubbed|subbed)[\)\]]\s*$"#, with: "",
+                                   options: [.regularExpression, .caseInsensitive])
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Each title's cover from its aliased Page (`t0`, `t1`, …), in the order asked.
+    static func covers(from data: Data, titles: [String]) -> [String: String] {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let pages = object["data"] as? [String: Any] else { return [:] }
+        var covers: [String: String] = [:]
+        for (index, title) in titles.enumerated() {
+            guard let page = pages["t\(index)"] as? [String: Any],
+                  let media = (page["media"] as? [[String: Any]])?.first,
+                  let cover = (media["coverImage"] as? [String: Any])?["large"] as? String,
+                  !cover.isEmpty else { continue }
+            covers[title] = cover
+        }
+        return covers
+    }
+
     /// AniList MANGA search, used to auto-match a module-scraped manga to a
     /// tracking entry. Selects `idMal` (→ MAL tracking for free) and `chapters`
     /// (total, for Completed promotion; nil when ongoing).

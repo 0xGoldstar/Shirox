@@ -922,7 +922,12 @@ struct DetailView: View {
                 .localFileURL(in: snap, relative: banner).absoluteString
         }
         #endif
-        return item.image
+        return item.image.isEmpty ? (vm.aniListMedia?.bannerImage ?? posterURL) : item.image
+    }
+
+    /// The search result's image, or the AniList cover borrowed for a module that sends none.
+    private var posterURL: String {
+        item.image.isEmpty ? (vm.detail?.image ?? "") : item.image
     }
 
     // MARK: - Hero (unchanged, but poster overlay uses neutral strokes)
@@ -953,13 +958,13 @@ struct DetailView: View {
             CurvedGradientShadow(height: 350, color: platformBackground, style: .subtle)
 
             HStack(alignment: .bottom, spacing: 14) {
-                CachedAsyncImage(urlString: item.image)
+                CachedAsyncImage(urlString: posterURL)
                     .frame(width: 110, height: 165)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
                     .expandablePoster {
-                        CachedAsyncImage(urlString: item.image, contentMode: .fit)
+                        CachedAsyncImage(urlString: posterURL, contentMode: .fit)
                     }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -1573,7 +1578,7 @@ struct DetailView: View {
                             episode: episode,
                             mediaTitle: detail.title,
                             moduleId: effectiveModuleId,
-                            itemImage: item.image,
+                            itemImage: posterURL,
                             totalEpisodes: detail.episodes.isEmpty ? nil : detail.episodes.count,
                             detailHref: vm.detailHref,
                             aniListID: vm.aniListID ?? aniListID,
@@ -1617,7 +1622,7 @@ struct DetailView: View {
                             episode: episode,
                             mediaTitle: detail.title,
                             moduleId: effectiveModuleId,
-                            itemImage: item.image,
+                            itemImage: posterURL,
                             totalEpisodes: detail.episodes.isEmpty ? nil : detail.episodes.count,
                             detailHref: vm.detailHref,
                             aniListID: vm.aniListID ?? aniListID,
