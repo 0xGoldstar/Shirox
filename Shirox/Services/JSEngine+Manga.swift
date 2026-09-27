@@ -32,6 +32,7 @@ extension JSEngine {
               let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             throw JSEngineError.parseError("Could not parse manga search results")
         }
+        for (image, headers) in Self.mangaImageHeaders(array) { MangaPageHeaders.shared.record(headers, for: image) }
         return Self.parseMangaSearchItems(array)
     }
 
@@ -74,6 +75,17 @@ extension JSEngine {
             let image = (item["imageURL"] as? String) ?? (item["image"] as? String) ?? ""
             return SearchItem(title: title, image: image, href: href)
         }
+    }
+
+    /// Headers a search result gave for its cover — a Seanime provider's site Referer — by address.
+    nonisolated static func mangaImageHeaders(_ array: [[String: Any]]) -> [String: [String: String]] {
+        var headersByImage: [String: [String: String]] = [:]
+        for item in array {
+            guard let image = (item["imageURL"] as? String) ?? (item["image"] as? String), !image.isEmpty,
+                  let headers = item["imageHeaders"] as? [String: String], !headers.isEmpty else { continue }
+            headersByImage[image] = headers
+        }
+        return headersByImage
     }
 
     /// A page is its address, or — from a Seanime provider — `{url, headers}`.

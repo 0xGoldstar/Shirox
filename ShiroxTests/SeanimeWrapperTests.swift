@@ -136,4 +136,47 @@ final class SeanimeWrapperTests: XCTestCase {
         XCTAssertTrue(failure.message.contains("servers"))
         XCTAssertTrue(failure.message.contains("a: down"), "Each server's reason is kept, for App Logs")
     }
+
+    // MARK: - Cover images
+
+    /// A stand-in for the engine's `fetch`: answers with an empty body.
+    private let hostFetch = "globalThis.fetch = async (url, options) => ({ ok: true, status: 200, text: async () => '', json: async () => ({}) });"
+
+    /// MangaBuddy's covers are refused without the Referer the provider sends to its own site —
+    /// the one covers get too.
+    func testCoversGetTheRefererTheProviderSendsItsSite() {
+        let context = SeanimeJSHarness.context(provider: """
+        class Provider {
+          async search(opts) {
+            await fetch("https://api.site.test/search?q=" + opts.query, { headers: { Referer: "https://site.test/" } });
+            return [{ id: "m1", title: "One", image: "https://cdn.test/c.webp" }, { id: "m2", title: "Two" }];
+          }
+        }
+        """, kind: "manga", host: hostFetch)
+        let results = value(SeanimeJSHarness.call(context, "searchResults", ["x"])) as? [[String: Any]]
+        XCTAssertEqual(results?.first?["imageHeaders"] as? [String: String], ["Referer": "https://site.test/"])
+        XCTAssertNil(results?.last?["imageHeaders"], "No image, no headers")
+    }
+
+    /// A provider that sends no Referer: its site's own address, from its first request.
+    func testCoversOtherwiseGetTheSitesAddress() {
+        let context = SeanimeJSHarness.context(provider: """
+        class Provider {
+          async search(opts) {
+            await fetch("https://www.site2.test/search/?q=" + opts.query);
+            return [{ id: "m1", title: "One", image: "https://img.site2.test/c.jpg" }];
+          }
+        }
+        """, kind: "manga", host: hostFetch)
+        let results = value(SeanimeJSHarness.call(context, "searchResults", ["x"])) as? [[String: Any]]
+        XCTAssertEqual(results?.first?["imageHeaders"] as? [String: String], ["Referer": "https://www.site2.test/"])
+    }
+
+    func testTheEngineRecordsCoverHeaders() {
+        let recorded = JSEngine.mangaImageHeaders([
+            ["title": "One", "id": "m1", "image": "https://cdn.test/c.webp", "imageHeaders": ["Referer": "https://site.test/"]],
+            ["title": "Two", "id": "m2", "image": "https://cdn.test/d.webp"],
+        ])
+        XCTAssertEqual(recorded, ["https://cdn.test/c.webp": ["Referer": "https://site.test/"]])
+    }
 }

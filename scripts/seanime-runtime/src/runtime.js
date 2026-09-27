@@ -87,6 +87,25 @@ if (globalThis.console) {
     }
   }
 }
+// ---- The provider's site, for its cover images ----
+// Covers on a protected image server are refused without the Referer the provider sends to its
+// own site (MangaBuddy: 403 without, 200 with) — or, when it sends none, its site's address.
+let siteReferer = null;
+const hostFetch = globalThis.fetch;
+if (typeof hostFetch === "function") {
+  globalThis.fetch = (url, options) => {
+    const headers = (options && options.headers) || {};
+    const referer = headers.Referer || headers.referer;
+    if (referer) {
+      siteReferer = referer;
+    } else if (!siteReferer) {
+      const origin = String(url).match(/^https?:\/\/[^/]+/);
+      if (origin) siteReferer = origin[0] + "/";
+    }
+    return hostFetch(url, options);
+  };
+}
+
 // ---- The wrapper: Shirox's module functions, answered by the provider ----
 let instance;
 function provider() {
@@ -98,7 +117,11 @@ function provider() {
 // Manga: raw values — Shirox's manga bridge JSON-encodes them itself.
 async function mangaSearch(keyword) {
   const results = (await provider().search({ query: keyword })) || [];
-  return results.map((r) => ({ title: r.title, image: r.image || "", id: String(r.id) }));
+  return results.map((r) => {
+    const item = { title: r.title, image: r.image || "", id: String(r.id) };
+    if (item.image && siteReferer) item.imageHeaders = { Referer: siteReferer };
+    return item;
+  });
 }
 
 function mangaDetails() {

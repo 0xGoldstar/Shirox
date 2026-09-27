@@ -13,8 +13,11 @@ enum SeanimeJSHarness {
         return try! String(contentsOf: url, encoding: .utf8)
     }
 
-    static func context(provider script: String = "", kind: String = "manga", dub: Bool = false) -> JSContext {
+    static func context(provider script: String = "", kind: String = "manga", dub: Bool = false,
+                        host: String = "") -> JSContext {
         let context = JSContext()!
+        // What the engine defines before the runtime — a stand-in `fetch`, say.
+        context.evaluateScript(host)
         context.setObject(["kind": kind, "name": "Test", "dub": dub], forKeyedSubscript: "__seanime" as NSString)
         context.evaluateScript(runtimeSource)
         context.evaluateScript(script)
