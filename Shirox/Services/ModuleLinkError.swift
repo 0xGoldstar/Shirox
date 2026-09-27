@@ -15,15 +15,15 @@ enum ModuleLinkError: LocalizedError, Equatable {
         case .unreachable(let status):
             return "That link answered with error \(status). Check it was copied in full."
         case .image:
-            return "That link is an image, not a module. Paste the module's .json link — for a Seanime provider, its manifest.json."
+            return "That link is an image, not a module. Paste the module's .json link instead."
         case .webPage:
             return "That link is a web page, not a module. On GitHub, open the file and use its Raw link."
         case .script:
-            return "That link is a script, not a module. Paste the .json link beside it — for a Seanime provider, its manifest.json."
+            return "That link is a script, not a module. Paste the .json link beside it instead."
         case .seanimeList:
-            return "That link is a list of Seanime providers. Adding a whole list isn't supported yet — paste one provider's manifest.json link."
+            return "That link is a list of modules. Adding a whole list isn't supported yet — paste one module's .json link."
         case .notAModule:
-            return "That link isn't a Shirox module or a Seanime provider manifest."
+            return "That link isn't a module Shirox can add."
         }
     }
 
