@@ -35,14 +35,19 @@ final class ModuleManager: ObservableObject {
         isLoading = true
         errorMessage = nil
         do {
-            let (data, _) = try await URLSession.shared.data(from: jsonURL)
+            let (data, response) = try await URLSession.shared.data(from: jsonURL)
             var module: ModuleDefinition
             if let seanime = SeanimeManifest.detect(data) {
                 // A Seanime provider's manifest: its script is fetched, converted and checked here.
                 module = try await SeanimeInstaller.module(from: seanime, manifestURL: jsonURL)
                 await cacheIcon(for: &module)
             } else {
-                module = try JSONDecoder().decode(ModuleDefinition.self, from: data)
+                do {
+                    module = try JSONDecoder().decode(ModuleDefinition.self, from: data)
+                } catch {
+                    // Not a module: say what the link is instead.
+                    throw ModuleLinkError.diagnose(data, response: response, url: jsonURL)
+                }
                 module.jsonUrl = jsonURL.absoluteString
                 // Cache script and icon
                 await cacheAssets(for: &module)
