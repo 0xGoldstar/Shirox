@@ -90,6 +90,34 @@ final class MPVEngineTests: XCTestCase {
         XCTAssertEqual(engine.currentTime, 1.25, accuracy: 0.05)
     }
 
+    /// The resume seek can come while the file is still opening; mpv can't seek until it has, so
+    /// the seek waits for it instead of being dropped.
+    func testASeekAskedForWhileLoadingLandsOnceLoaded() async throws {
+        engine.load(PlaybackSource(url: try silence(seconds: 3)))
+        XCTAssertFalse(engine.isItemReady)
+        await engine.seek(to: 2, precision: .exact)
+        XCTAssertTrue(engine.isItemReady)
+        XCTAssertEqual(engine.currentTime, 2, accuracy: 0.05)
+    }
+
+    /// The saved quality preference arrives while the file opens; mpv reopens it with the cap
+    /// and only then reports it ready, once.
+    func testACapSetWhileLoadingReloadsThenReportsReadyOnce() async throws {
+        var readyCount = 0
+        let ready = expectation(description: "ready")
+        engine.events.itemReady = {
+            readyCount += 1
+            ready.fulfill()
+        }
+        engine.load(PlaybackSource(url: try silence(seconds: 2)))
+        engine.setPeakBitRate(1_000_000)
+        await fulfillment(of: [ready], timeout: 10)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(readyCount, 1)
+        XCTAssertTrue(engine.isItemReady)
+        XCTAssertEqual(engine.duration ?? 0, 2, accuracy: 0.05)
+    }
+
     func testASeekWithACompletionCallsIt() async throws {
         try await loadReady(seconds: 2)
         let done = expectation(description: "seeked")

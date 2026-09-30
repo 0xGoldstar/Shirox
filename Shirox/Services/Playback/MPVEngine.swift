@@ -62,6 +62,11 @@ final class MPVEngine: PlaybackEngine {
     private var lastTimeControl: PlaybackTimeControl = .paused
     private var lastTickTime = -Double.infinity
     private var pendingSeeks: [(Bool) -> Void] = []
+    /// A seek asked for while the file was still opening, which mpv can't do yet; made once it has.
+    private var seekAfterLoad: (seconds: Double, precision: SeekPrecision, completion: ((Bool) -> Void)?)?
+    /// A bitrate cap set while the file was still opening. mpv picks the variant as it opens a
+    /// file, so the cap needs a reload once it's open.
+    private var reloadAfterLoad = false
     private var source: PlaybackSource?
     private var defaultUserAgent = ""
     private var observers: [NSObjectProtocol] = []
@@ -221,13 +226,25 @@ final class MPVEngine: PlaybackEngine {
             isItemFailed = false
             reportTimeControl()
         case .fileLoaded:
+            if reloadAfterLoad {
+                reloadAfterLoad = false
+                reload(at: seekAfterLoad?.seconds ?? currentTime)
+                return
+            }
             isItemReady = true
             events.itemReady()
             reportTimeControl()
+            if let pending = seekAfterLoad {
+                seekAfterLoad = nil
+                seek(to: pending.seconds, precision: pending.precision, completion: pending.completion)
+            }
         case .endFile(let reason, let error):
             // A replaced or stopped file ends too; only an error is news.
             guard reason == MPV_END_FILE_REASON_ERROR.rawValue else { return }
             finishPendingSeeks(false)
+            seekAfterLoad?.completion?(false)
+            seekAfterLoad = nil
+            reloadAfterLoad = false
             let failure = Failure(code: error)
             Logger.shared.log("[MPV] Playback failed: \(failure.localizedDescription)", type: "Error")
             if isItemReady {
@@ -305,6 +322,13 @@ final class MPVEngine: PlaybackEngine {
         for completion in done { completion(finished) }
     }
 
+    /// Opens the current source again at `seconds` — how a new bitrate cap takes effect.
+    private func reload(at seconds: Double) {
+        guard let source else { return }
+        isItemReady = false
+        command("loadfile", location(of: source.url), "replace", "-1", "start=\(seconds)")
+    }
+
     private func refreshAudioOptions() {
         let count = Int(getInt64("track-list/count") ?? 0)
         var options: [PlaybackAudioOption] = []
@@ -333,6 +357,9 @@ final class MPVEngine: PlaybackEngine {
         audioOptions = []
         selectedAudioOption = nil
         finishPendingSeeks(false)
+        seekAfterLoad?.completion?(false)
+        seekAfterLoad = nil
+        reloadAfterLoad = false
         setProperty("http-header-fields", MPVOptions.headerFields(source.headers))
         setProperty("user-agent", MPVOptions.userAgent(source.headers) ?? defaultUserAgent)
         setProperty("referrer", MPVOptions.referrer(source.headers) ?? "")
@@ -346,6 +373,8 @@ final class MPVEngine: PlaybackEngine {
         guard !isStopped else { return }
         isStopped = true
         finishPendingSeeks(false)
+        seekAfterLoad?.completion?(false)
+        seekAfterLoad = nil
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers = []
         events = PlaybackEngineEvents()
@@ -389,9 +418,17 @@ final class MPVEngine: PlaybackEngine {
     func playImmediately(atRate rate: Float) { self.rate = rate }
 
     func seek(to seconds: Double, precision: SeekPrecision, completion: ((Bool) -> Void)?) {
-        // Nothing loaded: nothing will restart to complete it.
         guard isItemReady else {
-            completion?(false)
+            if source != nil, !isItemFailed {
+                // Still opening: seek once it has. A later request replaces an earlier one, as a
+                // newer seek does on AVPlayer.
+                seekAfterLoad?.completion?(false)
+                seekAfterLoad = (seconds, precision, completion)
+                currentTime = seconds
+            } else {
+                // Nothing loading: nothing will restart to complete it.
+                completion?(false)
+            }
             return
         }
         if let completion { pendingSeeks.append(completion) }
@@ -412,10 +449,12 @@ final class MPVEngine: PlaybackEngine {
     /// mpv picks a variant as a file opens, so a new cap reloads the stream where it is.
     func setPeakBitRate(_ bitsPerSecond: Int?) {
         setProperty("hls-bitrate", MPVOptions.hlsBitrate(bitsPerSecond))
-        guard isItemReady, let source else { return }
-        let resumeAt = currentTime
-        isItemReady = false
-        command("loadfile", location(of: source.url), "replace", "-1", "start=\(resumeAt)")
+        guard source != nil, !isItemFailed else { return }
+        if isItemReady {
+            reload(at: currentTime)
+        } else {
+            reloadAfterLoad = true
+        }
     }
 
     func selectAudioOption(_ id: PlaybackAudioOption.ID) {
