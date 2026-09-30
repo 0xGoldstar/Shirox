@@ -2165,6 +2165,7 @@
 				95DE5ABBF64ACBFE36B79FBD /* Sources */,
 				896FE0E84327FF272C55EBF6 /* Frameworks */,
 				AA000003000000000000CC01 /* Resources */,
+				9CA99335E0742827EA68E858 /* Remove MPVKit Stubs (Mac Catalyst) */,
 			);
 			buildRules = (
 			);
@@ -2313,6 +2314,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		9CA99335E0742827EA68E858 /* Remove MPVKit Stubs (Mac Catalyst) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Remove MPVKit Stubs (Mac Catalyst)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# MPVKit links mpv, FFmpeg and the rest statically, yet Xcode still copies a small stub\n# framework for each into the app. On Mac Catalyst those stubs have the iPhone layout, and the\n# app fails validation (\"contains Info.plist, expected Versions/Current/Resources/Info.plist\").\n# Nothing loads them - the app has no load command for any - so they are removed.\n[ \"${IS_MACCATALYST}\" = \"YES\" ] || exit 0\ncd \"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\" 2>/dev/null || exit 0\nfor name in Libmpv Libavcodec Libavdevice Libavfilter Libavformat Libavutil Libswresample Libswscale \\\n            Libass Libfreetype Libfribidi Libharfbuzz Libunibreak Libplacebo Libshaderc_combined lcms2 \\\n            Libdovi Libdav1d Libuavs3d Libbluray Libuchardet Libssl Libcrypto gmp nettle hogweed gnutls; do\n  rm -rf \"${name}.framework\"\ndone\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		0D7C42462608CC0CC47C2FD3 /* Sources */ = {
