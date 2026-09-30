@@ -1,6 +1,7 @@
 #if os(iOS)
 import XCTest
 import UIKit
+import SwiftUI
 @testable import Shirox
 
 final class PageCurlTests: XCTestCase {
@@ -38,6 +39,120 @@ final class PageCurlTests: XCTestCase {
         XCTAssertTrue(PageCurl.canTurn(from: 11, forward: true, in: ids))
         XCTAssertTrue(PageCurl.canTurn(from: 11, forward: false, in: ids))
         XCTAssertFalse(PageCurl.canTurn(from: nil, forward: true, in: ids), "no page on screen yet")
+    }
+}
+
+/// The pager over a turn, driven the way UIKit drives it: the delegate hears the turn begin, the
+/// page view controller already reports the incoming page, and the reader re-renders meanwhile —
+/// it does, constantly, as pages warm and progress saves.
+@MainActor
+final class PageCurlPagerTurnTests: XCTestCase {
+
+    final class Model: ObservableObject {
+        @Published var current = 0
+        /// Stands for anything else in the reader that re-renders it.
+        @Published var unrelated = 0
+    }
+
+    struct Harness: View {
+        @ObservedObject var model: Model
+        var body: some View {
+            // The reader's page closure captures the reader itself, so every re-render hands the
+            // pager a new one and SwiftUI updates it; capturing state here does the same.
+            let unrelated = model.unrelated
+            PageCurlPager(pageIDs: [0, 1, 2, 3, 4], current: $model.current, rightToLeft: false) { id, _ in
+                Text("\(id) \(unrelated)")
+            }
+        }
+    }
+
+    private var window: UIWindow!
+    private var model: Model!
+    private var pager: UIPageViewController!
+
+    override func setUp() async throws {
+        model = Model()
+        let host = UIHostingController(rootView: Harness(model: model))
+        window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        flush()
+        pager = Self.find(UIPageViewController.self, in: host)
+        XCTAssertNotNil(pager)
+    }
+
+    override func tearDown() async throws {
+        window.isHidden = true
+        window = nil
+    }
+
+    private func flush() {
+        window.rootViewController?.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    }
+
+    private var shown: Int? { (pager.viewControllers?.first as? CurlPageHost)?.pageID }
+
+    /// UIKit starts a curl to the next page: it tells the delegate, and from then on the page view
+    /// controller reports the incoming page as the one it shows.
+    private func beginTurnForward() -> (previous: UIViewController, pending: UIViewController) {
+        let previous = pager.viewControllers!.first!
+        let pending = pager.dataSource!.pageViewController(pager, viewControllerAfter: previous)!
+        pager.delegate?.pageViewController?(pager, willTransitionTo: [pending])
+        pager.setViewControllers([pending], direction: .forward, animated: false)
+        return (previous, pending)
+    }
+
+    func testAReRenderMidTurnLeavesTheTurningPageAlone() {
+        XCTAssertEqual(shown, 0)
+        let turn = beginTurnForward()
+
+        model.unrelated += 1
+        flush()
+        XCTAssertEqual(shown, 1, "a re-render mid-curl yanked the page back to the one being turned away from")
+
+        pager.delegate?.pageViewController?(pager, didFinishAnimating: true,
+                                            previousViewControllers: [turn.previous], transitionCompleted: true)
+        flush()
+        XCTAssertEqual(model.current, 1)
+        XCTAssertEqual(shown, 1)
+    }
+
+    func testACancelledTurnStaysOnItsPage() {
+        let turn = beginTurnForward()
+        // The finger lets go short of the turn: UIKit puts the page back and says so.
+        pager.setViewControllers([turn.previous], direction: .reverse, animated: false)
+        pager.delegate?.pageViewController?(pager, didFinishAnimating: true,
+                                            previousViewControllers: [turn.previous], transitionCompleted: false)
+        model.unrelated += 1
+        flush()
+        XCTAssertEqual(model.current, 0)
+        XCTAssertEqual(shown, 0)
+    }
+
+    func testAJumpFromOutsideStillTurnsStraightThere() {
+        model.current = 3
+        flush()
+        XCTAssertEqual(shown, 3)
+    }
+
+    /// After a finished turn the pager knows which page it shows, so a later jump lands.
+    func testAJumpAfterATurnLands() {
+        let turn = beginTurnForward()
+        pager.delegate?.pageViewController?(pager, didFinishAnimating: true,
+                                            previousViewControllers: [turn.previous], transitionCompleted: true)
+        flush()
+        model.current = 0
+        flush()
+        XCTAssertEqual(shown, 0)
+    }
+
+    private static func find<T: UIViewController>(_ type: T.Type, in controller: UIViewController) -> T? {
+        if let match = controller as? T { return match }
+        for child in controller.children {
+            if let match = find(type, in: child) { return match }
+        }
+        return nil
     }
 }
 
