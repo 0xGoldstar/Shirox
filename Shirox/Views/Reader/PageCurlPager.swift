@@ -26,6 +26,20 @@ enum PageCurl {
         guard let id else { return false }
         return neighbor(of: id, offset: forward ? 1 : -1, in: ids) != nil
     }
+
+    /// Whether a pan may start a curl: only if there's a page whichever way it turns. The swipe's
+    /// motion and distance say one thing, where the page was grabbed may say another — the half
+    /// away from the spine turns forward — and UIKit picks the way itself. Judged by motion alone,
+    /// a leftward swipe grabbed on the first page's left half passed, UIKit curled it back to no
+    /// page, and threw "The number of view controllers provided (0) doesn't match the number
+    /// required (1) for the requested transition". Mid-chapter every way has a page.
+    static func canBeginCurl(from id: Int?, velocityX: CGFloat, translationX: CGFloat, locationX: CGFloat,
+                             width: CGFloat, rightToLeft: Bool, in ids: [Int]) -> Bool {
+        var ways = [rightToLeft ? locationX < width / 2 : locationX > width / 2]
+        if velocityX != 0 { ways.append(isForward(velocityX: velocityX, rightToLeft: rightToLeft)) }
+        if translationX != 0 { ways.append(isForward(velocityX: translationX, rightToLeft: rightToLeft)) }
+        return ways.allSatisfy { canTurn(from: id, forward: $0, in: ids) }
+    }
 }
 
 /// The paged reader with Apple Books' page curl — `UIPageViewController`'s own `.pageCurl`, which
@@ -141,10 +155,14 @@ struct PageCurlPager<Page: View>: UIViewControllerRepresentable {
             // Taps toggle the reader's controls, never turn the page.
             if gestureRecognizer is UITapGestureRecognizer { return false }
             guard let shown = displayed, !zoomed.contains(shown) else { return false }
-            if let pan = gestureRecognizer as? UIPanGestureRecognizer {
-                let forward = PageCurl.isForward(velocityX: pan.velocity(in: pan.view).x,
-                                                 rightToLeft: parent.rightToLeft)
-                guard PageCurl.canTurn(from: shown, forward: forward, in: parent.pageIDs) else { return false }
+            if let pan = gestureRecognizer as? UIPanGestureRecognizer, let view = pan.view {
+                guard PageCurl.canBeginCurl(from: shown,
+                                            velocityX: pan.velocity(in: view).x,
+                                            translationX: pan.translation(in: view).x,
+                                            locationX: pan.location(in: view).x,
+                                            width: view.bounds.width,
+                                            rightToLeft: parent.rightToLeft,
+                                            in: parent.pageIDs) else { return false }
             }
             return uikitDelegate?.gestureRecognizerShouldBegin?(gestureRecognizer) ?? true
         }
