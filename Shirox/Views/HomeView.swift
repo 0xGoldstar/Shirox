@@ -293,26 +293,9 @@ private struct FeaturedCarousel: View {
                 let carouselMidX = geo.frame(in: .global).midX
 
                 ZStack(alignment: .bottom) {
-                    TabView(selection: $selectedTab) {
-                        ForEach(0..<2000, id: \.self) { index in
-                            if !displayItems.isEmpty {
-                                FeaturedCard(
-                                    media: displayItems[index % displayCount],
-                                    isWide: isWideCard,
-                                    width: geo.size.width,
-                                    height: baseHeight,
-                                    carouselMidX: carouselMidX
-                                )
-                                .frame(width: geo.size.width, height: baseHeight)
-                                .clipped()
-                                .tag(index)
-                            }
-                        }
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .frame(width: geo.size.width, height: baseHeight)
-                    .clipped()
-                    .scaleEffect(isPullingDown ? scale : 1.0, anchor: .bottom)
+                    HeroPager(items: displayItems, selection: $selectedTab, width: geo.size.width,
+                              height: baseHeight, isWide: isWideCard, carouselMidX: carouselMidX)
+                        .scaleEffect(isPullingDown ? scale : 1.0, anchor: .bottom)
 
                     ZStack(alignment: .bottom) {
                         CurvedGradientShadow(height: 350, color: platformBackground, style: .prominent)
@@ -433,6 +416,44 @@ private struct FeaturedCarousel: View {
         #endif
     }
 }
+
+#if os(iOS) && !targetEnvironment(macCatalyst)
+/// The hero's pages, on their own so the Home scroll can't reach them. The carousel reads the
+/// scroll offset for its pull-down stretch, which re-ran its whole body on every frame of a scroll
+/// — and with it this `ForEach`, rebuilding all 2,000 pages 120 times a second, enough to heat a
+/// phone. Given only what the pages show, SwiftUI skips this view while those stay the same.
+private struct HeroPager: View {
+    let items: [Media]
+    @Binding var selection: Int
+    let width: CGFloat
+    let height: CGFloat
+    let isWide: Bool
+    /// The carousel's centre on screen, which each page's parallax is measured from.
+    let carouselMidX: CGFloat
+
+    var body: some View {
+        TabView(selection: $selection) {
+            ForEach(0..<2000, id: \.self) { index in
+                if !items.isEmpty {
+                    FeaturedCard(
+                        media: items[index % items.count],
+                        isWide: isWide,
+                        width: width,
+                        height: height,
+                        carouselMidX: carouselMidX
+                    )
+                    .frame(width: width, height: height)
+                    .clipped()
+                    .tag(index)
+                }
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .frame(width: width, height: height)
+        .clipped()
+    }
+}
+#endif
 
 // MARK: - macOS Featured Carousel (lightweight, no TabView with 2000 items)
 
