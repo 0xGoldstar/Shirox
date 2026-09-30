@@ -139,6 +139,9 @@ final class AVPlayerEngine: PlaybackEngine {
         return duration.seconds
     }
 
+    /// The picture's own size, zero until known.
+    var presentationSize: CGSize { player.currentItem?.presentationSize ?? .zero }
+
     var bufferedUntil: Double {
         (player.currentItem?.loadedTimeRanges ?? [])
             .map { $0.timeRangeValue }

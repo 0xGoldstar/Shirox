@@ -265,8 +265,19 @@ struct PlayerView: View {
             }
 
             if engine != nil, !castManager.isConnected {
+                #if !os(tvOS)
+                if subtitleRoute == .assOverlay, let av = engine as? AVPlayerEngine, let assScript {
+                    PlayerAssOverlay(script: assScript, engine: av, filled: assOverlayFilled,
+                                     visible: subtitleSettings.enabled,
+                                     delay: subtitleSettings.delaySeconds,
+                                     fontScale: subtitleSettings.fontSize / 24)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                }
+                #endif
+
                 PlayerSubtitleOverlay(
-                    cues: subtitleCues,
+                    cues: subtitleRoute == .cues ? subtitleCues : [],
                     currentTime: currentTime,
                     showControls: showControls,
                     settings: subtitleSettings
@@ -1713,6 +1724,22 @@ struct PlayerView: View {
 
     private var engineKind: PlaybackEngineKind {
         engine is MPVEngine ? .mpv : .native
+    }
+
+    /// Who draws the subtitles now.
+    private var subtitleRoute: SubtitleRoute {
+        SubtitleRouting.route(engine: engineKind,
+                              loaded: assScript != nil ? .ass : (subtitleCues.isEmpty ? .nothing : .cues),
+                              pickedExternal: false, pickedEmbedded: nil, embeddedDefault: nil)
+    }
+
+    /// Whether AVPlayer's picture is cropped to fill the screen — only the iOS video view can.
+    private var assOverlayFilled: Bool {
+        #if os(iOS)
+        isFilled
+        #else
+        false
+        #endif
     }
 
     @MainActor
