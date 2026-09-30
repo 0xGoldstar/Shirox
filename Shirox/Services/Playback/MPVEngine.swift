@@ -10,11 +10,33 @@ import UIKit
 /// MoltenVK briefly sets the drawable to 1×1 to force a presentation through; taking that size
 /// made the picture flicker and could leave it stuck at 1×1 (mpv-player/mpv#13651).
 final class MPVMetalLayer: CAMetalLayer {
+    /// Called when the layer's size in pixels changes — a rotation, a window resize — on
+    /// whichever thread changed it.
+    var onResize: (() -> Void)?
+
     override var drawableSize: CGSize {
         get { super.drawableSize }
         set {
             if Int(newValue.width) > 1 && Int(newValue.height) > 1 { super.drawableSize = newValue }
         }
+    }
+
+    // Once MoltenVK has set the drawable's size it no longer follows the layer's, so it's kept
+    // in step here: mpv reads it as the size to draw at.
+    override var bounds: CGRect {
+        didSet { if bounds.size != oldValue.size { fitDrawable() } }
+    }
+
+    override var contentsScale: CGFloat {
+        didSet { if contentsScale != oldValue { fitDrawable() } }
+    }
+
+    private func fitDrawable() {
+        let size = CGSize(width: (bounds.width * contentsScale).rounded(),
+                          height: (bounds.height * contentsScale).rounded())
+        guard size.width > 1, size.height > 1, size != drawableSize else { return }
+        drawableSize = size
+        onResize?()
     }
 }
 
@@ -76,6 +98,7 @@ final class MPVEngine: PlaybackEngine {
     private var loadGeneration = 0
     private var defaultUserAgent = ""
     private var observers: [NSObjectProtocol] = []
+    private var pendingRefit: DispatchWorkItem?
 
     private(set) var currentTime: Double = 0
     private(set) var duration: Double?
@@ -139,7 +162,13 @@ final class MPVEngine: PlaybackEngine {
             guard let context else { return }
             Unmanaged<MPVEngine>.fromOpaque(context).takeUnretainedValue().drainSoon()
         }, Unmanaged.passUnretained(self).toOpaque())
-        if output == .metal { observeBackground() }
+        if output == .metal {
+            observeBackground()
+            // Layout resizes it on the main thread, but MoltenVK works the layer from mpv's own.
+            layer.onResize = { [weak self] in
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.layerResized() } }
+            }
+        }
     }
 
     deinit {
@@ -400,6 +429,7 @@ final class MPVEngine: PlaybackEngine {
         finishPendingSeeks(false)
         seekAfterLoad?.completion?(false)
         seekAfterLoad = nil
+        pendingRefit?.cancel()
         router?.release()
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers = []
@@ -492,6 +522,45 @@ final class MPVEngine: PlaybackEngine {
     /// Fill crops the picture to the screen; fit shows all of it.
     func setFillsScreen(_ fills: Bool) {
         setDouble("panscan", fills ? 1 : 0)
+    }
+
+    /// The size in pixels mpv draws its picture at; nil until it has drawn one.
+    var videoOutputSize: CGSize? {
+        guard let width = getInt64("osd-dimensions/w"), let height = getInt64("osd-dimensions/h"),
+              width > 0, height > 0 else { return nil }
+        return CGSize(width: Int(width), height: Int(height))
+    }
+
+    // MARK: - Resizing
+
+    /// MPVKit's renderer reads the layer's size only when it sets up its video output, and never
+    /// again (mpvkit/MPVKit#3): after a rotation mpv went on drawing at the old size, the picture
+    /// small in one corner. So once a resize has settled, a video output drawing at the wrong
+    /// size is rebuilt, and the new one takes the layer's size.
+    private func layerResized() {
+        pendingRefit?.cancel()
+        let refit = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.refitVideoOutput() }
+        }
+        pendingRefit = refit
+        // A rotation animates its layout; rebuild once, at the end.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: refit)
+    }
+
+    private func refitVideoOutput() {
+        guard !isStopped, let mpv = handle, let drawn = videoOutputSize else { return }
+        let target = layer.drawableSize
+        guard abs(drawn.width - target.width) > 2 || abs(drawn.height - target.height) > 2 else { return }
+        // Off while backgrounded, and back on with the right size when it returns.
+        guard let track = getString("vid"), track != "no" else { return }
+        Logger.shared.log("[MPV] Drawing at \(Int(drawn.width))×\(Int(drawn.height)) in a \(Int(target.width))×\(Int(target.height)) layer; rebuilding the video output", type: "Player")
+        // Setting up a video output builds a Vulkan device, too slow for the main thread. The
+        // queue is where a stop destroys the handle, so it's still alive when this runs.
+        let live = Handle(pointer: mpv)
+        queue.async {
+            mpv_set_property_string(live.pointer, "vid", "no")
+            mpv_set_property_string(live.pointer, "vid", track)
+        }
     }
 
     // MARK: - Backgrounding
