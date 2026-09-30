@@ -80,4 +80,31 @@ final class PlaybackFallbackTests: XCTestCase {
         XCTAssertEqual(PlaybackFallback.decision(after: network, engine: .mpv,
                                                  canRefetch: false, hasRefetched: false), .giveUp)
     }
+
+    // MARK: - Waiting
+
+    /// mpv gives up on a dead source by itself, so while it's opening a stream the wait is left
+    /// to it: a far-away server took 15 s, and Retry came up just before it would have played.
+    func testMPVOpeningIsLeftToFinish() {
+        XCTAssertTrue(PlaybackFallback.waitIsOpening(engine: .mpv, isItemReady: false, isItemFailed: false))
+        XCTAssertFalse(PlaybackFallback.waitIsOpening(engine: .mpv, isItemReady: true, isItemFailed: false))
+        XCTAssertFalse(PlaybackFallback.waitIsOpening(engine: .mpv, isItemReady: false, isItemFailed: true))
+        XCTAssertNotNil(PlaybackFallback.openingPatience(for: .mpv))
+    }
+
+    /// AVPlayer can wait forever on a wedged request, so its waits stay the watchdog's.
+    func testAVPlayerOpeningIsStillWatched() {
+        XCTAssertFalse(PlaybackFallback.waitIsOpening(engine: .native, isItemReady: false, isItemFailed: false))
+        XCTAssertNil(PlaybackFallback.openingPatience(for: .native))
+    }
+
+    /// A wait is a stall only if nothing moved: a moved playhead is a seek landing, a grown
+    /// buffer a slow connection catching up.
+    func testAWaitIsAStallOnlyIfNothingMoved() {
+        XCTAssertTrue(PlaybackFallback.isStalled(playheadMoved: 0, bufferGrew: 0))
+        XCTAssertTrue(PlaybackFallback.isStalled(playheadMoved: 0.2, bufferGrew: 0.2))
+        XCTAssertFalse(PlaybackFallback.isStalled(playheadMoved: 0, bufferGrew: 3))
+        XCTAssertFalse(PlaybackFallback.isStalled(playheadMoved: 12, bufferGrew: 0))
+        XCTAssertFalse(PlaybackFallback.isStalled(playheadMoved: -12, bufferGrew: 0))
+    }
 }

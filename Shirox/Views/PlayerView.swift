@@ -153,6 +153,10 @@ struct PlayerView: View {
     /// deferred element); cleared on didBecomeKey when the menu is dismissed (see body).
     @State private var overlayActive = false
     @State private var videoReady = false
+    /// An open left to finish is taking a while; the loading screen says so.
+    @State private var isOpeningSlowly = false
+    /// Counts `watchOpening` calls, so only the latest watch acts.
+    @State private var openingWatch = 0
     @State private var isBuffering = false
     /// The audio tracks the stream offers, refreshed when the engine finds them.
     @State private var audioOptions: [PlaybackAudioOption] = []
@@ -691,7 +695,15 @@ struct PlayerView: View {
                     }
                 }
                 .padding(.top, 8)
+
+                if isOpeningSlowly {
+                    Text("Still loading. This source is slow to start.")
+                        .font(.caption).foregroundStyle(.white.opacity(0.6))
+                        .multilineTextAlignment(.center)
+                        .transition(.opacity)
+                }
             }
+            .animation(.easeOut(duration: 0.3), value: isOpeningSlowly)
             .padding(.horizontal, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1665,12 +1677,19 @@ struct PlayerView: View {
         // The play/pause reports and the clock, attached after play() as they always were.
         e.events = engineEvents()
 
-        // Add a fallback to ensure we don't load forever
-        Task {
-            try? await Task.sleep(nanoseconds: 10_000_000_000) // 10 seconds
-            if !videoReady {
-                Logger.shared.log("[Player] Loading timeout reached, forcing ready state", type: "Debug")
-                await MainActor.run { videoReady = true }
+        isOpeningSlowly = false
+        if let patience = PlaybackFallback.openingPatience(for: kind) {
+            // The engine sees its own open through, however slow: the loading screen stays up
+            // until it plays or fails, rather than giving way to a black screen and a Retry.
+            watchOpening(of: e, patience: patience)
+        } else {
+            // Add a fallback to ensure we don't load forever
+            Task {
+                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10 seconds
+                if !videoReady {
+                    Logger.shared.log("[Player] Loading timeout reached, forcing ready state", type: "Debug")
+                    await MainActor.run { videoReady = true }
+                }
             }
         }
 
@@ -1692,6 +1711,53 @@ struct PlayerView: View {
 
     private var engineKind: PlaybackEngineKind {
         engine is MPVEngine ? .mpv : .native
+    }
+
+    @MainActor
+    private func handleItemFailure(_ error: Error?) {
+        switch PlaybackFallback.decision(after: error, engine: engineKind,
+                                         canRefetch: canRecoverStream && !isRefetchingStream,
+                                         hasRefetched: refetchedAfterFailure) {
+        case .refetch:
+            refetchedAfterFailure = true
+            Task { @MainActor in await refetchStream() }
+        case .switchToMPV:
+            switchToMPV()
+        case .giveUp:
+            // Nothing to re-extract and no engine left to try — surface the failure instead
+            // of spinning forever.
+            surfaceUnrecoverablePlayback()
+        }
+    }
+
+    /// Keeps the loading screen up while an engine that sees its own open through (see
+    /// `PlaybackFallback.waitIsOpening`) opens `opening`: says so once it's taking a while, and
+    /// counts it failed past the engine's patience.
+    @MainActor
+    private func watchOpening(of opening: any PlaybackEngine, patience: TimeInterval) {
+        // An engine is reused across episodes and quality switches, so a watch is also over
+        // once a newer one starts.
+        openingWatch += 1
+        let watch = openingWatch
+        let stillOpening = { [opening] in
+            openingWatch == watch && engine.map { $0 === opening } == true
+                && !opening.isItemReady && !opening.isItemFailed
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(PlaybackFallback.slowOpeningHint * 1_000_000_000))
+            if stillOpening() { isOpeningSlowly = true }
+            try? await Task.sleep(nanoseconds: UInt64((patience - PlaybackFallback.slowOpeningHint) * 1_000_000_000))
+            guard stillOpening() else { return }
+            Logger.shared.log("[Player] Still opening after \(Int(patience))s — counting it failed", type: "Error")
+            handleItemFailure(nil)
+        }
+    }
+
+    /// For a load into the engine already playing — the next episode, another quality.
+    @MainActor
+    private func watchOpeningIfLeftToFinish() {
+        guard let engine, let patience = PlaybackFallback.openingPatience(for: engineKind) else { return }
+        watchOpening(of: engine, patience: patience)
     }
 
     /// On iOS mpv fetches remote streams through the app's proxy: its own HTTP/1.1 networking is
@@ -1826,22 +1892,12 @@ struct PlayerView: View {
             // With a resume position the overlay stays up until the seek lands, so the
             // user never sees a frame from the wrong position.
             if currentContext?.resumeFrom == nil { videoReady = true }
+            // Opened, but still filling its buffer: from here a wait is watched like any other.
+            if engine?.timeControl == .waiting { startStallWatchdog() }
         }
         events.itemFailed = { error in
             Logger.shared.log("[Player] Item failed: \(error?.localizedDescription ?? "unknown error")", type: "Error")
-            switch PlaybackFallback.decision(after: error, engine: engineKind,
-                                             canRefetch: canRecoverStream && !isRefetchingStream,
-                                             hasRefetched: refetchedAfterFailure) {
-            case .refetch:
-                refetchedAfterFailure = true
-                Task { @MainActor in await refetchStream() }
-            case .switchToMPV:
-                switchToMPV()
-            case .giveUp:
-                // Nothing to re-extract and no engine left to try — surface the failure instead
-                // of spinning forever.
-                surfaceUnrecoverablePlayback()
-            }
+            handleItemFailure(error)
         }
         events.playedToEnd = {
             // AVPlayer also posts this when a stream *dies* mid-episode — a CDN connection
@@ -2155,19 +2211,28 @@ struct PlayerView: View {
         // Ignore user-initiated transitions that legitimately produce a wait state.
         guard !isScrubbing, !isLoadingNextEpisode, !isRefetchingStream, !isRecoveringStall else { return }
         guard stallWatchdogTask == nil else { return } // already armed
+        // An open left to finish is `watchOpening`'s, not a stall.
+        if let engine, PlaybackFallback.waitIsOpening(engine: engineKind, isItemReady: engine.isItemReady,
+                                                      isItemFailed: engine.isItemFailed) { return }
         let stalledAt = currentTime
+        let bufferedAt = engine?.bufferedUntil ?? 0
         stallWatchdogTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 8_000_000_000)
             guard !Task.isCancelled else { return }
             stallWatchdogTask = nil
             // Playing or paused again → the stall cleared, nothing to recover.
             guard engine?.timeControl == .waiting else { return }
-            // Still waiting, but the playhead moved since we armed. A waiting player isn't
-            // advancing on its own, so a moved position means a SEEK into an unbuffered
-            // region (skip past the buffer, or resume-to-saved-position). A seek produces no
-            // fresh .playing→.waiting transition to re-trigger us, so re-arm at the new spot
-            // instead of bailing — otherwise that stall buffers forever with no recovery.
-            guard abs(currentTime - stalledAt) < 0.5 else { startStallWatchdog(); return }
+            // Still waiting, but something moved since we armed: re-arm rather than recover.
+            // A waiting player isn't advancing on its own, so a moved position means a SEEK
+            // into an unbuffered region (skip past the buffer, or resume-to-saved-position),
+            // which produces no fresh .playing→.waiting transition to re-trigger us. A grown
+            // buffer is a slow connection catching up: recovering would restart it, and the
+            // Retry it ends in used to work at once only because the buffer had filled.
+            guard PlaybackFallback.isStalled(playheadMoved: currentTime - stalledAt,
+                                             bufferGrew: (engine?.bufferedUntil ?? 0) - bufferedAt) else {
+                startStallWatchdog()
+                return
+            }
             await attemptStallRecovery()
         }
     }
@@ -2588,6 +2653,7 @@ struct PlayerView: View {
         // never noticed at all. The engine attaches them with every load. The audio tracks it
         // finds come back through `audioOptionsChanged`.
         engine?.load(PlaybackSource(url: next.url, headers: next.headers))
+        watchOpeningIfLeftToFinish()
         subtitleTracks = next.allSubtitles ?? subtitleTracks
         currentStream = next
         engine?.waitsToMinimizeStalling = !isLocalPlayback
@@ -2641,6 +2707,7 @@ struct PlayerView: View {
         var source = PlaybackSource(url: next.url, headers: next.headers)
         source.prefersJapaneseAudio = next.subtitle != nil
         engine?.load(source)
+        watchOpeningIfLeftToFinish()
         // THE BUG: this used to start the local player unconditionally. During a cast the
         // local player is deliberately parked and silent, so an auto-advance played episode 2
         // out of the handset while the Chromecast still sat on the finished episode 1. The new

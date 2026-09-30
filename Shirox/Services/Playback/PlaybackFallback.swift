@@ -63,4 +63,30 @@ enum PlaybackFallback {
             return refetchLeft ? .refetch : .giveUp
         }
     }
+
+    // MARK: - Waiting
+
+    /// Whether a wait is the engine still opening its stream, left to finish rather than watched
+    /// for a stall. mpv gives up on a dead source by itself, so a slow open is just slow: a
+    /// far-away server took it 15 s, and the watchdog offered Retry just before it would have
+    /// played. AVPlayer can wait forever on a wedged request, so its waits stay watched.
+    static func waitIsOpening(engine: PlaybackEngineKind, isItemReady: Bool, isItemFailed: Bool) -> Bool {
+        engine == .mpv && !isItemReady && !isItemFailed
+    }
+
+    /// How long an open left to finish may take before it counts as failed — past mpv's own
+    /// 60-second network timeout; nil for an engine whose open is watched instead.
+    static func openingPatience(for engine: PlaybackEngineKind) -> TimeInterval? {
+        engine == .mpv ? 75 : nil
+    }
+
+    /// When the loading screen says an open left to finish is taking a while.
+    static let slowOpeningHint: TimeInterval = 6
+
+    /// Whether a wait watched for the watchdog's whole interval is a stall: nothing moved. A
+    /// moved playhead is a seek landing somewhere unbuffered; a grown buffer is a slow
+    /// connection catching up, which recovering would only restart.
+    static func isStalled(playheadMoved: Double, bufferGrew: Double) -> Bool {
+        abs(playheadMoved) < 0.5 && bufferGrew < 0.5
+    }
 }
