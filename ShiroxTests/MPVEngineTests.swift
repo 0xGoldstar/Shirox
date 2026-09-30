@@ -1,0 +1,138 @@
+import XCTest
+import AVFoundation
+@testable import Shirox
+
+/// The mpv engine against real files — silent audio of a known length — with no video or audio
+/// output, so it runs without a GPU or a sound device.
+@MainActor
+final class MPVEngineTests: XCTestCase {
+
+    private var engine: MPVEngine!
+    private var files: [URL] = []
+
+    override func setUp() async throws {
+        engine = MPVEngine(output: .none)
+    }
+
+    override func tearDown() async throws {
+        engine.stop()
+        engine = nil
+        for file in files { try? FileManager.default.removeItem(at: file) }
+    }
+
+    private func silence(seconds: Double) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mpv-\(UUID().uuidString).caf")
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+        let frames = AVAudioFrameCount(seconds * 44_100)
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+        buffer.frameLength = frames
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: format.settings)
+            try file.write(from: buffer)
+        }
+        files.append(url)
+        return url
+    }
+
+    private func loadReady(seconds: Double) async throws {
+        let ready = expectation(description: "ready")
+        ready.assertForOverFulfill = false
+        engine.events.itemReady = { ready.fulfill() }
+        engine.load(PlaybackSource(url: try silence(seconds: seconds)))
+        await fulfillment(of: [ready], timeout: 10)
+    }
+
+    func testALoadedFileBecomesReadyWithItsDuration() async throws {
+        try await loadReady(seconds: 2)
+        XCTAssertTrue(engine.isItemReady)
+        XCTAssertFalse(engine.isItemFailed)
+        XCTAssertEqual(engine.duration ?? 0, 2, accuracy: 0.05)
+    }
+
+    func testAMissingFileFails() async {
+        let failed = expectation(description: "failed")
+        failed.assertForOverFulfill = false
+        engine.events.itemFailed = { _ in failed.fulfill() }
+        engine.load(PlaybackSource(url: FileManager.default.temporaryDirectory
+            .appendingPathComponent("missing-\(UUID().uuidString).caf")))
+        await fulfillment(of: [failed], timeout: 10)
+        XCTAssertTrue(engine.isItemFailed)
+        XCTAssertFalse(engine.isItemReady)
+    }
+
+    /// A load doesn't start playback — the player decides when.
+    func testLoadingLeavesItPaused() async throws {
+        try await loadReady(seconds: 2)
+        XCTAssertEqual(engine.rate, 0)
+        XCTAssertEqual(engine.timeControl, .paused)
+    }
+
+    func testPlayingReportsPlayingAndTheClockTicks() async throws {
+        try await loadReady(seconds: 3)
+        let playing = expectation(description: "playing")
+        playing.assertForOverFulfill = false
+        let ticked = expectation(description: "ticked")
+        ticked.assertForOverFulfill = false
+        engine.events.timeControlChanged = { if $0 == .playing { playing.fulfill() } }
+        // The first tick is the starting position; wait for one where the clock has moved.
+        engine.events.tick = { [unowned engine] in if engine!.currentTime > 0 { ticked.fulfill() } }
+        engine.rate = 1.5
+        await fulfillment(of: [playing, ticked], timeout: 10)
+        XCTAssertEqual(engine.rate, 1.5)
+        engine.pause()
+        XCTAssertEqual(engine.rate, 0)
+        XCTAssertEqual(engine.timeControl, .paused)
+    }
+
+    func testAnExactSeekLandsOnItsTime() async throws {
+        try await loadReady(seconds: 2)
+        await engine.seek(to: 1.25, precision: .exact)
+        XCTAssertEqual(engine.currentTime, 1.25, accuracy: 0.05)
+    }
+
+    func testASeekWithACompletionCallsIt() async throws {
+        try await loadReady(seconds: 2)
+        let done = expectation(description: "seeked")
+        engine.seek(to: 0.5, precision: .within(0.5)) { _ in done.fulfill() }
+        await fulfillment(of: [done], timeout: 10)
+    }
+
+    func testPlayingToTheEndIsReported() async throws {
+        try await loadReady(seconds: 0.5)
+        let ended = expectation(description: "ended")
+        engine.events.playedToEnd = { ended.fulfill() }
+        engine.rate = 1
+        await fulfillment(of: [ended], timeout: 10)
+    }
+
+    func testASecondLoadReplacesTheFirst() async throws {
+        try await loadReady(seconds: 2)
+        try await loadReady(seconds: 1)
+        XCTAssertEqual(engine.duration ?? 0, 1, accuracy: 0.05)
+    }
+
+    func testVolumeIsKeptAsSet() {
+        engine.volume = 0.25
+        XCTAssertEqual(engine.volume, 0.25, accuracy: 0.001)
+    }
+
+    func testAFileWithOneAudioTrackOffersIt() async throws {
+        try await loadReady(seconds: 1)
+        if engine.audioOptions.isEmpty {
+            let options = expectation(description: "options")
+            options.assertForOverFulfill = false
+            engine.events.audioOptionsChanged = { options.fulfill() }
+            await fulfillment(of: [options], timeout: 10)
+        }
+        XCTAssertEqual(engine.audioOptions.count, 1)
+    }
+
+    func testAStoppedEngineReportsNothing() throws {
+        var heard = false
+        engine.events.itemReady = { heard = true }
+        engine.load(PlaybackSource(url: try silence(seconds: 1)))
+        engine.stop()
+        RunLoop.main.run(until: Date().addingTimeInterval(1))
+        XCTAssertFalse(heard)
+    }
+}
