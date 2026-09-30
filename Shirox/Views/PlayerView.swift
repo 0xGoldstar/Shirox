@@ -67,6 +67,13 @@ struct PlayerView: View {
     /// Plays the stream. A new one for every `setupPlayer()`, as a new AVPlayer was made; a swap
     /// loads into the one there is.
     @State private var engine: (any PlaybackEngine)? = nil
+    @AppStorage("playerEngine") private var preferredEngine = PlaybackEngineKind.native.rawValue
+    /// Set once AVPlayer has given up on something MPV then played; the rest of the session stays
+    /// on MPV, since the next episode would most likely fail the same way first.
+    @State private var fellBackToMPV = false
+    /// A fresh URL was already fetched after a failure of this episode, so the next failure moves
+    /// on (to MPV, or to the retry) instead of fetching another.
+    @State private var refetchedAfterFailure = false
     @State private var isPlaying = false
     /// Last play/pause state pushed to the progress sync, so we report a genuine
     /// play↔pause flip exactly once (nil = nothing reported yet). Dedups the
@@ -231,13 +238,20 @@ struct PlayerView: View {
                                    videoGravity: isFilled ? .resizeAspectFill : .resizeAspect)
                         .ignoresSafeArea()
                         .overlay { videoLoadingOverlay }
+                } else if let mpv = engine as? MPVEngine {
+                    MPVVideoView(engine: mpv, filled: isFilled)
+                        .ignoresSafeArea()
+                        .overlay { videoLoadingOverlay }
                 }
                 #elseif os(tvOS)
-                // TODO: add compatible player view
-                EmptyView()
+                if let mpv = engine as? MPVEngine {
+                    MPVVideoView(engine: mpv, filled: isFilled).ignoresSafeArea()
+                }
                 #else
                 if let av = engine as? AVPlayerEngine {
                     MacVideoPlayerView(player: av.player).ignoresSafeArea()
+                } else if let mpv = engine as? MPVEngine {
+                    MPVVideoView(engine: mpv, filled: isFilled).ignoresSafeArea()
                 }
                 #endif
             } else {
@@ -882,11 +896,13 @@ struct PlayerView: View {
             title: currentStream.title,
             onDismiss: castManager.isConnected ? exitCastMode : handleDismiss,
             isLocked: $isLocked,
-            onPiP: {
+            // Picture in Picture and AirPlay video need the native engine's AVPlayer.
+            onPiP: engine is MPVEngine ? nil : {
                 #if os(iOS)
                 pipTrigger += 1
                 #endif
             },
+            showsAirPlay: !(engine is MPVEngine),
             topPadding: topPad,
             isLandscape: isLandscape
         )
@@ -1360,6 +1376,8 @@ struct PlayerView: View {
         // While casting the local player is deliberately parked and the TV is fed by the
         // Chromecast path. Rebuilding it here would start a second, audible playback.
         guard !castManager.isConnected else { return }
+        // MPV can't hand its picture to an AirPlay receiver, so there's no route to rebuild for.
+        guard engine is AVPlayerEngine else { return }
 
         let needsProxy = AirPlayRouting.needsProxy(
             url: currentStream.url,
@@ -1610,7 +1628,17 @@ struct PlayerView: View {
             source = PlaybackSource(url: currentStream.url, headers: currentStream.headers)
         }
         source.prefersJapaneseAudio = currentStream.subtitle != nil
-        let e = AVPlayerEngine()
+        #if os(tvOS)
+        // The native player shows no picture on tvOS; MPV is the one that does.
+        let kind = PlaybackEngineKind.mpv
+        #else
+        let kind = fellBackToMPV
+            ? PlaybackEngineKind.mpv
+            : PlaybackFallback.initialEngine(preferred: PlaybackEngineKind(rawValue: preferredEngine) ?? .native,
+                                             url: currentStream.url)
+        #endif
+        Logger.shared.log("[Player] Playing on the \(kind.rawValue) engine", type: "Player")
+        let e: any PlaybackEngine = kind == .mpv ? MPVEngine() : AVPlayerEngine()
         e.load(source)
         // Stall-minimisation is for streams: it holds playback until AVPlayer has built a
         // network-sized buffer. A downloaded episode is already on disk (or a hop away over
@@ -1660,6 +1688,21 @@ struct PlayerView: View {
         #if os(iOS)
         setupRemoteCommands()
         #endif
+    }
+
+    private var engineKind: PlaybackEngineKind {
+        engine is MPVEngine ? .mpv : .native
+    }
+
+    /// Carries on in MPV from where AVPlayer stopped: the same rebuild the AirPlay reroute and
+    /// the local recovery use, seeded with the position.
+    @MainActor
+    private func switchToMPV() {
+        Logger.shared.log("[Player] AVPlayer couldn't play this — continuing in MPV at \(currentTime)s", type: "Player")
+        fellBackToMPV = true
+        if currentTime > 0 { currentContext?.resumeFrom = currentTime }
+        didSeekToResume = false
+        setupPlayer()
     }
 
     /// What the player does as its engine reports. Every event is about the item on screen: the
@@ -1776,12 +1819,19 @@ struct PlayerView: View {
         }
         events.itemFailed = { error in
             Logger.shared.log("[Player] Item failed: \(error?.localizedDescription ?? "unknown error")", type: "Error")
-            guard canRecoverStream, !isRefetchingStream else {
-                // Nothing to re-extract — surface the failure instead of spinning forever.
+            switch PlaybackFallback.decision(after: error, engine: engineKind,
+                                             canRefetch: canRecoverStream && !isRefetchingStream,
+                                             hasRefetched: refetchedAfterFailure) {
+            case .refetch:
+                refetchedAfterFailure = true
+                Task { @MainActor in await refetchStream() }
+            case .switchToMPV:
+                switchToMPV()
+            case .giveUp:
+                // Nothing to re-extract and no engine left to try — surface the failure instead
+                // of spinning forever.
                 surfaceUnrecoverablePlayback()
-                return
             }
-            Task { @MainActor in await refetchStream() }
         }
         events.playedToEnd = {
             // AVPlayer also posts this when a stream *dies* mid-episode — a CDN connection
@@ -2554,6 +2604,8 @@ struct PlayerView: View {
     }
 
     private func swapStream(_ next: StreamResult, episodeNumber: Int, allStreams: [StreamResult] = [], episodeHref: String? = nil) {
+        // A new episode gets its own re-fetch; a re-fetch of this one (same number) doesn't.
+        if episodeNumber != currentContext?.episodeNumber { refetchedAfterFailure = false }
         didTrackEpisode = false
         completionBox.context = nil
         // onWatchNext confirmed ep `episodeNumber` exists. If availableEpisodes is stale

@@ -565,6 +565,7 @@ struct AccountsSettingsView: View {
 struct PlayerSettingsView: View {
     @AppStorage("forceLandscape") private var forceLandscape = false
     @AppStorage("playerLiquidGlass") private var playerLiquidGlass = true
+    @AppStorage("playerEngine") private var playerEngine = PlaybackEngineKind.native.rawValue
     @AppStorage("preferredQuality") private var preferredQuality: String = "auto"
     @AppStorage("speedBoostTolerance") private var speedBoostTolerance: Int = 10
     @AppStorage("playerSkipShort") private var skipShort: Int = 10
@@ -594,6 +595,16 @@ struct PlayerSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                #if !os(tvOS)
+                Picker("Player Engine", selection: $playerEngine) {
+                    Text("Native").tag(PlaybackEngineKind.native.rawValue)
+                    Text("MPV").tag(PlaybackEngineKind.mpv.rawValue)
+                }
+                Text("MPV plays more formats, like MKV, and more subtitle styles, but has no Picture in Picture or AirPlay video. Native switches to MPV by itself when it can't play something.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                #endif
             }
 
             Section("Playback Quality & Gestures") {
