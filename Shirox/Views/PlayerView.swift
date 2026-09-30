@@ -181,6 +181,14 @@ struct PlayerView: View {
     @State private var subtitleCues: [SubtitleCue] = []
     /// The chosen track when it's an ASS script, kept whole for libass (or mpv) to draw.
     @State private var assScript: String?
+    /// The subtitle tracks inside the file, which only MPV draws.
+    @State private var embeddedSubtitles: [PlaybackSubtitleOption] = []
+    /// The file's default subtitle track, or its first.
+    @State private var embeddedSubtitleDefault: Int?
+    /// A track inside the file the viewer picked.
+    @State private var pickedEmbeddedSubtitle: Int?
+    /// The viewer picked (or imported) a downloadable track rather than taking the default.
+    @State private var subtitlePickedByUser = false
     @State private var selectedSubtitleTrack: SubtitleTrack? = nil
     @State private var subtitleTracks: [SubtitleTrack]? = nil
     @ObservedObject var subtitleSettings = SubtitleSettingsManager.shared
@@ -625,9 +633,14 @@ struct PlayerView: View {
             PlayerSubtitleSettingsView(
                 settings: subtitleSettings,
                 availableTracks: subtitleTracks,
-                selectedTrack: $selectedSubtitleTrack,
+                selectedTrack: Binding(get: { shownSubtitleTrack }, set: { pickSubtitleTrack($0) }),
                 allowLocalImport: canImportSubtitles,
-                onImport: addImportedSubtitle
+                onImport: addImportedSubtitle,
+                embeddedTracks: embeddedSubtitles,
+                selectedEmbedded: shownEmbeddedSubtitle,
+                onSelectEmbedded: { pickEmbeddedSubtitle($0) },
+                showsStyledNote: subtitleRoute == .assOverlay || subtitleRoute == .mpvScript
+                    || shownEmbeddedSubtitle != nil
             )
             .id(subtitleTracks?.count ?? 0)            .adaptivePresentationDetents([.medium, .large])
         }
@@ -640,6 +653,12 @@ struct PlayerView: View {
             }
         }
         .onChangeOf(selectedSubtitleTrack) { loadSubtitles() }
+        // What mpv draws follows who's drawing, and the viewer's settings.
+        .onChangeOf(subtitleRoute) { _ in applySubtitlesToMPV() }
+        .onChangeOf(assScript) { _ in applySubtitlesToMPV() }
+        .onChangeOf(subtitleSettings.enabled) { _ in applySubtitlesToMPV() }
+        .onChangeOf(subtitleSettings.delaySeconds) { _ in applySubtitlesToMPV() }
+        .onChangeOf(subtitleSettings.fontSize) { _ in applySubtitlesToMPV() }
         .sheet(isPresented: $showNextEpisodePicker, onDismiss: {
             nextEpisodeStreams = []
             nextEpisodeNumber = 0
@@ -1626,6 +1645,9 @@ struct PlayerView: View {
     private func setupPlayer() {
         engine?.stop()
         audioOptions = []
+        embeddedSubtitles = []
+        embeddedSubtitleDefault = nil
+        pickedEmbeddedSubtitle = nil
         #if os(iOS)
         videoReady = false
         // Take audio focus now that a player is actually opening. This is what
@@ -1689,6 +1711,8 @@ struct PlayerView: View {
 
         // The play/pause reports and the clock, attached after play() as they always were.
         e.events = engineEvents()
+        // A new engine starts out drawing no subtitles of its own.
+        applySubtitlesToMPV()
 
         isOpeningSlowly = false
         if let patience = PlaybackFallback.openingPatience(for: kind) {
@@ -1730,7 +1754,8 @@ struct PlayerView: View {
     private var subtitleRoute: SubtitleRoute {
         SubtitleRouting.route(engine: engineKind,
                               loaded: assScript != nil ? .ass : (subtitleCues.isEmpty ? .nothing : .cues),
-                              pickedExternal: false, pickedEmbedded: nil, embeddedDefault: nil)
+                              pickedExternal: subtitlePickedByUser, pickedEmbedded: pickedEmbeddedSubtitle,
+                              embeddedDefault: embeddedSubtitleDefault)
     }
 
     /// Whether AVPlayer's picture is cropped to fill the screen — only the iOS video view can.
@@ -1956,6 +1981,11 @@ struct PlayerView: View {
             guard canRecoverStream, !isRefetchingStream else { return }
             Logger.shared.log("[StreamExpiry] failedToPlayToEndTime: \(error?.localizedDescription ?? "unknown") — refetching", type: "Player")
             Task { @MainActor in await recoverPlayback() }
+        }
+        events.subtitleOptionsChanged = {
+            guard let mpv = engine as? MPVEngine else { return }
+            embeddedSubtitles = mpv.subtitleOptions
+            embeddedSubtitleDefault = mpv.defaultSubtitleOption
         }
         events.audioOptionsChanged = {
             audioOptions = engine?.audioOptions ?? []
@@ -2702,6 +2732,10 @@ struct PlayerView: View {
         }
         subtitleCues = []
         assScript = nil
+        // The new file brings its own tracks, numbered its own way.
+        embeddedSubtitles = []
+        embeddedSubtitleDefault = nil
+        pickedEmbeddedSubtitle = nil
         selectedSubtitleTrack = nil
         loadSubtitles()
         // Seek to same position after item is ready
@@ -2774,6 +2808,8 @@ struct PlayerView: View {
         // Reset prefetch so the newly-playing episode prefetches its own next.
         didPrefetchNext = false
         prefetchTask = nil
+        // A new episode starts on its default subtitles, the file's own on MPV.
+        subtitlePickedByUser = false
         prefetchedResult = nil
         didSeekToResume = true
         subtitleTracks = next.allSubtitles ?? subtitleTracks
@@ -2805,6 +2841,10 @@ struct PlayerView: View {
         }
         subtitleCues = []
         assScript = nil
+        // The new file brings its own tracks, numbered its own way.
+        embeddedSubtitles = []
+        embeddedSubtitleDefault = nil
+        pickedEmbeddedSubtitle = nil
         selectedSubtitleTrack = nil
         loadSubtitles()
         tvdbEpisodeTitle = nil
@@ -2850,15 +2890,17 @@ struct PlayerView: View {
         let settings = subtitleSettings
         return PlayerSubtitleMenu.elements(
             enabled: settings.enabled, delay: settings.delaySeconds, fontSize: settings.fontSize,
-            tracks: subtitleTracks ?? [], selected: selectedSubtitleTrack,
+            tracks: subtitleTracks ?? [], selected: shownSubtitleTrack,
+            embedded: embeddedSubtitles, selectedEmbedded: shownEmbeddedSubtitle,
             actions: PlayerSubtitleMenu.Actions(
                 setEnabled: { settings.enabled = $0 },
                 currentDelay: { settings.delaySeconds },
                 setDelay: { settings.delaySeconds = $0 },
                 setFontSize: { settings.fontSize = $0 },
-                selectTrack: { selectedSubtitleTrack = $0 },
+                selectTrack: { pickSubtitleTrack($0) },
                 importFile: canImportSubtitles ? { showSubtitleImporter = true } : nil,
-                moreSettings: { showSubtitleSettings = true }))
+                moreSettings: { showSubtitleSettings = true },
+                selectEmbedded: { pickEmbeddedSubtitle($0) }))
     }
 
     /// Two different meanings of "local" live in this file. `PlayerContext.isLocalPlayback` is
@@ -2874,7 +2916,44 @@ struct PlayerView: View {
         var tracks = subtitleTracks ?? []
         tracks.append(track)
         subtitleTracks = tracks
+        pickSubtitleTrack(track)
+    }
+
+    /// The viewer chose a downloadable track, or Default (nil).
+    private func pickSubtitleTrack(_ track: SubtitleTrack?) {
+        pickedEmbeddedSubtitle = nil
+        subtitlePickedByUser = track != nil
         selectedSubtitleTrack = track
+    }
+
+    private func pickEmbeddedSubtitle(_ id: Int) {
+        pickedEmbeddedSubtitle = id
+    }
+
+    /// The downloadable track on screen, if one is.
+    private var shownSubtitleTrack: SubtitleTrack? {
+        switch subtitleRoute {
+        case .cues, .assOverlay, .mpvScript: return selectedSubtitleTrack
+        case .none, .mpvEmbedded: return nil
+        }
+    }
+
+    /// The track inside the file on screen, if one is.
+    private var shownEmbeddedSubtitle: Int? {
+        if case .mpvEmbedded(let id) = subtitleRoute { return id }
+        return nil
+    }
+
+    /// Tells mpv what to draw — nothing when the overlay's drawing — and how.
+    private func applySubtitlesToMPV() {
+        guard let mpv = engine as? MPVEngine else { return }
+        switch subtitleRoute {
+        case .mpvEmbedded(let id): mpv.showSubtitles(.embedded(id))
+        case .mpvScript: mpv.showSubtitles(assScript.map { .script($0) } ?? .none)
+        case .none, .cues, .assOverlay: mpv.showSubtitles(.none)
+        }
+        mpv.applySubtitleSettings(visible: subtitleSettings.enabled, delay: subtitleSettings.delaySeconds,
+                                  fontSize: subtitleSettings.fontSize)
     }
 
     private func sourceMenuItems() -> [PlayerMenuItem] {

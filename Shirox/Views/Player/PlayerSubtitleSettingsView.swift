@@ -7,6 +7,13 @@ struct PlayerSubtitleSettingsView: View {
     @Binding var selectedTrack: SubtitleTrack?
     var allowLocalImport: Bool = false
     var onImport: ((SubtitleTrack) -> Void)? = nil
+    /// The subtitle tracks inside the file, which only MPV draws.
+    var embeddedTracks: [PlaybackSubtitleOption] = []
+    /// The track inside the file on screen, if one is.
+    var selectedEmbedded: Int? = nil
+    var onSelectEmbedded: ((Int) -> Void)? = nil
+    /// The subtitles on screen are styled (ASS), so the appearance settings mostly don't apply.
+    var showsStyledNote = false
     @Environment(\.dismiss) private var dismiss
     @State private var showImporter = false
     /// What's typed in the Sync section's exact-value field, cleared once it's applied.
@@ -22,12 +29,22 @@ struct PlayerSubtitleSettingsView: View {
 
                 if let tracks = availableTracks, !tracks.isEmpty {
                     Section("Subtitle Track") {
-                        trackRow(title: "Default", isActive: selectedTrack == nil) {
+                        trackRow(title: "Default", isActive: selectedTrack == nil && selectedEmbedded == nil) {
                             selectedTrack = nil
                         }
                         ForEach(tracks) { track in
                             trackRow(title: track.title, isActive: selectedTrack?.id == track.id) {
                                 selectedTrack = track
+                            }
+                        }
+                    }
+                }
+
+                if !embeddedTracks.isEmpty {
+                    Section("In This Video") {
+                        ForEach(embeddedTracks) { option in
+                            trackRow(title: option.title, isActive: selectedEmbedded == option.id) {
+                                onSelectEmbedded?(option.id)
                             }
                         }
                     }
@@ -43,7 +60,7 @@ struct PlayerSubtitleSettingsView: View {
                     }
                 }
 
-                Section("Appearance") {
+                Section {
                     #if !os(tvOS)
                     ColorPicker("Text Color", selection: $settings.foregroundColor)
 
@@ -70,6 +87,12 @@ struct PlayerSubtitleSettingsView: View {
 
                     Toggle("Background", isOn: $settings.backgroundEnabled)
                         .tint(.secondary)
+                } header: {
+                    Text("Appearance")
+                } footer: {
+                    if showsStyledNote {
+                        Text("Styled (.ass) subtitles keep their own fonts and colours; size and delay still apply.")
+                    }
                 }
 
                 Section("Position") {

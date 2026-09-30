@@ -13,15 +13,18 @@ final class PlayerSubtitleMenuTests: XCTestCase {
         var delay: Double?
         var fontSize: Double?
         var selected: SubtitleTrack??
+        var embedded: Int?
         var imported = false
         var moreSettings = false
     }
 
     private func menu(enabled: Bool = true, delay: Double = 0, fontSize: Double = 24,
                       tracks: [SubtitleTrack] = [], selected: SubtitleTrack? = nil,
+                      embedded: [PlaybackSubtitleOption] = [], selectedEmbedded: Int? = nil,
                       canImport: Bool = false, log: Log = Log()) -> [PlayerMenuElement] {
         PlayerSubtitleMenu.elements(
             enabled: enabled, delay: delay, fontSize: fontSize, tracks: tracks, selected: selected,
+            embedded: embedded, selectedEmbedded: selectedEmbedded,
             actions: PlayerSubtitleMenu.Actions(
                 setEnabled: { log.enabled = $0 },
                 currentDelay: { log.delay ?? delay },
@@ -29,7 +32,8 @@ final class PlayerSubtitleMenuTests: XCTestCase {
                 setFontSize: { log.fontSize = $0 },
                 selectTrack: { log.selected = .some($0) },
                 importFile: canImport ? { log.imported = true } : nil,
-                moreSettings: { log.moreSettings = true }))
+                moreSettings: { log.moreSettings = true },
+                selectEmbedded: { log.embedded = $0 }))
     }
 
     // MARK: - Labels
@@ -102,6 +106,23 @@ final class PlayerSubtitleMenuTests: XCTestCase {
 
     func testNoTrackListWithoutTracks() {
         XCTAssertNil(Self.item("Default", in: menu(tracks: [])))
+    }
+
+    /// A file's own tracks get their own section; the one on screen is checked.
+    func testTheFilesOwnTracksAreListed() {
+        let log = Log()
+        let embedded = [PlaybackSubtitleOption(id: 3, title: "English"), PlaybackSubtitleOption(id: 4, title: "Signs")]
+        let elements = menu(tracks: [english], embedded: embedded, selectedEmbedded: 3, log: log)
+        let fileTracks = Self.section("In This Video", in: elements)
+        XCTAssertEqual(Self.item("English", in: fileTracks)?.isOn, true)
+        XCTAssertEqual(Self.item("Signs", in: fileTracks)?.isOn, false)
+        XCTAssertEqual(Self.item("Default", in: elements)?.isOn, false, "something's on screen")
+        Self.item("Signs", in: fileTracks)?.action()
+        XCTAssertEqual(log.embedded, 4)
+    }
+
+    func testNoFileSectionWithoutTracksInTheFile() {
+        XCTAssertTrue(Self.section("In This Video", in: menu(tracks: [english])).isEmpty)
     }
 
     func testTheDelayStepsKeepTheMenuOpenAndReset() {
@@ -186,6 +207,12 @@ final class PlayerSubtitleMenuTests: XCTestCase {
 
     private static func item(_ title: String, in elements: [PlayerMenuElement]) -> PlayerMenuItem? {
         items(in: elements).first { $0.title == title }
+    }
+
+    /// The rows of the top-level section with this heading; empty if there's none.
+    private static func section(_ heading: String, in elements: [PlayerMenuElement]) -> [PlayerMenuElement] {
+        for case .section(let title, let children) in elements where title == heading { return children }
+        return []
     }
 
     private static func submenu(_ title: String, in elements: [PlayerMenuElement]) -> PlayerMenuElement? {
