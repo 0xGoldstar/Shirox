@@ -126,16 +126,23 @@ struct PageCurlPager<Page: View>: UIViewControllerRepresentable {
 
         func pageViewController(_ pageViewController: UIPageViewController,
                                 viewControllerBefore viewController: UIViewController) -> UIViewController? {
-            guard let id = (viewController as? CurlPageHost)?.pageID,
-                  let previous = PageCurl.neighbor(of: id, offset: -1, in: parent.pageIDs) else { return nil }
-            return host(for: previous)
+            page(beside: viewController, offset: -1)
         }
 
         func pageViewController(_ pageViewController: UIPageViewController,
                                 viewControllerAfter viewController: UIViewController) -> UIViewController? {
-            guard let id = (viewController as? CurlPageHost)?.pageID,
-                  let next = PageCurl.neighbor(of: id, offset: 1, in: parent.pageIDs) else { return nil }
-            return host(for: next)
+            page(beside: viewController, offset: 1)
+        }
+
+        /// The neighbouring page — or, past either end, the same page again. A curl can only be
+        /// started toward a page that exists (`gestureRecognizerShouldBegin`), but UIKit re-aims
+        /// one whose finger drags back past where it started, and then asks for the page before the
+        /// first or after the last. Answering with none threw "The number of view controllers
+        /// provided (0) doesn't match the number required (1) for the requested transition"; the
+        /// same page lets that curl land where it began.
+        private func page(beside viewController: UIViewController, offset: Int) -> UIViewController? {
+            guard let id = (viewController as? CurlPageHost)?.pageID else { return nil }
+            return host(for: PageCurl.neighbor(of: id, offset: offset, in: parent.pageIDs) ?? id)
         }
 
         func pageViewController(_ pageViewController: UIPageViewController,

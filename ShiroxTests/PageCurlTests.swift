@@ -187,6 +187,35 @@ final class PageCurlPagerTurnTests: XCTestCase {
         XCTAssertEqual(shown, 3)
     }
 
+    /// A curl UIKit re-aims mid-gesture — the finger drags back past where it started — asks for
+    /// the page before the first (or after the last) after the start was allowed. Answering with
+    /// no page threw "The number of view controllers provided (0) doesn't match the number
+    /// required (1) for the requested transition"; the page itself lets the curl land where it was.
+    func testPastEitherEndTheCurlIsHandedTheSamePage() {
+        let first = pager.viewControllers!.first!
+        let before = pager.dataSource!.pageViewController(pager, viewControllerBefore: first)
+        XCTAssertEqual((before as? CurlPageHost)?.pageID, 0)
+
+        model.current = 4
+        flush()
+        let last = pager.viewControllers!.first!
+        let after = pager.dataSource!.pageViewController(pager, viewControllerAfter: last)
+        XCTAssertEqual((after as? CurlPageHost)?.pageID, 4)
+    }
+
+    /// Landing on that same page changes nothing.
+    func testACurlThatLandsOnTheSamePageStaysPut() {
+        let first = pager.viewControllers!.first!
+        let same = pager.dataSource!.pageViewController(pager, viewControllerBefore: first)!
+        pager.delegate?.pageViewController?(pager, willTransitionTo: [same])
+        pager.setViewControllers([same], direction: .reverse, animated: false)
+        pager.delegate?.pageViewController?(pager, didFinishAnimating: true,
+                                            previousViewControllers: [first], transitionCompleted: true)
+        flush()
+        XCTAssertEqual(model.current, 0)
+        XCTAssertEqual(shown, 0)
+    }
+
     /// After a finished turn the pager knows which page it shows, so a later jump lands.
     func testAJumpAfterATurnLands() {
         let turn = beginTurnForward()
