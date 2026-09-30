@@ -19,8 +19,17 @@ protocol MPVRouter: AnyObject {
 /// back through it, and serves mpv over loopback.
 @MainActor
 final class MPVProxyRouter: MPVRouter {
-    private static let reason = "mpv"
+    /// Its own, so an engine being replaced lets go of the proxy without taking it down under
+    /// the engine replacing it.
+    private let reason = "mpv-\(UUID().uuidString)"
+    private let readyTimeout: TimeInterval
     private var holding = false
+
+    /// - Parameter readyTimeout: how long to wait for the proxy before mpv fetches the stream
+    ///   itself — its port can be taken, and then it never comes up.
+    init(readyTimeout: TimeInterval = 5) {
+        self.readyTimeout = readyTimeout
+    }
 
     func route(_ source: PlaybackSource) async -> PlaybackSource {
         guard let scheme = source.url.scheme?.lowercased(), scheme == "http" || scheme == "https",
@@ -28,9 +37,14 @@ final class MPVProxyRouter: MPVRouter {
             // Files, and downloads already served over loopback, need no help.
             return source
         }
-        await CastProxyServer.shared.startAndWait(headers: source.headers, reason: Self.reason)
         holding = true
-        guard let proxied = CastProxyServer.shared.loopbackURL(for: source.url) else { return source }
+        let up = await CastProxyServer.shared.startAndWait(headers: source.headers, reason: reason,
+                                                           timeout: readyTimeout)
+        guard up, let proxied = CastProxyServer.shared.loopbackURL(for: source.url) else {
+            Logger.shared.log("[MPV] The proxy didn't come up; fetching the stream directly", type: "Error")
+            release()
+            return source
+        }
         var routed = PlaybackSource(url: proxied)
         routed.prefersJapaneseAudio = source.prefersJapaneseAudio
         return routed
@@ -39,7 +53,7 @@ final class MPVProxyRouter: MPVRouter {
     func release() {
         guard holding else { return }
         holding = false
-        CastProxyServer.shared.stop(reason: Self.reason)
+        CastProxyServer.shared.stop(reason: reason)
     }
 }
 #endif

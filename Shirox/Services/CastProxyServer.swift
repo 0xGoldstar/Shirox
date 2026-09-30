@@ -50,7 +50,7 @@ final class CastProxyServer: @unchecked Sendable {
 
     private var listener: NWListener?
     private var proxyHeaders: [String: String] = [:]
-    private var readyContinuations: [CheckedContinuation<Void, Never>] = []
+    private var readyContinuations: [UUID: CheckedContinuation<Bool, Never>] = [:]
     private var connections: [ObjectIdentifier: ProxyConnection] = [:]
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     private var pathMonitor: NWPathMonitor?
@@ -92,19 +92,28 @@ final class CastProxyServer: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
-    /// Starts the server (if not already running) and suspends until the listener is ready.
+    /// Starts the server (if not already running) and suspends until the listener is ready, or
+    /// until `timeout` passes: a port something else holds never becomes ready, and waiting
+    /// for it used to hang forever. The listener keeps retrying either way until stopped.
     /// - Parameter reason: who needs it up; pass the same value to ``stop(reason:)``.
-    func startAndWait(headers: [String: String], reason: String = "cast") async {
+    /// - Returns: whether the proxy is up.
+    @discardableResult
+    func startAndWait(headers: [String: String], reason: String = "cast",
+                      timeout: TimeInterval = 10) async -> Bool {
         await withCheckedContinuation { continuation in
             stateQueue.async {
                 self.proxyHeaders = headers
                 self.reasons.insert(reason)
                 if self.running {
-                    continuation.resume()
+                    continuation.resume(returning: true)
                     return
                 }
-                self.readyContinuations.append(continuation)
+                let waiter = UUID()
+                self.readyContinuations[waiter] = continuation
                 if self.listener == nil { self.startListenerLocked() }
+                self.stateQueue.asyncAfter(deadline: .now() + timeout) {
+                    self.readyContinuations.removeValue(forKey: waiter)?.resume(returning: self.running)
+                }
             }
         }
     }
@@ -144,9 +153,9 @@ final class CastProxyServer: @unchecked Sendable {
     }
 
     private func resumeWaitersLocked() {
-        let waiting = readyContinuations
+        let waiting = Array(readyContinuations.values)
         readyContinuations.removeAll()
-        waiting.forEach { $0.resume() }
+        waiting.forEach { $0.resume(returning: running) }
     }
 
     private func startListenerLocked() {
