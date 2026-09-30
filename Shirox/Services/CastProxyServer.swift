@@ -35,9 +35,11 @@ final class CastProxyServer: @unchecked Sendable {
 
     // MARK: - Configuration
 
-    private let port: NWEndpoint.Port = 8766
-    /// How long a kept-alive connection may sit idle before it is reclaimed.
-    private let idleTimeout: TimeInterval = 60
+    // `port` and `idleTimeout` change only while the proxy is down — tests move them, clear of
+    // a copy of the app running in a simulator on the same Mac, which shares its ports.
+    var port: NWEndpoint.Port = 8766
+    /// How long a connection may go with nothing moving on it before it is reclaimed.
+    var idleTimeout: TimeInterval = 60
     /// Backoff before re-arming a listener that failed.
     private let restartDelay: TimeInterval = 1.0
 
@@ -405,6 +407,10 @@ fileprivate final class ProxyConnection: @unchecked Sendable {
     private var buffer = Data()
     private var closed = false
     private var idleTimer: DispatchSourceTimer?
+    /// When bytes last moved either way. Idle means nothing moved for `idleTimeout`, not that
+    /// the request is older than that: a whole episode goes out over one response, and timing
+    /// from the request cut mpv off mid-file once a minute.
+    private var lastActivity = DispatchTime.now()
 
     /// A head larger than this is not a real request — refuse it rather than buffer forever.
     private static let maxHeadBytes = 64 * 1024
@@ -486,7 +492,7 @@ fileprivate final class ProxyConnection: @unchecked Sendable {
             semaphore.signal()
         })
         semaphore.wait()
-        if !ok { close() }
+        if !ok { close() } else { markActivity() }
         return ok
     }
 
@@ -503,13 +509,34 @@ fileprivate final class ProxyConnection: @unchecked Sendable {
 
     private func armIdleTimer() {
         lock.lock()
+        lastActivity = .now()
         idleTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + idleTimeout)
-        timer.setEventHandler { [weak self] in self?.close() }
+        timer.setEventHandler { [weak self] in self?.idleTimerFired() }
         idleTimer = timer
         timer.resume()
         lock.unlock()
+    }
+
+    private func markActivity() {
+        lock.lock()
+        lastActivity = .now()
+        lock.unlock()
+    }
+
+    /// Closes the connection if nothing has moved for the whole timeout; otherwise waits out
+    /// the rest of it from the last activity.
+    private func idleTimerFired() {
+        lock.lock()
+        let deadline = lastActivity + idleTimeout
+        if deadline > .now(), let timer = idleTimer {
+            timer.schedule(deadline: deadline)
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        close()
     }
 
     /// Idempotent — every path (idle, peer hangup, send failure, server shutdown) lands here.
@@ -597,6 +624,10 @@ fileprivate final class ProxyExchangeRegistry: NSObject, URLSessionDataDelegate,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard let exchange = exchange(for: dataTask) else { completionHandler(.cancel); return }
         let http = response as? HTTPURLResponse
+        if let http, http.statusCode >= 400 {
+            // Passed on as is; logged so a refusal is plainly the server's, not the proxy's.
+            Logger.shared.log("[CastProxy] \(http.url?.host ?? "Upstream") answered \(http.statusCode)", type: "Error")
+        }
         let mime = http?.value(forHTTPHeaderField: "Content-Type")
             ?? response.mimeType
             ?? Self.mimeType(for: exchange.manifestBase.pathExtension)
