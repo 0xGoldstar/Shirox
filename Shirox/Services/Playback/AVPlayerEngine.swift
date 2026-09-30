@@ -31,9 +31,10 @@ final class AVPlayerEngine: PlaybackEngine {
     private func startReporting() {
         guard !isStopped, timeControlObservation == nil else { return }
         timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+            let engine = self
             DispatchQueue.main.async {
-                guard let self else { return }
-                self.events.timeControlChanged(self.timeControl)
+                guard let engine else { return }
+                engine.events.timeControlChanged(engine.timeControl)
             }
         }
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
@@ -80,11 +81,12 @@ final class AVPlayerEngine: PlaybackEngine {
     private func observe(_ item: AVPlayerItem) {
         statusObservation?.invalidate()
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] observed, _ in
+            let engine = self
             DispatchQueue.main.async {
-                guard let self, self.player.currentItem === observed else { return }
+                guard let engine, engine.player.currentItem === observed else { return }
                 switch observed.status {
-                case .readyToPlay: self.events.itemReady()
-                case .failed: self.events.itemFailed(observed.error)
+                case .readyToPlay: engine.events.itemReady()
+                case .failed: engine.events.itemFailed(observed.error)
                 default: break
                 }
             }
