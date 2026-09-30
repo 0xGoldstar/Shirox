@@ -64,12 +64,32 @@ final class MPVResizeTests: XCTestCase {
         XCTAssertTrue(drewLandscape, "drew at \(String(describing: engine.videoOutputSize)), not \(landscape)")
         if paused { engine.pause() }
 
+        var states: [PlaybackTimeControl] = []
+        var clockWentBack = false
+        var lastTime = engine.currentTime
+        engine.events.timeControlChanged = { states.append($0) }
+        engine.events.tick = { [unowned engine] in
+            if engine.currentTime < lastTime - 0.05 { clockWentBack = true }
+            lastTime = engine.currentTime
+        }
+        let rotatedAt = engine.currentTime
+
         host.frame = CGRect(x: 0, y: 0, width: 180, height: 320)
         host.layoutIfNeeded()
         let portrait = CGSize(width: landscape.height, height: landscape.width)
         XCTAssertEqual(engine.layer.drawableSize, portrait)
         let drewPortrait = await waitUntil(10) { self.matches(engine.videoOutputSize, portrait) }
         XCTAssertTrue(drewPortrait, "still drawing at \(String(describing: engine.videoOutputSize)) after rotating to \(portrait)")
+
+        // Rotating isn't loading: no spinner, and the clock carries on (or stays put, paused).
+        _ = await waitUntil(1) { false }
+        XCTAssertFalse(states.contains(.waiting), "reported waiting while rotating: \(states)")
+        XCTAssertFalse(clockWentBack, "the clock jumped back while rotating")
+        if paused {
+            XCTAssertEqual(engine.currentTime, rotatedAt, accuracy: 0.05)
+        } else {
+            XCTAssertGreaterThan(engine.currentTime, rotatedAt + 0.5, "playback stalled while rotating")
+        }
     }
 
     private func matches(_ size: CGSize?, _ target: CGSize) -> Bool {

@@ -99,6 +99,8 @@ final class MPVEngine: PlaybackEngine {
     private var defaultUserAgent = ""
     private var observers: [NSObjectProtocol] = []
     private var pendingRefit: DispatchWorkItem?
+    /// Whether the aspect override currently holds the invisible nudge (see `refitVideoOutput`).
+    private var aspectNudged = false
 
     private(set) var currentTime: Double = 0
     private(set) var duration: Double?
@@ -420,6 +422,9 @@ final class MPVEngine: PlaybackEngine {
         setProperty("referrer", MPVOptions.referrer(source.headers) ?? "")
         // mpv has no per-file "prefer Japanese"; alang is an order of preference for the next file.
         setProperty("alang", source.prefersJapaneseAudio ? "ja,jpn" : "")
+        // The nudge was for the last file's picture.
+        aspectNudged = false
+        setProperty("video-aspect-override", "no")
         command("loadfile", location(of: source.url), "replace")
     }
 
@@ -533,34 +538,33 @@ final class MPVEngine: PlaybackEngine {
 
     // MARK: - Resizing
 
-    /// MPVKit's renderer reads the layer's size only when it sets up its video output, and never
-    /// again (mpvkit/MPVKit#3): after a rotation mpv went on drawing at the old size, the picture
-    /// small in one corner. So once a resize has settled, a video output drawing at the wrong
-    /// size is rebuilt, and the new one takes the layer's size.
+    /// MPVKit's renderer reads the layer's size only when it configures its video output, and
+    /// never again (mpvkit/MPVKit#3): after a rotation mpv went on drawing at the old size, the
+    /// picture small in one corner. It configures the output again whenever the picture's own
+    /// parameters change, so once a resize has settled, they're changed by nothing visible: an
+    /// aspect a millionth wider, which rounds to the same size in pixels.
+    ///
+    /// Rebuilding the video output instead did the job too, but mpv then re-read the video from
+    /// its last keyframe, over the network: the sound dropped out and it buffered for a second
+    /// on every turn of the phone.
     private func layerResized() {
         pendingRefit?.cancel()
         let refit = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated { self?.refitVideoOutput() }
         }
         pendingRefit = refit
-        // A rotation animates its layout; rebuild once, at the end.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: refit)
+        // A rotation sets its final size up front; wait out the rest of the layout pass.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: refit)
     }
 
     private func refitVideoOutput() {
-        guard !isStopped, let mpv = handle, let drawn = videoOutputSize else { return }
+        guard !isStopped, let drawn = videoOutputSize,
+              let aspect = getDouble("video-params/aspect"), aspect > 0 else { return }
         let target = layer.drawableSize
         guard abs(drawn.width - target.width) > 2 || abs(drawn.height - target.height) > 2 else { return }
-        // Off while backgrounded, and back on with the right size when it returns.
-        guard let track = getString("vid"), track != "no" else { return }
-        Logger.shared.log("[MPV] Drawing at \(Int(drawn.width))×\(Int(drawn.height)) in a \(Int(target.width))×\(Int(target.height)) layer; rebuilding the video output", type: "Player")
-        // Setting up a video output builds a Vulkan device, too slow for the main thread. The
-        // queue is where a stop destroys the handle, so it's still alive when this runs.
-        let live = Handle(pointer: mpv)
-        queue.async {
-            mpv_set_property_string(live.pointer, "vid", "no")
-            mpv_set_property_string(live.pointer, "vid", track)
-        }
+        Logger.shared.log("[MPV] Drawing at \(Int(drawn.width))×\(Int(drawn.height)) in a \(Int(target.width))×\(Int(target.height)) layer; reconfiguring", type: "Player")
+        aspectNudged.toggle()
+        setProperty("video-aspect-override", aspectNudged ? String(aspect * (1 + 1e-6)) : "no")
     }
 
     // MARK: - Backgrounding
