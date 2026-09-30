@@ -83,7 +83,14 @@ final class MPVEngine: PlaybackEngine {
     private var storedVolume: Float = 1
     private var lastTimeControl: PlaybackTimeControl = .paused
     private var lastTickTime = -Double.infinity
-    private var pendingSeeks: [(Bool) -> Void] = []
+    /// A seek waiting to land: sent with a reply number, taken once mpv has answered it.
+    private struct PendingSeek {
+        let reply: UInt64
+        var taken = false
+        let completion: (Bool) -> Void
+    }
+    private var pendingSeeks: [PendingSeek] = []
+    private var nextSeekReply: UInt64 = 1
     /// A seek asked for while the file was still opening, which mpv can't do yet; made once it has.
     private var seekAfterLoad: (seconds: Double, precision: SeekPrecision, completion: ((Bool) -> Void)?)?
     /// A bitrate cap set while the file was still opening. mpv picks the variant as it opens a
@@ -210,6 +217,8 @@ final class MPVEngine: PlaybackEngine {
         case fileLoaded
         case endFile(reason: UInt32, error: Int32)
         case playbackRestart
+        /// mpv took (or refused) the command sent with this reply number.
+        case commandReply(UInt64, error: Int32)
         case double(String, Double?)
         case flag(String, Bool?)
         case int(String, Int64?)
@@ -246,6 +255,8 @@ final class MPVEngine: PlaybackEngine {
             return .fileLoaded
         case MPV_EVENT_PLAYBACK_RESTART:
             return .playbackRestart
+        case MPV_EVENT_COMMAND_REPLY:
+            return .commandReply(event.reply_userdata, error: event.error)
         case MPV_EVENT_END_FILE:
             guard let data = event.data?.assumingMemoryBound(to: mpv_event_end_file.self).pointee else { return nil }
             return .endFile(reason: data.reason.rawValue, error: data.error)
@@ -312,8 +323,15 @@ final class MPVEngine: PlaybackEngine {
             }
         case .playbackRestart:
             if let time = getDouble("time-pos") { currentTime = time }
-            finishPendingSeeks(true)
+            finishTakenSeeks()
             tick(force: true)
+        case .commandReply(let reply, let error):
+            guard let index = pendingSeeks.firstIndex(where: { $0.reply == reply }) else { return }
+            if error < 0 {
+                pendingSeeks.remove(at: index).completion(false)
+            } else {
+                pendingSeeks[index].taken = true
+            }
         case .double(let name, let value):
             switch name {
             case "time-pos":
@@ -377,7 +395,16 @@ final class MPVEngine: PlaybackEngine {
     private func finishPendingSeeks(_ finished: Bool) {
         let done = pendingSeeks
         pendingSeeks = []
-        for completion in done { completion(finished) }
+        for seek in done { seek.completion(finished) }
+    }
+
+    /// A restart lands the seeks mpv had already taken. A seek sent just after the file started
+    /// playing would otherwise land on that start's restart, still queued on its way here, and
+    /// read as done at the old position.
+    private func finishTakenSeeks() {
+        let landed = pendingSeeks.filter(\.taken)
+        pendingSeeks.removeAll { $0.taken }
+        for seek in landed { seek.completion(true) }
     }
 
     /// Opens the current source again at `seconds` — how a new bitrate cap takes effect.
@@ -538,9 +565,18 @@ final class MPVEngine: PlaybackEngine {
             }
             return
         }
-        if let completion { pendingSeeks.append(completion) }
         currentTime = seconds
-        command("seek", String(seconds), MPVOptions.seekFlags(precision))
+        guard let completion else {
+            command("seek", String(seconds), MPVOptions.seekFlags(precision))
+            return
+        }
+        let reply = nextSeekReply
+        nextSeekReply += 1
+        pendingSeeks.append(PendingSeek(reply: reply, completion: completion))
+        if !commandAsync(reply: reply, "seek", String(seconds), MPVOptions.seekFlags(precision)) {
+            pendingSeeks.removeAll { $0.reply == reply }
+            completion(false)
+        }
     }
 
     func seek(to seconds: Double, precision: SeekPrecision) async {
@@ -753,5 +789,19 @@ final class MPVEngine: PlaybackEngine {
         if status < 0 {
             Logger.shared.log("[MPV] \(arguments.first ?? "command") failed: \(String(cString: mpv_error_string(status)))", type: "Error")
         }
+    }
+
+    /// Sends a command whose answer comes back as an event carrying `reply`. False if it
+    /// couldn't be sent.
+    private func commandAsync(reply: UInt64, _ arguments: String...) -> Bool {
+        guard let mpv = handle else { return false }
+        let owned = arguments.map { strdup($0) }
+        defer { owned.forEach { free($0) } }
+        var pointers = owned.map { UnsafePointer<CChar>($0) } + [nil]
+        let status = mpv_command_async(mpv, reply, &pointers)
+        if status < 0 {
+            Logger.shared.log("[MPV] \(arguments.first ?? "command") failed: \(String(cString: mpv_error_string(status)))", type: "Error")
+        }
+        return status >= 0
     }
 }
