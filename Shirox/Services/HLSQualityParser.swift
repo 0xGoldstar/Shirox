@@ -41,15 +41,18 @@ enum HLSQualityParser {
         return digits.isEmpty ? nil : Int(digits)
     }
 
-    static func parse(url: URL, headers: [String: String]) async -> [HLSQualityLevel] {
+    static func parse(url: URL, headers: [String: String], session: URLSession = .shared) async -> [HLSQualityLevel] {
         var request = URLRequest(url: url, timeoutInterval: 10)
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
-        guard let (data, response) = try? await URLSession.shared.decodedData(for: request) else {
+        guard let (playlist, statusCode) = try? await fetchPlaylist(request, session: session) else {
             Logger.shared.log("[HLSQuality] Fetch failed for \(Logger.redact(url))", type: "Error")
             return []
         }
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard let data = playlist else {
+            Logger.shared.log("[HLSQuality] Not a playlist (status=\(statusCode)), left unread: \(Logger.redact(url))", type: "Stream")
+            return []
+        }
         guard let text = String(data: data, encoding: .utf8) else {
             Logger.shared.log("[HLSQuality] Could not decode response (status=\(statusCode)) for \(Logger.redact(url))", type: "Error")
             return []
@@ -97,5 +100,44 @@ enum HLSQualityParser {
         let result = seen.values.sorted { $0.bandwidth > $1.bandwidth }
         Logger.shared.log("[HLSQuality] Parsed \(result.count) quality levels: \(result.map { "\($0.label)@\($0.bandwidth)" })", type: "Stream")
         return result
+    }
+
+    /// Longest body read as a playlist; anything bigger isn't one.
+    static let maxPlaylistBytes = 2 << 20
+    /// How much of the body decides whether it's a playlist.
+    private static let sniffLength = 64
+
+    /// The body if it's a playlist, else nil, with the response's status.
+    ///
+    /// The URL is the stream's own, which for a direct MP4 or MKV link is the episode file. That
+    /// used to be downloaded whole into memory beside the player; now it's dropped after its
+    /// first bytes.
+    private static func fetchPlaylist(_ request: URLRequest, session: URLSession) async throws -> (Data?, Int) {
+        let (bytes, response) = try await session.bytes(for: request)
+        let http = response as? HTTPURLResponse
+        let statusCode = http?.statusCode ?? -1
+        var body = Data()
+        var sniffed = false
+        for try await byte in bytes {
+            body.append(byte)
+            if !sniffed, body.count >= sniffLength {
+                sniffed = true
+                guard mayBePlaylist(body) else { bytes.task.cancel(); return (nil, statusCode) }
+            }
+            if body.count > maxPlaylistBytes { bytes.task.cancel(); return (nil, statusCode) }
+        }
+        guard sniffed || mayBePlaylist(body) else { return (nil, statusCode) }
+        if let http { body = try HTTPBodyDecoding.decoded(body, response: http) }
+        return (body, statusCode)
+    }
+
+    /// Whether a body starting this way can be a playlist: `#EXTM3U`, after any byte-order mark
+    /// or whitespace, or a zstd frame yet to be decoded.
+    static func mayBePlaylist(_ start: Data) -> Bool {
+        if start.starts(with: HTTPBodyDecoding.zstdMagic) { return true }
+        var rest = start[...]
+        if rest.starts(with: [0xEF, 0xBB, 0xBF]) { rest = rest.dropFirst(3) }
+        rest = rest.drop { $0 == 0x20 || $0 == 0x09 || $0 == 0x0A || $0 == 0x0D }
+        return rest.starts(with: Array("#EXTM3U".utf8))
     }
 }
