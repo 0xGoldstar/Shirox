@@ -179,6 +179,8 @@ struct PlayerView: View {
 
     // Subtitles
     @State private var subtitleCues: [SubtitleCue] = []
+    /// The chosen track when it's an ASS script, kept whole for libass (or mpv) to draw.
+    @State private var assScript: String?
     @State private var selectedSubtitleTrack: SubtitleTrack? = nil
     @State private var subtitleTracks: [SubtitleTrack]? = nil
     @ObservedObject var subtitleSettings = SubtitleSettingsManager.shared
@@ -1965,11 +1967,22 @@ struct PlayerView: View {
         }
     }
 
+    private func show(_ loaded: LoadedSubtitles) {
+        switch loaded {
+        case .cues(let cues):
+            subtitleCues = cues
+            assScript = nil
+        case .ass(let script):
+            subtitleCues = []
+            assScript = script
+        }
+    }
+
     private func loadSubtitles() {
         if let track = selectedSubtitleTrack {
             Task {
                 do {
-                    subtitleCues = try await VTTSubtitlesLoader.load(from: track.url.absoluteString, headers: track.headers)
+                    show(try await VTTSubtitlesLoader.load(from: track.url.absoluteString, headers: track.headers))
                 } catch {
                     Logger.shared.log("[Subtitles] Failed to load track '\(track.title)': \(error)", type: "Error")
                 }
@@ -1985,7 +1998,7 @@ struct PlayerView: View {
             }
             Task {
                 do {
-                    subtitleCues = try await VTTSubtitlesLoader.load(from: urlString, headers: currentStream.subtitleHeaders)
+                    show(try await VTTSubtitlesLoader.load(from: urlString, headers: currentStream.subtitleHeaders))
                 } catch {
                     Logger.shared.log("[Subtitles] Failed to load default: \(error)", type: "Error")
                 }
@@ -1997,7 +2010,7 @@ struct PlayerView: View {
             selectedSubtitleTrack = first
             Task {
                 do {
-                    subtitleCues = try await VTTSubtitlesLoader.load(from: first.url.absoluteString, headers: first.headers)
+                    show(try await VTTSubtitlesLoader.load(from: first.url.absoluteString, headers: first.headers))
                 } catch {
                     Logger.shared.log("[Subtitles] Failed to load first track: \(error)", type: "Error")
                 }
@@ -2661,6 +2674,7 @@ struct PlayerView: View {
             currentContext = PlayerContext(mediaTitle: ctx.mediaTitle, episodeNumber: ctx.episodeNumber, episodeTitle: ctx.episodeTitle, imageUrl: ctx.imageUrl, aniListID: ctx.aniListID, malID: ctx.malID, moduleId: ctx.moduleId, totalEpisodes: ctx.totalEpisodes, availableEpisodes: ctx.availableEpisodes, isAiring: ctx.isAiring, resumeFrom: ctx.resumeFrom, detailHref: ctx.detailHref, episodeHref: ctx.episodeHref, streamTitle: next.title, workingDetailHref: ctx.workingDetailHref, thumbnailUrl: ctx.thumbnailUrl, simklTitle: ctx.simklTitle)
         }
         subtitleCues = []
+        assScript = nil
         selectedSubtitleTrack = nil
         loadSubtitles()
         // Seek to same position after item is ready
@@ -2763,6 +2777,7 @@ struct PlayerView: View {
             }
         }
         subtitleCues = []
+        assScript = nil
         selectedSubtitleTrack = nil
         loadSubtitles()
         tvdbEpisodeTitle = nil

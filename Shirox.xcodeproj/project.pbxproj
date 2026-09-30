@@ -443,6 +443,7 @@
 		1D7E00496481B46D86C0E530 /* SyncTargets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FCF5D4BE28837126DC12CF1 /* SyncTargets.swift */; };
 		1E9C0F13D08F553EC0BF3F9E /* LocalCollection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A013F4638FEFB8E37C2E53A /* LocalCollection.swift */; };
 		1EF89167D3E014ECF13C8657 /* TVDBLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74A691F1B345D1C7447C46B2 /* TVDBLogo.swift */; };
+		1F04849669244CD077701190 /* SubtitleLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2063F643CA2437FD3A6B2F7F /* SubtitleLoaderTests.swift */; };
 		1F1EEAEF0D210E5ADE27A915 /* SimklLibraryReadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE9A37F2AF92184D9A24B5A /* SimklLibraryReadTests.swift */; };
 		1F4B1AD2CC04E8B6F5BF995D /* SimklWriteQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D9BBDAAE6189B464E64BBC5 /* SimklWriteQueue.swift */; };
 		20B7EA26094D8953DC45E3F7 /* SimklTitleCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3015516B8F0B96AC14DEACE4 /* SimklTitleCatalogTests.swift */; };
@@ -1172,6 +1173,7 @@
 		1E8C2D959A901D1DA465C7F4 /* JellyfinCoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JellyfinCoreTests.swift; sourceTree = "<group>"; };
 		1FB508B47E45CCA9A0D55958 /* AniListMangaMappingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AniListMangaMappingTests.swift; sourceTree = "<group>"; };
 		1FCF5D4BE28837126DC12CF1 /* SyncTargets.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SyncTargets.swift; sourceTree = "<group>"; };
+		2063F643CA2437FD3A6B2F7F /* SubtitleLoaderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SubtitleLoaderTests.swift; sourceTree = "<group>"; };
 		21201D48C8E94395977F4564 /* ScoreInputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreInputView.swift; sourceTree = "<group>"; };
 		225725D9D612397018C48688 /* SimklBudget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklBudget.swift; sourceTree = "<group>"; };
 		22C368EBCB67CA0FCB2B7714 /* SimklFeedStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklFeedStore.swift; sourceTree = "<group>"; };
@@ -2052,6 +2054,7 @@
 				DDE58B7E7C2B8B8181779721 /* HLSQualityFetchTests.swift */,
 				D3BD42D4ABFF5BC4A121CFDE /* CastProxyBusyPortTests.swift */,
 				A8F0B480DD6D108FF41A3181 /* MPVResizeTests.swift */,
+				2063F643CA2437FD3A6B2F7F /* SubtitleLoaderTests.swift */,
 			);
 			path = ShiroxTests;
 			sourceTree = SOURCE_ROOT;
@@ -2504,6 +2507,7 @@
 				DDEF617BD6B67069892CEC31 /* HLSQualityFetchTests.swift in Sources */,
 				7014036E276C2A50DA725879 /* CastProxyBusyPortTests.swift in Sources */,
 				58232FED2E020560EB2F816F /* MPVResizeTests.swift in Sources */,
+				1F04849669244CD077701190 /* SubtitleLoaderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

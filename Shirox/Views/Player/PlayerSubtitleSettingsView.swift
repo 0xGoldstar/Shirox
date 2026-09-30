@@ -166,6 +166,7 @@ struct PlayerSubtitleSettingsView: View {
         var types: [UTType] = [.plainText, .text, .data]
         if let vtt = UTType(filenameExtension: "vtt") { types.insert(vtt, at: 0) }
         if let srt = UTType(filenameExtension: "srt") { types.insert(srt, at: 0) }
+        for ext in ["ass", "ssa"] { if let type = UTType(filenameExtension: ext) { types.insert(type, at: 0) } }
         return types
     }
 
