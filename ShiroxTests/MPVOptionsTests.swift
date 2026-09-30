@@ -45,4 +45,11 @@ final class MPVOptionsTests: XCTestCase {
         XCTAssertEqual(MPVOptions.volume(0.25), 25)
         XCTAssertEqual(MPVOptions.volume(1), 100)
     }
+
+    /// The viewer's size is points on a 24-point base; mpv scales its own drawing by the ratio.
+    func testTheSubtitleSizeBecomesAScale() {
+        XCTAssertEqual(MPVOptions.subScale(fontSize: 24), 1)
+        XCTAssertEqual(MPVOptions.subScale(fontSize: 36), 1.5)
+        XCTAssertEqual(MPVOptions.subScale(fontSize: 18), 0.75)
+    }
 }

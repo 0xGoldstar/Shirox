@@ -46,6 +46,11 @@ enum MPVOptions {
         -delay
     }
 
+    /// `sub-scale` for the subtitle size the viewer set, in points on a 24-point base.
+    static func subScale(fontSize: Double) -> Double {
+        fontSize / 24
+    }
+
     /// `volume` is a percentage.
     static func volume(_ volume: Float) -> Double {
         Double(volume) * 100

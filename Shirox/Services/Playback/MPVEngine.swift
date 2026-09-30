@@ -110,6 +110,22 @@ final class MPVEngine: PlaybackEngine {
     private(set) var audioOptions: [PlaybackAudioOption] = []
     private(set) var selectedAudioOption: PlaybackAudioOption.ID?
 
+    /// What mpv draws: nothing (subtitles are then the overlay's), a track in the file, or an
+    /// ASS script.
+    enum SubtitleSource: Equatable {
+        case none
+        case embedded(Int)
+        case script(String)
+    }
+
+    /// The subtitle tracks inside the file.
+    private(set) var subtitleOptions: [PlaybackSubtitleOption] = []
+    /// The file's default subtitle track, or its first; nil when it has none.
+    private(set) var defaultSubtitleOption: PlaybackSubtitleOption.ID?
+    private var subtitleSource: SubtitleSource = .none
+    /// Where the script mpv is drawing was written.
+    private var scriptFile: URL?
+
     /// - Parameter router: decides where each stream is fetched from; nil opens it as given.
     init(output: Output = .metal, router: MPVRouter? = nil) {
         self.router = router
@@ -273,6 +289,8 @@ final class MPVEngine: PlaybackEngine {
             isItemReady = true
             events.itemReady()
             reportTimeControl()
+            refreshSubtitleOptions()
+            applySubtitleSource()
             if let pending = seekAfterLoad {
                 seekAfterLoad = nil
                 seek(to: pending.seconds, precision: pending.precision, completion: pending.completion)
@@ -329,6 +347,7 @@ final class MPVEngine: PlaybackEngine {
             switch name {
             case "track-list/count":
                 refreshAudioOptions()
+                refreshSubtitleOptions()
             case "aid":
                 selectedAudioOption = value.map(Int.init)
             default:
@@ -373,14 +392,36 @@ final class MPVEngine: PlaybackEngine {
         var options: [PlaybackAudioOption] = []
         for index in 0..<count where getString("track-list/\(index)/type") == "audio" {
             guard let id = getInt64("track-list/\(index)/id") else { continue }
-            let title = getString("track-list/\(index)/title")
-                ?? getString("track-list/\(index)/lang").map { Locale.current.localizedString(forLanguageCode: $0) ?? $0 }
-                ?? "Track \(id)"
-            options.append(PlaybackAudioOption(id: Int(id), title: title))
+            options.append(PlaybackAudioOption(id: Int(id), title: trackTitle(at: index, id: id)))
         }
         audioOptions = options
         selectedAudioOption = getInt64("aid").map(Int.init)
         events.audioOptionsChanged()
+    }
+
+    /// The file's own subtitle tracks — not the scripts added to it.
+    private func refreshSubtitleOptions() {
+        let count = Int(getInt64("track-list/count") ?? 0)
+        var options: [PlaybackSubtitleOption] = []
+        var flaggedDefault: Int?
+        for index in 0..<count where getString("track-list/\(index)/type") == "sub"
+            && getString("track-list/\(index)/external") != "yes" {
+            guard let id = getInt64("track-list/\(index)/id") else { continue }
+            options.append(PlaybackSubtitleOption(id: Int(id), title: trackTitle(at: index, id: id)))
+            if flaggedDefault == nil, getString("track-list/\(index)/default") == "yes" { flaggedDefault = Int(id) }
+        }
+        let defaultOption = flaggedDefault ?? options.first?.id
+        guard options != subtitleOptions || defaultOption != defaultSubtitleOption else { return }
+        subtitleOptions = options
+        defaultSubtitleOption = defaultOption
+        events.subtitleOptionsChanged()
+    }
+
+    /// A track's title, else its language's name, else its number.
+    private func trackTitle(at index: Int, id: Int64) -> String {
+        getString("track-list/\(index)/title")
+            ?? getString("track-list/\(index)/lang").map { Locale.current.localizedString(forLanguageCode: $0) ?? $0 }
+            ?? "Track \(id)"
     }
 
     // MARK: - PlaybackEngine
@@ -395,6 +436,8 @@ final class MPVEngine: PlaybackEngine {
         lastTickTime = -.infinity
         audioOptions = []
         selectedAudioOption = nil
+        subtitleOptions = []
+        defaultSubtitleOption = nil
         finishPendingSeeks(false)
         seekAfterLoad?.completion?(false)
         seekAfterLoad = nil
@@ -425,6 +468,8 @@ final class MPVEngine: PlaybackEngine {
         // The nudge was for the last file's picture.
         aspectNudged = false
         setProperty("video-aspect-override", "no")
+        // A track number means nothing in the next file; what to show is re-applied once it opens.
+        setProperty("sid", "no")
         command("loadfile", location(of: source.url), "replace")
     }
 
@@ -435,6 +480,7 @@ final class MPVEngine: PlaybackEngine {
         seekAfterLoad?.completion?(false)
         seekAfterLoad = nil
         pendingRefit?.cancel()
+        removeScriptFile()
         router?.release()
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers = []
@@ -527,6 +573,72 @@ final class MPVEngine: PlaybackEngine {
     /// Fill crops the picture to the screen; fit shows all of it.
     func setFillsScreen(_ fills: Bool) {
         setDouble("panscan", fills ? 1 : 0)
+    }
+
+    // MARK: - Subtitles
+
+    /// Draws `source` from now on, and again whenever the stream reopens.
+    func showSubtitles(_ source: SubtitleSource) {
+        guard source != subtitleSource else { return }
+        subtitleSource = source
+        applySubtitleSource()
+    }
+
+    /// The viewer's subtitle settings, applied to what mpv draws.
+    func applySubtitleSettings(visible: Bool, delay: Double, fontSize: Double) {
+        setProperty("sub-visibility", visible ? "yes" : "no")
+        setDouble("sub-delay", MPVOptions.subDelay(fromOverlayDelay: delay))
+        setDouble("sub-scale", MPVOptions.subScale(fontSize: fontSize))
+    }
+
+    /// The subtitle track mpv is drawing, and whether it came from outside the file.
+    var shownSubtitleTrack: (id: Int, isExternal: Bool)? {
+        guard let id = getInt64("sid") else { return nil }
+        let count = Int(getInt64("track-list/count") ?? 0)
+        for index in 0..<count where getString("track-list/\(index)/type") == "sub"
+            && getInt64("track-list/\(index)/id") == id {
+            return (Int(id), getString("track-list/\(index)/external") == "yes")
+        }
+        return nil
+    }
+
+    private func applySubtitleSource() {
+        // mpv can only take a track once the file's open; this runs again then.
+        guard isItemReady else { return }
+        removeScriptTracks()
+        switch subtitleSource {
+        case .none:
+            setProperty("sid", "no")
+        case .embedded(let id):
+            setProperty("sid", String(id))
+        case .script(let text):
+            let file = FileManager.default.temporaryDirectory
+                .appendingPathComponent("shirox-subtitles-\(UUID().uuidString).ass")
+            do {
+                try Data(text.utf8).write(to: file)
+            } catch {
+                Logger.shared.log("[MPV] Couldn't write the subtitle script: \(error)", type: "Error")
+                return
+            }
+            scriptFile = file
+            command("sub-add", file.path, "select")
+        }
+    }
+
+    /// Takes out scripts added before; a reopened stream has dropped them anyway.
+    private func removeScriptTracks() {
+        let count = Int(getInt64("track-list/count") ?? 0)
+        for index in (0..<count).reversed() where getString("track-list/\(index)/type") == "sub"
+            && getString("track-list/\(index)/external") == "yes" {
+            if let id = getInt64("track-list/\(index)/id") { command("sub-remove", String(id)) }
+        }
+        removeScriptFile()
+    }
+
+    private func removeScriptFile() {
+        guard let scriptFile else { return }
+        try? FileManager.default.removeItem(at: scriptFile)
+        self.scriptFile = nil
     }
 
     /// The size in pixels mpv draws its picture at; nil until it has drawn one.

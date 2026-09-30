@@ -21,6 +21,12 @@ struct PlaybackAudioOption: Identifiable, Equatable {
     let title: String
 }
 
+/// A subtitle track inside the file, which the engine draws itself.
+struct PlaybackSubtitleOption: Identifiable, Equatable {
+    let id: Int
+    let title: String
+}
+
 /// What to play.
 struct PlaybackSource: Equatable {
     let url: URL
@@ -41,6 +47,8 @@ struct PlaybackEngineEvents {
     var playedToEnd: () -> Void = {}
     var failedToPlayToEnd: (Error?) -> Void = { _ in }
     var audioOptionsChanged: () -> Void = {}
+    /// The file's own subtitle tracks changed. Only MPV draws them, so only MPV sends it.
+    var subtitleOptionsChanged: () -> Void = {}
 }
 
 /// The player behind the player screen. `PlayerView` drives playback only through this, so the
