@@ -1638,7 +1638,7 @@ struct PlayerView: View {
                                              url: currentStream.url)
         #endif
         Logger.shared.log("[Player] Playing on the \(kind.rawValue) engine", type: "Player")
-        let e: any PlaybackEngine = kind == .mpv ? MPVEngine() : AVPlayerEngine()
+        let e: any PlaybackEngine = kind == .mpv ? Self.makeMPVEngine() : AVPlayerEngine()
         e.load(source)
         // Stall-minimisation is for streams: it holds playback until AVPlayer has built a
         // network-sized buffer. A downloaded episode is already on disk (or a hop away over
@@ -1692,6 +1692,16 @@ struct PlayerView: View {
 
     private var engineKind: PlaybackEngineKind {
         engine is MPVEngine ? .mpv : .native
+    }
+
+    /// On iOS mpv fetches remote streams through the app's proxy: its own HTTP/1.1 networking is
+    /// refused by CDNs that AVPlayer's HTTP/2 gets through (see `MPVProxyRouter`).
+    private static func makeMPVEngine() -> MPVEngine {
+        #if os(iOS)
+        MPVEngine(router: MPVProxyRouter())
+        #else
+        MPVEngine()
+        #endif
     }
 
     /// Carries on in MPV from where AVPlayer stopped: the same rebuild the AirPlay reroute and

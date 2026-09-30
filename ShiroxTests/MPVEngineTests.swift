@@ -155,6 +155,65 @@ final class MPVEngineTests: XCTestCase {
         XCTAssertEqual(engine.audioOptions.count, 1)
     }
 
+    // MARK: - Routing
+
+    /// Stands in for the proxy: sends every source to a local file, and records what it was asked.
+    final class FakeRouter: MPVRouter {
+        var target: URL
+        var routed: [URL] = []
+        var released = 0
+        var delay: UInt64 = 0
+        init(target: URL) { self.target = target }
+        func route(_ source: PlaybackSource) async -> PlaybackSource {
+            routed.append(source.url)
+            if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+            return PlaybackSource(url: target)
+        }
+        func release() { released += 1 }
+    }
+
+    /// mpv plays what the router hands it, not the stream's own URL.
+    func testARoutedSourceIsWhatPlays() async throws {
+        let router = FakeRouter(target: try silence(seconds: 2))
+        engine.stop()
+        engine = MPVEngine(output: .none, router: router)
+        let ready = expectation(description: "ready")
+        engine.events.itemReady = { ready.fulfill() }
+        engine.load(PlaybackSource(url: URL(string: "https://cdn.invalid/ep1.m3u8")!,
+                                   headers: ["Referer": "https://site.invalid/"]))
+        await fulfillment(of: [ready], timeout: 10)
+        XCTAssertEqual(router.routed, [URL(string: "https://cdn.invalid/ep1.m3u8")!])
+        XCTAssertEqual(engine.duration ?? 0, 2, accuracy: 0.05)
+    }
+
+    /// A load that's replaced while its route is still being worked out never opens.
+    func testASupersededRouteIsDropped() async throws {
+        let first = try silence(seconds: 3)
+        let router = FakeRouter(target: first)
+        router.delay = 300_000_000
+        engine.stop()
+        engine = MPVEngine(output: .none, router: router)
+        engine.load(PlaybackSource(url: URL(string: "https://cdn.invalid/ep1.m3u8")!))
+        router.delay = 0
+        router.target = try silence(seconds: 1)
+        let ready = expectation(description: "ready")
+        ready.assertForOverFulfill = false
+        engine.events.itemReady = { ready.fulfill() }
+        engine.load(PlaybackSource(url: URL(string: "https://cdn.invalid/ep2.m3u8")!))
+        await fulfillment(of: [ready], timeout: 10)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        XCTAssertEqual(engine.duration ?? 0, 1, accuracy: 0.05, "the second episode is what's loaded")
+    }
+
+    func testStoppingReleasesTheRoute() throws {
+        let router = FakeRouter(target: try silence(seconds: 1))
+        engine.stop()
+        engine = MPVEngine(output: .none, router: router)
+        engine.load(PlaybackSource(url: URL(string: "https://cdn.invalid/ep1.m3u8")!))
+        engine.stop()
+        XCTAssertEqual(router.released, 1)
+    }
+
     func testAStoppedEngineReportsNothing() throws {
         var heard = false
         engine.events.itemReady = { heard = true }

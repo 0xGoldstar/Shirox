@@ -67,7 +67,13 @@ final class MPVEngine: PlaybackEngine {
     /// A bitrate cap set while the file was still opening. mpv picks the variant as it opens a
     /// file, so the cap needs a reload once it's open.
     private var reloadAfterLoad = false
+    /// What the player asked to play.
     private var source: PlaybackSource?
+    /// What mpv was actually given — `source`, or where the router sent it.
+    private var opened: PlaybackSource?
+    private let router: MPVRouter?
+    /// Counts loads, so a route that finishes after a newer load has started is dropped.
+    private var loadGeneration = 0
     private var defaultUserAgent = ""
     private var observers: [NSObjectProtocol] = []
 
@@ -79,7 +85,9 @@ final class MPVEngine: PlaybackEngine {
     private(set) var audioOptions: [PlaybackAudioOption] = []
     private(set) var selectedAudioOption: PlaybackAudioOption.ID?
 
-    init(output: Output = .metal) {
+    /// - Parameter router: decides where each stream is fetched from; nil opens it as given.
+    init(output: Output = .metal, router: MPVRouter? = nil) {
+        self.router = router
         guard let mpv = mpv_create() else {
             Logger.shared.log("[MPV] Couldn't create an mpv instance", type: "Error")
             return
@@ -324,9 +332,9 @@ final class MPVEngine: PlaybackEngine {
 
     /// Opens the current source again at `seconds` — how a new bitrate cap takes effect.
     private func reload(at seconds: Double) {
-        guard let source else { return }
+        guard let opened else { return }
         isItemReady = false
-        command("loadfile", location(of: source.url), "replace", "-1", "start=\(seconds)")
+        command("loadfile", location(of: opened.url), "replace", "-1", "start=\(seconds)")
     }
 
     private func refreshAudioOptions() {
@@ -360,13 +368,30 @@ final class MPVEngine: PlaybackEngine {
         seekAfterLoad?.completion?(false)
         seekAfterLoad = nil
         reloadAfterLoad = false
+        reportTimeControl()
+        guard let router else {
+            open(source)
+            return
+        }
+        loadGeneration += 1
+        let generation = loadGeneration
+        Task { [weak self] in
+            let routed = await router.route(source)
+            // A newer load, or a stop, while the route was worked out: this one is dropped.
+            guard let self, !self.isStopped, generation == self.loadGeneration else { return }
+            self.open(routed)
+        }
+    }
+
+    /// Hands mpv the source — the stream itself, or where the router sent it.
+    private func open(_ source: PlaybackSource) {
+        opened = source
         setProperty("http-header-fields", MPVOptions.headerFields(source.headers))
         setProperty("user-agent", MPVOptions.userAgent(source.headers) ?? defaultUserAgent)
         setProperty("referrer", MPVOptions.referrer(source.headers) ?? "")
         // mpv has no per-file "prefer Japanese"; alang is an order of preference for the next file.
         setProperty("alang", source.prefersJapaneseAudio ? "ja,jpn" : "")
         command("loadfile", location(of: source.url), "replace")
-        reportTimeControl()
     }
 
     func stop() {
@@ -375,6 +400,7 @@ final class MPVEngine: PlaybackEngine {
         finishPendingSeeks(false)
         seekAfterLoad?.completion?(false)
         seekAfterLoad = nil
+        router?.release()
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers = []
         events = PlaybackEngineEvents()

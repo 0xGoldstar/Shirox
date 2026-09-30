@@ -271,17 +271,34 @@ final class CastProxyServer: @unchecked Sendable {
             let host = cachedIP ?? Self.currentLocalIP()
             cachedIP = host
             guard let host, host != "127.0.0.1" else { return nil }
-            var c = URLComponents()
-            c.scheme = "http"
-            c.host = host
-            c.port = Int(port.rawValue)
-            c.path = "/proxy"
-            c.queryItems = [
-                URLQueryItem(name: "url", value: url.absoluteString),
-                URLQueryItem(name: "t", value: token)
-            ]
-            return c.url
+            return mintLocked(url, host: host)
         }
+    }
+
+    /// Returns a proxied URL on loopback, signed with this run's token — for a client on this
+    /// device (mpv), which reaches the proxy with or without Wi-Fi.
+    func loopbackURL(for url: URL) -> URL? {
+        stateQueue.sync { mintLocked(url, host: "127.0.0.1") }
+    }
+
+    private func mintLocked(_ url: URL, host: String) -> URL? {
+        var c = URLComponents()
+        c.scheme = "http"
+        c.host = host
+        c.port = Int(port.rawValue)
+        c.path = "/proxy"
+        c.queryItems = [
+            URLQueryItem(name: "url", value: url.absoluteString),
+            URLQueryItem(name: "t", value: token)
+        ]
+        return c.url
+    }
+
+    /// Whether a request reached the proxy over loopback, going by its `Host`. Its playlists are
+    /// then rewritten with loopback URLs too, so the segments don't depend on Wi-Fi either.
+    static func isLoopback(hostHeader: String?) -> Bool {
+        guard let host = hostHeader?.split(separator: ":").first?.lowercased() else { return false }
+        return host == "127.0.0.1" || host == "localhost"
     }
 
     private static func makeToken() -> String {
@@ -333,12 +350,15 @@ final class CastProxyServer: @unchecked Sendable {
             request.setValue(range, forHTTPHeaderField: "Range")
         }
 
+        let loopback = Self.isLoopback(hostHeader: head.value(for: "host"))
         await exchanges.run(request: request,
                             on: upstream,
                             connection: connection,
                             wantsBody: head.wantsBody,
                             rewriteManifestFrom: target,
-                            proxy: { [weak self] in self?.proxyURL(for: $0) })
+                            proxy: { [weak self] in
+                                loopback ? self?.loopbackURL(for: $0) : self?.proxyURL(for: $0)
+                            })
     }
 
     // MARK: - Local IP
