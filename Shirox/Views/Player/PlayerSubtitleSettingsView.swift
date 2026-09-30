@@ -9,6 +9,8 @@ struct PlayerSubtitleSettingsView: View {
     var onImport: ((SubtitleTrack) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var showImporter = false
+    /// What's typed in the Sync section's exact-value field, cleared once it's applied.
+    @State private var exactDelay = ""
 
     var body: some View {
         NavigationStack {
@@ -84,25 +86,52 @@ struct PlayerSubtitleSettingsView: View {
                     #endif
                 }
 
-                Section("Sync") {
-                    #if !os(tvOS)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Delay")
-                            Spacer()
-                            Text(String(format: "%.1fs", settings.delaySeconds))
-                                .foregroundStyle(.secondary)
-                            Button("Reset") {
-                                settings.delaySeconds = 0
+                #if !os(tvOS)
+                Section {
+                    HStack {
+                        Text("Delay")
+                        Spacer()
+                        Text(PlayerSubtitleMenu.delayLabel(settings.delaySeconds))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 8) {
+                        ForEach(Self.sheetDelaySteps, id: \.self) { step in
+                            Button {
+                                settings.delaySeconds = PlayerSubtitleMenu.stepped(settings.delaySeconds, by: step)
+                            } label: {
+                                Text(PlayerSubtitleMenu.delayLabel(step))
+                                    .monospacedDigit()
+                                    .frame(maxWidth: .infinity)
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
                             .foregroundStyle(Color.accentColor)
                         }
-                        Slider(value: $settings.delaySeconds, in: -5...5, step: 0.1)
                     }
-                    #endif
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    HStack {
+                        TextField("Exact value, e.g. −83.5", text: $exactDelay)
+                            .numbersAndPunctuationKeyboard()
+                            .onSubmit(applyExactDelay)
+                        Button("Set", action: applyExactDelay)
+                            .disabled(PlayerSubtitleMenu.parseDelay(exactDelay) == nil)
+                            .foregroundStyle(Color.accentColor)
+                        Button("Reset") {
+                            settings.delaySeconds = 0
+                            exactDelay = ""
+                        }
+                        .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                } header: {
+                    Text("Sync")
+                } footer: {
+                    Text("A positive delay shows subtitles sooner, a negative one later.")
                 }
+                #endif
             }
             .softScrollEdges()
             .navigationTitle("Subtitle Settings")
@@ -121,6 +150,15 @@ struct PlayerSubtitleSettingsView: View {
                 }
             }
         }
+    }
+
+    /// The sheet's steps. The menu has the ±5 s ones; typing covers anything bigger.
+    static let sheetDelaySteps: [Double] = [-1, -0.1, 0.1, 1]
+
+    private func applyExactDelay() {
+        guard let value = PlayerSubtitleMenu.parseDelay(exactDelay) else { return }
+        settings.delaySeconds = value
+        exactDelay = ""
     }
 
     /// Also used by the subtitles menu's import row.
@@ -145,5 +183,17 @@ struct PlayerSubtitleSettingsView: View {
                 }
             }
         }
+    }
+}
+
+private extension View {
+    /// The keyboard with a minus key. `.decimalPad` has none, and a delay can be negative.
+    @ViewBuilder
+    func numbersAndPunctuationKeyboard() -> some View {
+        #if os(iOS)
+        keyboardType(.numbersAndPunctuation)
+        #else
+        self
+        #endif
     }
 }
