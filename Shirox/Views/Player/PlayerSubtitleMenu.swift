@@ -19,9 +19,7 @@ enum PlayerSubtitleMenu {
         var moreSettings: () -> Void
     }
 
-    /// The sheet's slider range.
-    static let delayRange: ClosedRange<Double> = -5...5
-    static let delaySteps: [Double] = [-0.5, -0.1, 0.1, 0.5]
+    static let delaySteps: [Double] = [-5, -1, -0.5, -0.1, 0.1, 0.5, 1, 5]
     static let sizes: [(name: String, points: Double)] = [
         ("Small", 18), ("Medium", 24), ("Large", 30), ("Extra Large", 36),
     ]
@@ -70,10 +68,23 @@ enum PlayerSubtitleMenu {
         return (tenths > 0 ? "+" : "−") + String(format: "%.1f", abs(tenths) / 10) + "s"
     }
 
-    /// The delay after a step, on a tenth and within the sheet's range.
+    /// The delay after a step, on a tenth. There's no cap: subtitles timed for another cut of
+    /// the episode can be a whole recap or opening out.
     static func stepped(_ delay: Double, by step: Double) -> Double {
-        let value = ((delay + step) * 10).rounded() / 10
-        return min(max(value, delayRange.lowerBound), delayRange.upperBound)
+        ((delay + step) * 10).rounded() / 10
+    }
+
+    /// A delay typed into the sheet: "83.5", "-2", "−0.4" or "1,5", with or without a trailing
+    /// "s". On a tenth like the steps; nil for anything that isn't a finite number.
+    static func parseDelay(_ text: String) -> Double? {
+        var cleaned = text.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "−", with: "-")
+            .replacingOccurrences(of: ",", with: ".")
+        if cleaned.hasSuffix("s") {
+            cleaned = String(cleaned.dropLast()).trimmingCharacters(in: .whitespaces)
+        }
+        guard let value = Double(cleaned), value.isFinite else { return nil }
+        return (value * 10).rounded() / 10
     }
 
     /// The preset's name, or the points of a size set with the sheet's slider.
