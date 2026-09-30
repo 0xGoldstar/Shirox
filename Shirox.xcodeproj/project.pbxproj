@@ -450,6 +450,7 @@
 		2226245532D5C4D6A3B109F1 /* HLSManifestParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 434062BAE638F3D33467EBCF /* HLSManifestParser.swift */; };
 		2299421510297E604395E24E /* DataSaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A304B304C482A8AAA10DB209 /* DataSaver.swift */; };
 		23A2038CCEF4B2EF19C6DBC4 /* SimklHomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 017A0CD3925511086F3B6099 /* SimklHomeViewModel.swift */; };
+		23D6C34EC9EC443168F997F1 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; productRef = 98DACBDDFA4D953F5D7F559E /* MPVKit */; };
 		241C08ED40752B534F055933 /* libzstd in Frameworks */ = {isa = PBXBuildFile; productRef = 254F319EE376CCB39DE7AF9C /* libzstd */; };
 		243906CC2AB59FF9AE447BDF /* LibraryWriteSink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF6D00FF0F0489890FAF52D /* LibraryWriteSink.swift */; };
 		243E4ABC94E487634341D34B /* AVPlayerEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 016EA3BC349BBBE803F7D65C /* AVPlayerEngineTests.swift */; };
@@ -483,6 +484,7 @@
 		30F99AC7601B22559244BB16 /* TrackingLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD85596DDDE2969C940A38C /* TrackingLinks.swift */; };
 		31E5C6496E10906DA839A64E /* LibrarySourceSwitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 340C623B04A57EE34B09333C /* LibrarySourceSwitcher.swift */; };
 		3293B17DF9DEECB014C8C540 /* SimklTitleReadsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7799F7824536E9E54A2D6903 /* SimklTitleReadsTests.swift */; };
+		32F3A54684036F605CB9A10A /* MPVKit in Frameworks */ = {isa = PBXBuildFile; productRef = AD2529EB8362B5776B962BCC /* MPVKit */; };
 		32FA75AAF4A0DCC20AA15D03 /* CopyTitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 250387834E819E85E4CD966E /* CopyTitle.swift */; };
 		33A72004F275D89800ADAF53 /* MangaProgressManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB5F43A448079ACC600D906 /* MangaProgressManager.swift */; };
 		33EA776012193DAB0570A9A6 /* MangaModuleResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78D8556737F55F2772288018 /* MangaModuleResolver.swift */; };
@@ -755,6 +757,7 @@
 		9FBB1E7362264AFB57C66C8C /* ReaderPageMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2630DB71CDC98D422B49EC1A /* ReaderPageMapping.swift */; };
 		9FBCE94F27C5099207290B7C /* WatchOrderSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC268A065BC5B9DB56250D4B /* WatchOrderSection.swift */; };
 		A00137A45A0CEF5CE53358BD /* PlaybackEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D60B798231DDDA4482EFD7DF /* PlaybackEngine.swift */; };
+		A06C948886D47E15E4842DF6 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; productRef = C333924C8E6D85D22BFA180C /* MPVKit */; };
 		A0722750ED30A028878FF395 /* MALMangaLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BAE193514A5E83E81EF31B8 /* MALMangaLibraryService.swift */; };
 		A116F1F16FA3F31588F7D0B7 /* SimklPlayTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D916039C879C3C82C435886 /* SimklPlayTracker.swift */; };
 		A147502B402E4F1121420096 /* PendingWrite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A5A6BA34DDCEF8AFDF2E059 /* PendingWrite.swift */; };
@@ -1427,6 +1430,7 @@
 				FAFF9AA00DEB80103E5C7F76 /* WebKit.framework in Frameworks */,
 				1251C4572FCAD62E002AD0B2 /* GoogleCastDynamicCore in Frameworks */,
 				241C08ED40752B534F055933 /* libzstd in Frameworks */,
+				A06C948886D47E15E4842DF6 /* MPVKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1437,6 +1441,7 @@
 				0F474E262FE9E84800FAC2BA /* Kingfisher in Frameworks */,
 				121D9B452FCA53AA000FF9B4 /* FakeWebKit in Frameworks */,
 				C4BFF68BBC523AB88DCA3247 /* libzstd in Frameworks */,
+				32F3A54684036F605CB9A10A /* MPVKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1457,6 +1462,7 @@
 				0FB47691410BFA732D132352 /* WebKit.framework in Frameworks */,
 				121D9B332FCA527E000FF9B4 /* GoogleCastDynamicCore in Frameworks */,
 				4534EAA6EBAA8ADDB6343896 /* libzstd in Frameworks */,
+				23D6C34EC9EC443168F997F1 /* MPVKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2109,6 +2115,7 @@
 				121D9B442FCA53AA000FF9B4 /* FakeWebKit */,
 				0F474E252FE9E84800FAC2BA /* Kingfisher */,
 				C482D0E0AC514A00E36EEC7A /* libzstd */,
+				AD2529EB8362B5776B962BCC /* MPVKit */,
 			);
 			productName = Shirox_tvOS;
 			productReference = 121D9B382FCA5378000FF9B4 /* Shirox_tvOS.app */;
@@ -2129,6 +2136,7 @@
 			name = Shirox_iOS;
 			packageProductDependencies = (
 				17FB32D34DDEB0E0E09776CE /* libzstd */,
+				98DACBDDFA4D953F5D7F559E /* MPVKit */,
 			);
 			productName = Shirox_iOS;
 			productReference = E8D91E43B99205901655CDF0 /* Shirox.app */;
@@ -2167,6 +2175,7 @@
 			name = Shirox_macOS;
 			packageProductDependencies = (
 				254F319EE376CCB39DE7AF9C /* libzstd */,
+				C333924C8E6D85D22BFA180C /* MPVKit */,
 			);
 			productName = Shirox_macOS;
 			productReference = 4C8891C8EC305651E62AC138 /* Shirox.app */;
@@ -2209,6 +2218,7 @@
 				121D9B432FCA53AA000FF9B4 /* XCRemoteSwiftPackageReference "FakeWebKit" */,
 				0F474E202FE9E7D600FAC2BA /* XCRemoteSwiftPackageReference "Kingfisher" */,
 				1E95D785326020281E9DCAAE /* XCRemoteSwiftPackageReference "zstd" */,
+				2338EEEFC73F4EC8953A9F5F /* XCRemoteSwiftPackageReference "MPVKit" */,
 			);
 			productRefGroup = 73D712B4138A3740575F996E /* Products */;
 			projectDirPath = "";
@@ -3676,6 +3686,14 @@
 				version = 1.5.7;
 			};
 		};
+		2338EEEFC73F4EC8953A9F5F /* XCRemoteSwiftPackageReference "MPVKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mpvkit/MPVKit";
+			requirement = {
+				kind = exactVersion;
+				version = 1.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -3718,6 +3736,21 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1E95D785326020281E9DCAAE /* XCRemoteSwiftPackageReference "zstd" */;
 			productName = libzstd;
+		};
+		98DACBDDFA4D953F5D7F559E /* MPVKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2338EEEFC73F4EC8953A9F5F /* XCRemoteSwiftPackageReference "MPVKit" */;
+			productName = MPVKit;
+		};
+		AD2529EB8362B5776B962BCC /* MPVKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2338EEEFC73F4EC8953A9F5F /* XCRemoteSwiftPackageReference "MPVKit" */;
+			productName = MPVKit;
+		};
+		C333924C8E6D85D22BFA180C /* MPVKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2338EEEFC73F4EC8953A9F5F /* XCRemoteSwiftPackageReference "MPVKit" */;
+			productName = MPVKit;
 		};
 		C482D0E0AC514A00E36EEC7A /* libzstd */ = {
 			isa = XCSwiftPackageProductDependency;
