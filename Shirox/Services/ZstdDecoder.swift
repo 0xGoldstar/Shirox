@@ -74,3 +74,13 @@ enum HTTPBodyDecoding {
         return try ZstdDecoder.decompress(data)
     }
 }
+
+extension URLSession {
+    /// `data(for:)` with a zstd body decoded, since URLSession leaves those compressed. A body
+    /// that says it's zstd but won't decode fails the request instead of passing on garbage.
+    func decodedData(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let (data, response) = try await data(for: request)
+        guard let http = response as? HTTPURLResponse else { return (data, response) }
+        return (try HTTPBodyDecoding.decoded(data, response: http), response)
+    }
+}

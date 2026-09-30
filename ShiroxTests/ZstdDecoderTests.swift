@@ -85,3 +85,57 @@ final class ZstdDecoderTests: XCTestCase {
         XCTAssertThrowsError(try HTTPBodyDecoding.decoded(json.prefix(10), response: response(encoding: "zstd")))
     }
 }
+
+/// Serves one canned response to any request, bytes exactly as given, the way a server puts them
+/// on the wire. A custom protocol means the system does no content decoding of its own.
+private final class CannedResponseProtocol: URLProtocol {
+    nonisolated(unsafe) static var body = Data()
+    nonisolated(unsafe) static var headers: [String: String] = [:]
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                                       headerFields: Self.headers)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Self.body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+final class ZstdSessionTests: XCTestCase {
+
+    private func session(body: Data, headers: [String: String]) -> URLSession {
+        CannedResponseProtocol.body = body
+        CannedResponseProtocol.headers = headers
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CannedResponseProtocol.self]
+        return URLSession(configuration: config)
+    }
+
+    private let request = URLRequest(url: URL(string: "https://example.com/api")!)
+    private let json = Data(base64Encoded: "KLUv/QBY6QAAeyJvayI6dHJ1ZSwidGl0bGUiOiJGcmllcmVuIn0=")!
+
+    func testASessionHandsBackTheDecodedBody() async throws {
+        let (data, _) = try await session(body: json, headers: ["Content-Encoding": "zstd"]).decodedData(for: request)
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), #"{"ok":true,"title":"Frieren"}"#)
+    }
+
+    func testAPlainBodyComesBackAsSent() async throws {
+        let plain = Data("hello".utf8)
+        let (data, _) = try await session(body: plain, headers: [:]).decodedData(for: request)
+        XCTAssertEqual(data, plain)
+    }
+
+    func testABrokenZstdBodyFailsTheRequestWithAReason() async {
+        do {
+            _ = try await session(body: json.prefix(10), headers: ["Content-Encoding": "zstd"]).decodedData(for: request)
+            XCTFail("Expected a decode failure")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.hasPrefix("Could not decode zstd response: "), "\(error)")
+        }
+    }
+}

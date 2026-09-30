@@ -47,7 +47,7 @@ enum VTTSubtitlesLoader {
             request.setValue(value, forHTTPHeaderField: key)
         }
 
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let (data, _) = try await URLSession.shared.decodedData(for: request)
 
         guard let content = String(data: data, encoding: .utf8) ??
                             String(data: data, encoding: .isoLatin1) else {

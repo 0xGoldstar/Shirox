@@ -43,7 +43,7 @@ final class JSEngine: ObservableObject {
             guard let url = URL(string: module.scriptUrl) else {
                 throw URLError(.badURL)
             }
-            let (data, _) = try await session.data(from: url)
+            let (data, _) = try await session.decodedData(for: URLRequest(url: url))
             guard let fetched = String(data: data, encoding: .utf8) else {
                 throw URLError(.cannotDecodeContentData)
             }
@@ -260,7 +260,8 @@ final class JSEngine: ObservableObject {
                         }
                     }
 
-                    var (data, response) = try await self.session.data(for: request)
+                    // Decoded before the body is read at all: the Cloudflare wall check below reads it too.
+                    var (data, response) = try await self.session.decodedData(for: request)
                     guard var httpResponse = response as? HTTPURLResponse else {
                         reject.call(withArguments: ["No response data"])
                         return
@@ -279,9 +280,9 @@ final class JSEngine: ObservableObject {
                             session: self.session
                         )
                         if let recovered {
-                            data = recovered.data
+                            data = try HTTPBodyDecoding.decoded(recovered.data, response: recovered.response)
                             httpResponse = recovered.response
-                            responseText = String(data: recovered.data, encoding: .utf8) ?? ""
+                            responseText = String(data: data, encoding: .utf8) ?? ""
                         } else {
                             await CloudflareBypassManager.shared.flagPendingVerification(for: cfResponseURL)
                         }

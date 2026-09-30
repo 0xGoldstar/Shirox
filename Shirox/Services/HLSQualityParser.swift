@@ -45,7 +45,7 @@ enum HLSQualityParser {
         var request = URLRequest(url: url, timeoutInterval: 10)
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
-        guard let (data, response) = try? await URLSession.shared.data(for: request) else {
+        guard let (data, response) = try? await URLSession.shared.decodedData(for: request) else {
             Logger.shared.log("[HLSQuality] Fetch failed for \(Logger.redact(url))", type: "Error")
             return []
         }
