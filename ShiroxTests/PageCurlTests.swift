@@ -12,7 +12,6 @@ final class PageCurlTests: XCTestCase {
         XCTAssertEqual(PageCurl.spineLocation(rightToLeft: false), .min)
     }
 
-    /// Pages stay in reading order in both directions; only the spine moves.
     func testNeighboursFollowReadingOrder() {
         let ids = [10, 11, 12]
         XCTAssertEqual(PageCurl.neighbor(of: 11, offset: 1, in: ids), 12)
@@ -41,55 +40,58 @@ final class PageCurlTests: XCTestCase {
         XCTAssertFalse(PageCurl.canTurn(from: nil, forward: true, in: ids), "no page on screen yet")
     }
 
+    // MARK: - UIKit's side of a curl
+
+    /// UIKit asks for the page "after" on a leftward swipe and "before" on a rightward one — with
+    /// the spine on either side, wherever the page is grabbed (driven through its own pan handler).
+    /// Right to left reads the other way, so there its "before" is the next page.
+    func testUIKitsBeforeAndAfterMapToReadingOrder() {
+        XCTAssertEqual(PageCurl.readingOffset(uikitAfter: true, rightToLeft: false), 1)
+        XCTAssertEqual(PageCurl.readingOffset(uikitAfter: false, rightToLeft: false), -1)
+        XCTAssertEqual(PageCurl.readingOffset(uikitAfter: false, rightToLeft: true), 1,
+                       "right to left, a swipe right turns to the next page")
+        XCTAssertEqual(PageCurl.readingOffset(uikitAfter: true, rightToLeft: true), -1)
+    }
+
     // MARK: - Starting a curl
 
     private let ids = [10, 11, 12]
-    private let width: CGFloat = 400
 
-    private func canBegin(from id: Int, velocityX: CGFloat, translationX: CGFloat, locationX: CGFloat,
+    private func canBegin(from id: Int, velocityX: CGFloat, translationX: CGFloat,
                           rightToLeft: Bool = false) -> Bool {
         PageCurl.canBeginCurl(from: id, velocityX: velocityX, translationX: translationX,
-                              locationX: locationX, width: width, rightToLeft: rightToLeft, in: ids)
+                              rightToLeft: rightToLeft, in: ids)
     }
 
-    /// The crash, left to right: a leftward swipe on the first page, started on its left half. By
-    /// its motion it turns forward; UIKit, going by where the page was grabbed, curled it back —
-    /// to no page. "The number of view controllers provided (0) doesn't match the number required
-    /// (1) for the requested transition".
-    func testOnTheFirstPageAForwardSwipeGrabbedOnTheBackHalfIsIgnored() {
-        XCTAssertFalse(canBegin(from: 10, velocityX: -500, translationX: -12, locationX: 120))
+    /// The crash, right to left: a swipe right on the first page, meant for the next one. The pager
+    /// took it for forward; UIKit turned it back — to no page. "The number of view controllers
+    /// provided (0) doesn't match the number required (1) for the requested transition".
+    func testRightToLeftASwipeRightOnTheFirstPageTurnsForward() {
+        XCTAssertTrue(canBegin(from: 10, velocityX: 500, translationX: 12, rightToLeft: true))
+        XCTAssertFalse(canBegin(from: 10, velocityX: -500, translationX: -12, rightToLeft: true))
     }
 
-    func testOnTheFirstPageAForwardSwipeGrabbedOnTheForwardHalfTurns() {
-        XCTAssertTrue(canBegin(from: 10, velocityX: -500, translationX: -12, locationX: 320))
+    func testLeftToRightASwipeLeftOnTheFirstPageTurnsForward() {
+        XCTAssertTrue(canBegin(from: 10, velocityX: -500, translationX: -12))
+        XCTAssertFalse(canBegin(from: 10, velocityX: 500, translationX: 12))
     }
 
-    func testOnTheLastPageABackSwipeGrabbedOnTheForwardHalfIsIgnored() {
-        XCTAssertFalse(canBegin(from: 12, velocityX: 500, translationX: 12, locationX: 320))
-        XCTAssertTrue(canBegin(from: 12, velocityX: 500, translationX: 12, locationX: 80))
-    }
-
-    /// Mid-chapter every reading of the swipe has a page, so nothing changes there.
-    func testInTheMiddleEverySwipeTurns() {
-        XCTAssertTrue(canBegin(from: 11, velocityX: -500, translationX: -12, locationX: 80))
-        XCTAssertTrue(canBegin(from: 11, velocityX: 500, translationX: 12, locationX: 320))
+    func testOnTheLastPageOnlyTurningBackStarts() {
+        XCTAssertFalse(canBegin(from: 12, velocityX: -500, translationX: -12))
+        XCTAssertTrue(canBegin(from: 12, velocityX: 500, translationX: 12))
+        XCTAssertFalse(canBegin(from: 12, velocityX: 500, translationX: 12, rightToLeft: true))
     }
 
     /// Motion one way and distance the other — a finger that doubled back — must both be possible.
     func testMotionAndDistanceMustBothHaveAPage() {
-        XCTAssertFalse(canBegin(from: 10, velocityX: -500, translationX: 6, locationX: 320))
+        XCTAssertFalse(canBegin(from: 10, velocityX: -500, translationX: 6))
+        XCTAssertTrue(canBegin(from: 11, velocityX: -500, translationX: 6))
     }
 
-    /// Right to left mirrors it: the spine is on the right, so the left half turns forward.
-    func testRightToLeftMirrorsWhichHalfTurnsForward() {
-        XCTAssertFalse(canBegin(from: 10, velocityX: 500, translationX: 12, locationX: 320, rightToLeft: true))
-        XCTAssertTrue(canBegin(from: 10, velocityX: 500, translationX: 12, locationX: 80, rightToLeft: true))
-    }
-
-    /// A pan that hasn't moved yet says nothing by its motion; where it was grabbed decides.
-    func testAStillPanIsJudgedByWhereItWasGrabbed() {
-        XCTAssertTrue(canBegin(from: 10, velocityX: 0, translationX: 0, locationX: 320))
-        XCTAssertFalse(canBegin(from: 10, velocityX: 0, translationX: 0, locationX: 80))
+    /// A pan that hasn't moved says nothing about where it's going, so it needs a page both ways.
+    func testAStillPanStartsOnlyWithAPageBothWays() {
+        XCTAssertTrue(canBegin(from: 11, velocityX: 0, translationX: 0))
+        XCTAssertFalse(canBegin(from: 10, velocityX: 0, translationX: 0))
     }
 }
 
@@ -185,6 +187,30 @@ final class PageCurlPagerTurnTests: XCTestCase {
         model.current = 3
         flush()
         XCTAssertEqual(shown, 3)
+    }
+
+    /// Right to left, UIKit's "before" (a swipe right) is the next page and its "after" the one
+    /// behind — past the start, the same page.
+    func testRightToLeftSwapsWhichNeighbourUIKitGets() {
+        let rtl = RTLHarness(model: model)
+        let host = UIHostingController(rootView: rtl)
+        window.rootViewController = host
+        flush()
+        let pager = Self.find(UIPageViewController.self, in: host)!
+        let first = pager.viewControllers!.first!
+        let before = pager.dataSource!.pageViewController(pager, viewControllerBefore: first)
+        let after = pager.dataSource!.pageViewController(pager, viewControllerAfter: first)
+        XCTAssertEqual((before as? CurlPageHost)?.pageID, 1)
+        XCTAssertEqual((after as? CurlPageHost)?.pageID, 0)
+    }
+
+    struct RTLHarness: View {
+        @ObservedObject var model: Model
+        var body: some View {
+            PageCurlPager(pageIDs: [0, 1, 2, 3, 4], current: $model.current, rightToLeft: true) { id, _ in
+                Text("\(id)")
+            }
+        }
     }
 
     /// A curl UIKit re-aims mid-gesture — the finger drags back past where it started — asks for
