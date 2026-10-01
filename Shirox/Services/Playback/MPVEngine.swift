@@ -69,13 +69,38 @@ final class MPVEngine: PlaybackEngine {
     let layer = MPVMetalLayer()
 
     #if os(iOS)
-    func captureCurrentFrame() -> UIImage? {
-        guard isItemReady else { return nil }
+    private struct PendingScreenshot {
+        let file: URL
+        let completion: @MainActor (UIImage?) -> Void
+    }
+    private var pendingScreenshots: [UInt64: PendingScreenshot] = [:]
+
+    func captureCurrentFrame(completion: @escaping @MainActor (UIImage?) -> Void) {
+        guard isItemReady, !isStopped else { completion(nil); return }
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString).appendingPathExtension("png")
-        defer { try? FileManager.default.removeItem(at: file) }
-        command("screenshot-to-file", file.path, "video")
-        return UIImage(contentsOfFile: file.path)
+        let reply = nextSeekReply
+        nextSeekReply += 1
+        pendingScreenshots[reply] = PendingScreenshot(file: file, completion: completion)
+        // Screenshot encoding can finish after the command is queued. Keep the file until mpv
+        // reports completion instead of reading and deleting it immediately.
+        if !commandAsync(reply: reply, "screenshot-to-file", file.path, "video") {
+            pendingScreenshots.removeValue(forKey: reply)
+            completion(nil)
+        }
+    }
+
+    private func finishScreenshot(reply: UInt64, error: Int32) -> Bool {
+        guard let pending = pendingScreenshots.removeValue(forKey: reply) else { return false }
+        let image = error >= 0 ? UIImage(contentsOfFile: pending.file.path) : nil
+        if error < 0 {
+            Logger.shared.log("[MPV] Screenshot failed: \(String(cString: mpv_error_string(error)))", type: "Error")
+        } else if image == nil {
+            Logger.shared.log("[MPV] Screenshot completed without an image", type: "Error")
+        }
+        try? FileManager.default.removeItem(at: pending.file)
+        pending.completion(image)
+        return true
     }
     #endif
 
@@ -367,6 +392,9 @@ final class MPVEngine: PlaybackEngine {
             tick(force: true)
             tellMetalShown()
         case .commandReply(let reply, let error):
+            #if os(iOS)
+            if finishScreenshot(reply: reply, error: error) { return }
+            #endif
             guard let index = pendingSeeks.firstIndex(where: { $0.reply == reply }) else { return }
             if error < 0 {
                 pendingSeeks.remove(at: index).completion(false)
@@ -544,6 +572,14 @@ final class MPVEngine: PlaybackEngine {
     func stop() {
         guard !isStopped else { return }
         isStopped = true
+        #if os(iOS)
+        let screenshots = Array(pendingScreenshots.values)
+        pendingScreenshots = [:]
+        for screenshot in screenshots {
+            try? FileManager.default.removeItem(at: screenshot.file)
+            screenshot.completion(nil)
+        }
+        #endif
         tellMetalShown()
         finishPendingSeeks(false)
         seekAfterLoad?.completion?(false)

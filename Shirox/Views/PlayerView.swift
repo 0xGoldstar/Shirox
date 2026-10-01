@@ -901,8 +901,14 @@ struct PlayerView: View {
 
     #if os(iOS)
     private func saveCurrentFrame(from engine: any PlaybackEngine) {
-        let image = (engine as? AVPlayerEngine)?.captureCurrentFrame()
-            ?? (engine as? MPVEngine)?.captureCurrentFrame()
+        if let mpv = engine as? MPVEngine {
+            mpv.captureCurrentFrame { image in saveFrameImage(image) }
+        } else {
+            saveFrameImage((engine as? AVPlayerEngine)?.captureCurrentFrame())
+        }
+    }
+
+    private func saveFrameImage(_ image: UIImage?) {
         guard let image else {
             frameSaveMessage = "The current video frame is unavailable. Try again while the video is playing."
             showFrameSaveAlert = true
