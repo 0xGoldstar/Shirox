@@ -87,4 +87,24 @@ final class PlayerForegroundRecoveryTests: XCTestCase {
             PlayerForegroundRecovery.recoverThreshold(isLocalPlayback: true),
             PlayerForegroundRecovery.recoverThreshold(isLocalPlayback: false))
     }
+
+    // MARK: - The resume nudge
+
+    /// THE BUG: back from Picture in Picture the player sought to where it already was — a nudge
+    /// for a player iOS had suspended — and the sound dropped out for a second. One that kept
+    /// playing while away has nothing to recover from.
+    func testPlayerThatKeptPlayingIsLeftAlone() {
+        XCTAssertFalse(PlayerForegroundRecovery.needsResumeNudge(isPlaying: true, timeControl: .playing))
+    }
+
+    /// Meant to play but stopped while away — the audio session taken, the buffer evicted.
+    func testPlayerThatStoppedWhileAwayIsNudged() {
+        XCTAssertTrue(PlayerForegroundRecovery.needsResumeNudge(isPlaying: true, timeControl: .paused))
+        XCTAssertTrue(PlayerForegroundRecovery.needsResumeNudge(isPlaying: true, timeControl: .waiting))
+    }
+
+    /// A paused player's frame is drawn again on return, as before.
+    func testPausedPlayerIsStillNudged() {
+        XCTAssertTrue(PlayerForegroundRecovery.needsResumeNudge(isPlaying: false, timeControl: .paused))
+    }
 }

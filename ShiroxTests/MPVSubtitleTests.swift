@@ -117,13 +117,16 @@ final class MPVSubtitleTests: XCTestCase {
 
     /// A quality change reopens the stream; the script comes back with it.
     func testTheScriptSurvivesAReload() async throws {
-        await load(try silence())
+        let server = try await HLSServer.twoVariants()
+        defer { server.stop() }
+        await load(server.url(of: "/master.m3u8"))
         engine.showSubtitles(.script(script))
         _ = await waitUntil { self.engine.shownSubtitleTrack?.isExternal == true }
         let reopened = expectation(description: "reopened")
         reopened.assertForOverFulfill = false
         engine.events.itemReady = { reopened.fulfill() }
-        engine.setPeakBitRate(1_000_000)
+        // Down from the highest variant, which it opened on.
+        engine.setPeakBitRate(600_000)
         await fulfillment(of: [reopened], timeout: 10)
         let back = await waitUntil { self.engine.shownSubtitleTrack?.isExternal == true }
         XCTAssertTrue(back)

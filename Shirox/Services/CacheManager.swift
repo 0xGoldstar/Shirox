@@ -65,7 +65,7 @@ final class CacheManager: ObservableObject {
     }
 
     var idMappingSize: Int {
-        (UserDefaults.standard.data(forKey: "id_mappings_cache")?.count ?? 0)
+        IDMappingService.shared.storageSize
     }
 
     var episodeSortSize: Int {

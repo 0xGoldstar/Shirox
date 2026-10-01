@@ -17,6 +17,23 @@ enum PlaybackIntent: Equatable {
     case pause
 }
 
+/// What Now Playing shows apart from the position.
+struct NowPlayingDetails: Equatable {
+    var title: String
+    var subtitle: String
+    var duration: Double
+    /// Which artwork is attached; nil for none yet.
+    var artworkKey: String?
+}
+
+/// What Now Playing was told, and when (`time`, on a monotonic clock).
+struct NowPlayingSnapshot: Equatable {
+    var details: NowPlayingDetails
+    var elapsed: Double
+    var rate: Double
+    var time: Double
+}
+
 /// Pure routing decisions for transport commands and Now Playing — no AVFoundation, no Cast
 /// SDK, fully unit-testable.
 ///
@@ -97,5 +114,20 @@ enum PlaybackRouting {
         let raw = target == .cast ? castPosition : localPosition
         guard raw.isFinite, raw > 0 else { return 0 }
         return raw
+    }
+
+    /// How far the position may stray from where the system would have moved it before Now
+    /// Playing is told again: more than a tick's jitter, less than anyone would notice.
+    static let nowPlayingDriftTolerance = 1.0
+
+    /// Whether Now Playing needs telling again. The system moves its scrubber along by itself from
+    /// the last position and rate it was given, so it only needs what it can't work out: a change
+    /// to what it shows, to the rate, or a position that has strayed from where it would have got
+    /// to — a seek, a stall. Sent on every half-second tick instead, it cost a round trip to the
+    /// media daemon twice a second for the length of every episode.
+    static func nowPlayingNeedsUpdate(last: NowPlayingSnapshot?, next: NowPlayingSnapshot) -> Bool {
+        guard let last, last.details == next.details, last.rate == next.rate else { return true }
+        let expected = last.elapsed + (next.time - last.time) * last.rate
+        return abs(next.elapsed - expected) > nowPlayingDriftTolerance
     }
 }

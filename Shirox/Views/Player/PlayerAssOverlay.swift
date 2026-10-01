@@ -16,11 +16,16 @@ enum VideoFrame {
 }
 
 #if os(iOS) || os(macOS)
-/// Draws an ASS script over AVPlayer's picture, every screen refresh, lined up with the picture
+/// Draws an ASS script over AVPlayer's picture as it plays, lined up with the picture
 /// in Fit and Fill. It doesn't rise with the controls: signs belong where the script put them.
 /// The platform views own the display link and call `tick`.
 @MainActor
 final class AssOverlayDriver {
+    /// How often the display link asks for a frame. Subtitles move with the picture, which runs
+    /// at 24–30 frames a second; left at the screen's rate the link rendered two to five times
+    /// that, and on a 120 Hz screen kept the panel at 120 Hz for the whole episode.
+    static let frameRateRange = CAFrameRateRange(minimum: 24, maximum: 30, preferred: 30)
+
     let layer = CALayer()
     private var renderer: AssRenderer?
     private var script: String?
@@ -67,7 +72,7 @@ final class AssOverlayDriver {
         layer.isHidden = !visible
     }
 
-    /// One screen refresh: draws the script at the picture's time, once the last frame's done.
+    /// One display-link frame: draws the script at the picture's time, once the last frame's done.
     func tick(bounds: CGRect, scale: CGFloat) {
         guard visible, !rendering, let renderer, let engine, scale > 0 else { return }
         let video = VideoFrame.rect(videoSize: engine.presentationSize, in: bounds, filled: filled)
@@ -139,6 +144,7 @@ final class AssOverlayView: UIView {
         clipsToBounds = true
         layer.addSublayer(driver.layer)
         let link = CADisplayLink(target: DisplayLinkTarget(self), selector: #selector(DisplayLinkTarget.fire))
+        link.preferredFrameRateRange = AssOverlayDriver.frameRateRange
         link.add(to: .main, forMode: .common)
         displayLink = link
     }
@@ -213,6 +219,7 @@ final class AssOverlayView: NSView {
         stop()
         guard window != nil else { return }
         let link = displayLink(target: DisplayLinkTarget(self), selector: #selector(DisplayLinkTarget.fire))
+        link.preferredFrameRateRange = AssOverlayDriver.frameRateRange
         link.add(to: .main, forMode: .common)
         self.link = link
     }

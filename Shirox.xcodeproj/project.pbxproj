@@ -443,6 +443,7 @@
 		1D35FCAF1184526713F84562 /* SimklKindPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99368291A4FD4331E25F2FEA /* SimklKindPicker.swift */; };
 		1D7E00496481B46D86C0E530 /* SyncTargets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FCF5D4BE28837126DC12CF1 /* SyncTargets.swift */; };
 		1E9C0F13D08F553EC0BF3F9E /* LocalCollection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A013F4638FEFB8E37C2E53A /* LocalCollection.swift */; };
+		1EC02510E39975D92376E45B /* StoredFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B02286E77DB0BD73AD3303E /* StoredFile.swift */; };
 		1EF89167D3E014ECF13C8657 /* TVDBLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74A691F1B345D1C7447C46B2 /* TVDBLogo.swift */; };
 		1F04849669244CD077701190 /* SubtitleLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2063F643CA2437FD3A6B2F7F /* SubtitleLoaderTests.swift */; };
 		1F1EEAEF0D210E5ADE27A915 /* SimklLibraryReadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE9A37F2AF92184D9A24B5A /* SimklLibraryReadTests.swift */; };
@@ -588,6 +589,7 @@
 		5A10040226ADFB59AD6A0D41 /* SimklOAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2724D13591401331A3D0EA0 /* SimklOAuth.swift */; };
 		5A8751D8DA64618C6E3F9FB8 /* SimklCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39077FFB4866E4944852E363 /* SimklCatalog.swift */; };
 		5A87BA220E36A141B0CB2602 /* VideoFrameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 712ECC5DF98264C2AE135A26 /* VideoFrameTests.swift */; };
+		5A9942CB2AAF5CA77B2305BE /* StoredFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A0E68AE50FD1EC52AA35A6 /* StoredFileTests.swift */; };
 		5BB802012A7D94DA181527C1 /* SimklActivityStorageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD7CC628C6AE93B4C0BEA616 /* SimklActivityStorageTests.swift */; };
 		5BF948F195AA32379C202F8A /* SimklLibraryService+Titles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1424D4F2FFA81CC26F8F4795 /* SimklLibraryService+Titles.swift */; };
 		5C5B78EFA2A189F5865F491D /* JellyfinAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EA13A2F15016892850F349E /* JellyfinAuthManager.swift */; };
@@ -786,6 +788,7 @@
 		A31132F016A7E93E1D180198 /* MangaMatchManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F22BAD7B63A9CC4EC7C9F88A /* MangaMatchManagerTests.swift */; };
 		A35FE91944C0673BFACA89D8 /* JikanGenreMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72916D73A600FD77E3BA1BF2 /* JikanGenreMergeTests.swift */; };
 		A44BEB6C5F0E92DBB45541A8 /* AniListSeasonTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A27BE91A41E067C81A857EB2 /* AniListSeasonTests.swift */; };
+		A480B91CC2D33C71521D0832 /* StoredFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B02286E77DB0BD73AD3303E /* StoredFile.swift */; };
 		A48A03EB68F6674514A6B029 /* TrackingIDInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D86F9ECC723417E1CFE1019 /* TrackingIDInput.swift */; };
 		A49E0E23C1C7285635391C71 /* MPVVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D543E2A2D8BF2A3E8FE21B10 /* MPVVideoView.swift */; };
 		A4B00A81F73C9F0843FCED35 /* MangaReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A163F438470905CAA8B912B0 /* MangaReaderView.swift */; };
@@ -947,6 +950,7 @@
 		E107D4BF53B86BFE5626C76D /* SubtitleRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 881989087D5AEFEADB010420 /* SubtitleRouting.swift */; };
 		E10C29F791B718172E8CF384 /* SeanimeRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F9EFB7A4C41F3449EC80F9A /* SeanimeRuntimeTests.swift */; };
 		E1C5DF794BC10D91A8DB9648 /* SimklLibraryMirrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 480ECDBED1F683F27CA3D75C /* SimklLibraryMirrorTests.swift */; };
+		E1D812CEDF45CB3743A34CD1 /* StoredFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B02286E77DB0BD73AD3303E /* StoredFile.swift */; };
 		E1E9074E77CDEAAB8607D3DA /* SimklTitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F592860D1C8F12E4C54C22CA /* SimklTitle.swift */; };
 		E222081CF7D1FD62460F4D4A /* ContinueReadingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 260EB4F88FB4092DF0B4EC76 /* ContinueReadingCard.swift */; };
 		E227DA58285C280ED3980B82 /* KingfisherImageCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC154F4B51E6E8262096B6AE /* KingfisherImageCacheTests.swift */; };
@@ -1209,7 +1213,7 @@
 		2C4A4D717CED7197DBAD4A83 /* JellyfinModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JellyfinModels.swift; sourceTree = "<group>"; };
 		2D27CE239EB1FB6F910EF415 /* CastProxyStreamingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CastProxyStreamingTests.swift; sourceTree = "<group>"; };
 		2D2FC0A9D0A969258C961440 /* SeanimeJSHarness.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SeanimeJSHarness.swift; sourceTree = "<group>"; };
-		2E7F10F162A39F3D89AE3150 /* SeanimeRuntime.js */ = {isa = PBXFileReference; includeInIndex = 1; path = SeanimeRuntime.js; sourceTree = "<group>"; };
+		2E7F10F162A39F3D89AE3150 /* SeanimeRuntime.js */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.javascript; path = SeanimeRuntime.js; sourceTree = "<group>"; };
 		2EE54AD330121EBCFAC06D19 /* SimklBrowseView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklBrowseView.swift; sourceTree = "<group>"; };
 		2EEEE6BC436B400EC32EFB21 /* SimklTitleLabels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklTitleLabels.swift; sourceTree = "<group>"; };
 		3015516B8F0B96AC14DEACE4 /* SimklTitleCatalogTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklTitleCatalogTests.swift; sourceTree = "<group>"; };
@@ -1240,6 +1244,7 @@
 		49B5885AD320A89432B9989B /* MangaTrackingCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MangaTrackingCoordinator.swift; sourceTree = "<group>"; };
 		49DFA57CE44ED5570821789D /* PendingWriteTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PendingWriteTests.swift; sourceTree = "<group>"; };
 		4A5A6BA34DDCEF8AFDF2E059 /* PendingWrite.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PendingWrite.swift; sourceTree = "<group>"; };
+		4B02286E77DB0BD73AD3303E /* StoredFile.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StoredFile.swift; sourceTree = "<group>"; };
 		4BE8F22DF8EF4BBAC15BAB79 /* ShiroxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiroxApp.swift; sourceTree = "<group>"; };
 		4C8891C8EC305651E62AC138 /* Shirox.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Shirox.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4D4FBF1385A6C9330CBE7EAB /* JellyfinPosterCard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JellyfinPosterCard.swift; sourceTree = "<group>"; };
@@ -1335,6 +1340,7 @@
 		8C220528D41F9BA2258478A7 /* ZstdDecoderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ZstdDecoderTests.swift; sourceTree = "<group>"; };
 		8C2FB3C08F0745BF3371AB61 /* PlaybackFallbackTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlaybackFallbackTests.swift; sourceTree = "<group>"; };
 		8ED34D3615A79E601F9274DD /* GooeyRefresh.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GooeyRefresh.swift; sourceTree = "<group>"; };
+		90A0E68AE50FD1EC52AA35A6 /* StoredFileTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StoredFileTests.swift; sourceTree = "<group>"; };
 		92928753257FE3CDF1DBEB3D /* ProviderFallbackChainTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderFallbackChainTests.swift; sourceTree = "<group>"; };
 		934CF6C649A71441C6FC2A54 /* MPVRouter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MPVRouter.swift; sourceTree = "<group>"; };
 		95C66D33997B0DDE59B89202 /* MPVEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MPVEngineTests.swift; sourceTree = "<group>"; };
@@ -1475,7 +1481,7 @@
 		FB6C011401E61E32CCB64E39 /* TVDBLogoTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TVDBLogoTests.swift; sourceTree = "<group>"; };
 		FBDD5C0C8F638C5E144F1F5A /* SimklSearchTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklSearchTests.swift; sourceTree = "<group>"; };
 		FC1DF7D44E93B5DA2DDAD152 /* SimklLibraryEntryPage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklLibraryEntryPage.swift; sourceTree = "<group>"; };
-		FCBEAC7148133CCF2D13E786 /* SeanimeInstall.js */ = {isa = PBXFileReference; includeInIndex = 1; path = SeanimeInstall.js; sourceTree = "<group>"; };
+		FCBEAC7148133CCF2D13E786 /* SeanimeInstall.js */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.javascript; path = SeanimeInstall.js; sourceTree = "<group>"; };
 		FD7CC628C6AE93B4C0BEA616 /* SimklActivityStorageTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklActivityStorageTests.swift; sourceTree = "<group>"; };
 		FDE1772827514FDF2A90E5B8 /* SimklSearchSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimklSearchSheet.swift; sourceTree = "<group>"; };
 		FF4C00BAA407FF400B069044 /* JellyfinEntryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JellyfinEntryView.swift; sourceTree = "<group>"; };
@@ -1721,6 +1727,7 @@
 				11EBA9BEE694E9966F4A8FEF /* AdultModuleCheck.swift */,
 				5C08F6988DE355E187F365E4 /* ZstdDecoder.swift */,
 				C44D2451545353874948DF1F /* Playback */,
+				4B02286E77DB0BD73AD3303E /* StoredFile.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -2086,6 +2093,7 @@
 				444C7BF9F46B4DDF3020C5A1 /* TestVideo.swift */,
 				1E508610E714E87932D182B3 /* PlayerAssOverlayTests.swift */,
 				466723FF4D05B75D5EC252A0 /* MPVSubtitleTests.swift */,
+				90A0E68AE50FD1EC52AA35A6 /* StoredFileTests.swift */,
 			);
 			path = ShiroxTests;
 			sourceTree = SOURCE_ROOT;
@@ -2107,7 +2115,6 @@
 				7496DED830909E3851C4653D /* SimklAnimeOpener.swift */,
 				2EE54AD330121EBCFAC06D19 /* SimklBrowseView.swift */,
 			);
-			name = Simkl;
 			path = Simkl;
 			sourceTree = "<group>";
 		};
@@ -2547,6 +2554,7 @@
 				AE4E9A812833E5EB2F8823CF /* TestVideo.swift in Sources */,
 				028A7BFC6F1AE04C6B995A5B /* PlayerAssOverlayTests.swift in Sources */,
 				CA99AD9718EE1ED9DEC477F8 /* MPVSubtitleTests.swift in Sources */,
+				5A9942CB2AAF5CA77B2305BE /* StoredFileTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2828,6 +2836,7 @@
 				86DC5D5F83635B202F82F8DD /* SubtitleRouting.swift in Sources */,
 				8FF9077E0792A74FF47CA7A6 /* AssRenderer.swift in Sources */,
 				487D4362E36FEB276271DC6F /* PlayerAssOverlay.swift in Sources */,
+				1EC02510E39975D92376E45B /* StoredFile.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3110,6 +3119,7 @@
 				E107D4BF53B86BFE5626C76D /* SubtitleRouting.swift in Sources */,
 				CF8F569B2D479043D6C99B65 /* AssRenderer.swift in Sources */,
 				A05FBBC4521D380C9FD9BEA1 /* PlayerAssOverlay.swift in Sources */,
+				E1D812CEDF45CB3743A34CD1 /* StoredFile.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3392,6 +3402,7 @@
 				FF2F81D3615940308F608BD6 /* SubtitleRouting.swift in Sources */,
 				A2D2EFB4D55B12D686DA4F63 /* AssRenderer.swift in Sources */,
 				F203FF3416950534546A9E17 /* PlayerAssOverlay.swift in Sources */,
+				A480B91CC2D33C71521D0832 /* StoredFile.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3414,7 +3425,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 114;
+				CURRENT_PROJECT_VERSION = 115;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
@@ -3452,7 +3463,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 114;
+				CURRENT_PROJECT_VERSION = 115;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
@@ -3572,7 +3583,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 114;
+				CURRENT_PROJECT_VERSION = 115;
 				DEVELOPMENT_TEAM = JRMTH65Z3H;
 				ENABLE_TESTABILITY = YES;
 				INFOPLIST_FILE = Shirox/Info.plist;
@@ -3617,7 +3628,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "shirox-icon";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 114;
+				CURRENT_PROJECT_VERSION = 115;
 				DEAD_CODE_STRIPPING = YES;
 				INFOPLIST_FILE = Shirox/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
@@ -3643,7 +3654,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 114;
+				CURRENT_PROJECT_VERSION = 115;
 				DEVELOPMENT_TEAM = JRMTH65Z3H;
 				INFOPLIST_FILE = Shirox/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
@@ -3732,7 +3743,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "shirox-icon";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 114;
+				CURRENT_PROJECT_VERSION = 115;
 				DEAD_CODE_STRIPPING = YES;
 				INFOPLIST_FILE = Shirox/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";

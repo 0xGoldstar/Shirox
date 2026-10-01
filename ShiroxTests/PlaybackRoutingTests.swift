@@ -159,4 +159,64 @@ final class PlaybackRoutingTests: XCTestCase {
         XCTAssertEqual(PlaybackRouting.nowPlayingElapsed(target: .local, castPosition: 0, localPosition: .nan), 0)
         XCTAssertEqual(PlaybackRouting.nowPlayingElapsed(target: .local, castPosition: 0, localPosition: -3), 0)
     }
+
+    // MARK: - How often Now Playing is told
+
+    /// THE BUG: the player sent Now Playing its whole dictionary on every half-second tick, for
+    /// the length of every episode — a round trip to the media daemon twice a second, though the
+    /// system moves the scrubber along by itself from the last position and rate it was given.
+    private func sent(elapsed: Double, rate: Double = 1, at time: Double,
+                      title: String = "Frieren", artwork: String? = "poster") -> NowPlayingSnapshot {
+        NowPlayingSnapshot(details: NowPlayingDetails(title: title, subtitle: "Episode 3",
+                                                      duration: 1440, artworkKey: artwork),
+                           elapsed: elapsed, rate: rate, time: time)
+    }
+
+    func testFirstSnapshotIsSent() {
+        XCTAssertTrue(PlaybackRouting.nowPlayingNeedsUpdate(last: nil, next: sent(elapsed: 0, at: 0)))
+    }
+
+    /// Playing along as the system expects: nothing to tell it.
+    func testSteadyPlaybackIsNotSentAgain() {
+        XCTAssertFalse(PlaybackRouting.nowPlayingNeedsUpdate(last: sent(elapsed: 100, at: 10),
+                                                             next: sent(elapsed: 100.5, at: 10.5)))
+        XCTAssertFalse(PlaybackRouting.nowPlayingNeedsUpdate(last: sent(elapsed: 100, rate: 1.5, at: 10),
+                                                             next: sent(elapsed: 103, rate: 1.5, at: 12)))
+    }
+
+    func testStayingPausedIsNotSentAgain() {
+        XCTAssertFalse(PlaybackRouting.nowPlayingNeedsUpdate(last: sent(elapsed: 100, rate: 0, at: 10),
+                                                             next: sent(elapsed: 100, rate: 0, at: 40)))
+    }
+
+    /// A tick's own jitter isn't a jump.
+    func testSmallDriftIsNotSent() {
+        XCTAssertFalse(PlaybackRouting.nowPlayingNeedsUpdate(last: sent(elapsed: 100, at: 10),
+                                                             next: sent(elapsed: 100.2, at: 10.5)))
+    }
+
+    func testSeekIsSent() {
+        XCTAssertTrue(PlaybackRouting.nowPlayingNeedsUpdate(last: sent(elapsed: 100, at: 10),
+                                                            next: sent(elapsed: 400, at: 10.5)))
+    }
+
+    /// A stall: still "playing", but the position has stopped where the system would have moved it on.
+    func testStallIsSent() {
+        XCTAssertTrue(PlaybackRouting.nowPlayingNeedsUpdate(last: sent(elapsed: 100, at: 10),
+                                                            next: sent(elapsed: 100, at: 12)))
+    }
+
+    func testPauseAndSpeedChangesAreSent() {
+        XCTAssertTrue(PlaybackRouting.nowPlayingNeedsUpdate(last: sent(elapsed: 100, at: 10),
+                                                            next: sent(elapsed: 100, rate: 0, at: 10.1)))
+        XCTAssertTrue(PlaybackRouting.nowPlayingNeedsUpdate(last: sent(elapsed: 100, at: 10),
+                                                            next: sent(elapsed: 100, rate: 2, at: 10.1)))
+    }
+
+    func testWhatIsShownChangingIsSent() {
+        XCTAssertTrue(PlaybackRouting.nowPlayingNeedsUpdate(last: sent(elapsed: 100, at: 10),
+                                                            next: sent(elapsed: 100.5, at: 10.5, title: "Dandadan")))
+        XCTAssertTrue(PlaybackRouting.nowPlayingNeedsUpdate(last: sent(elapsed: 100, at: 10, artwork: nil),
+                                                            next: sent(elapsed: 100.5, at: 10.5)))
+    }
 }

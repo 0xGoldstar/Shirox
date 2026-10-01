@@ -53,6 +53,31 @@ private final class CompletionBox {
     var context: PlayerContext?
 }
 
+/// Where playback is, which moves on every half-second tick. Kept out of the player's own state:
+/// there, every tick redrew the whole player — every bar, button and overlay — when only the time
+/// and the subtitles change. The views that show it read it through `ClockReader`.
+private final class PlaybackClock: ObservableObject {
+    @Published var currentTime: Double = 0
+    @Published var bufferProgress: Double = 0
+}
+
+/// Draws `content` from the clock, so a tick redraws it alone.
+private struct ClockReader<Content: View>: View {
+    @ObservedObject var clock: PlaybackClock
+    @ViewBuilder let content: (PlaybackClock) -> Content
+
+    var body: some View { content(clock) }
+}
+
+/// What the player last told Now Playing, and the artwork it has asked for — kept out of view
+/// state, so noting either doesn't redraw the player.
+private final class NowPlayingLedger {
+    var sent: NowPlayingSnapshot?
+    /// Each artwork is fetched once. One that failed — a host answering with a Cloudflare
+    /// challenge instead of an image — was fetched again on every tick, twice a second.
+    var requestedArtwork: Set<String> = []
+}
+
 struct PlayerView: View {
     let currentStreamInitial: StreamResult
     let customDismiss: (() -> Void)?
@@ -79,7 +104,12 @@ struct PlayerView: View {
     /// play↔pause flip exactly once (nil = nothing reported yet). Dedups the
     /// button, Control Center, and buffering/seek status flaps into one report.
     @State private var lastReportedPaused: Bool? = nil
-    @State private var currentTime: Double = 0
+    @State private var clock = PlaybackClock()
+    /// The clock's, read and set as before; the player doesn't redraw for it (see `PlaybackClock`).
+    private var currentTime: Double {
+        get { clock.currentTime }
+        nonmutating set { clock.currentTime = newValue }
+    }
     @State private var duration: Double = 0
     @State private var showControls = true
     @State private var isLocked = false
@@ -160,7 +190,10 @@ struct PlayerView: View {
     @State private var isBuffering = false
     /// The audio tracks the stream offers, refreshed when the engine finds them.
     @State private var audioOptions: [PlaybackAudioOption] = []
-    @State private var bufferProgress: Double = 0
+    private var bufferProgress: Double {
+        get { clock.bufferProgress }
+        nonmutating set { clock.bufferProgress = newValue }
+    }
 
     // Stall recovery watchdog
     @State private var stallWatchdogTask: Task<Void, Never>? = nil
@@ -210,6 +243,7 @@ struct PlayerView: View {
     @State private var chaseTime: Double = 0
     @State private var isChasing = false
     @State private var artworkCache: [String: MPMediaItemArtwork] = [:]
+    @State private var nowPlaying = NowPlayingLedger()
     // PiP (iOS only)
     #if os(iOS)
     @State private var pipTrigger = 0
@@ -284,12 +318,14 @@ struct PlayerView: View {
                 }
                 #endif
 
-                PlayerSubtitleOverlay(
-                    cues: subtitleRoute == .cues ? subtitleCues : [],
-                    currentTime: currentTime,
-                    showControls: showControls,
-                    settings: subtitleSettings
-                )
+                ClockReader(clock: clock) { clock in
+                    PlayerSubtitleOverlay(
+                        cues: subtitleRoute == .cues ? subtitleCues : [],
+                        currentTime: clock.currentTime,
+                        showControls: showControls,
+                        settings: subtitleSettings
+                    )
+                }
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
@@ -412,6 +448,7 @@ struct PlayerView: View {
             cancelStallWatchdog(resetAttempts: true)
             #if os(iOS)
             CastProxyServer.shared.stop(reason: "airplay")
+            MPVPictureInPicture.shared.stop()
             #endif
             engine?.stop()
             saveProgress()
@@ -561,6 +598,9 @@ struct PlayerView: View {
                 Task { @MainActor in await recoverPlayback() }
                 return
             }
+            // Back from Picture in Picture, or from background audio, still playing: it was never
+            // suspended, and the seek below would only cut its sound out for a second.
+            guard PlayerForegroundRecovery.needsResumeNudge(isPlaying: isPlaying, timeControl: engine.timeControl) else { return }
             engine.seek(to: currentTime, precision: .exact, completion: nil)
             if isPlaying {
                 engine.rate = Float(playbackSpeed)
@@ -715,15 +755,17 @@ struct PlayerView: View {
                     Text("Episode \(ep)").font(.subheadline).foregroundStyle(.white.opacity(0.65))
                 }
 
-                VStack(spacing: 8) {
-                    if bufferProgress > 0 {
-                        ProgressView(value: bufferProgress, total: 1.0)
-                            .progressViewStyle(.linear)
-                            .tint(.white)
-                            .frame(width: 120)
-                            .scaleEffect(x: 1, y: 0.5)
-                    } else {
-                        ProgressView().tint(.white)
+                ClockReader(clock: clock) { clock in
+                    VStack(spacing: 8) {
+                        if clock.bufferProgress > 0 {
+                            ProgressView(value: clock.bufferProgress, total: 1.0)
+                                .progressViewStyle(.linear)
+                                .tint(.white)
+                                .frame(width: 120)
+                                .scaleEffect(x: 1, y: 0.5)
+                        } else {
+                            ProgressView().tint(.white)
+                        }
                     }
                 }
                 .padding(.top, 8)
@@ -940,10 +982,15 @@ struct PlayerView: View {
             title: currentStream.title,
             onDismiss: castManager.isConnected ? exitCastMode : handleDismiss,
             isLocked: $isLocked,
-            // Picture in Picture and AirPlay video need the native engine's AVPlayer.
-            onPiP: engine is MPVEngine ? nil : {
+            // AirPlay video needs the native engine's AVPlayer; MPV's Picture in Picture goes
+            // through its software renderer.
+            onPiP: {
                 #if os(iOS)
-                pipTrigger += 1
+                if let mpv = engine as? MPVEngine {
+                    MPVPictureInPicture.shared.toggle(engine: mpv)
+                } else {
+                    pipTrigger += 1
+                }
                 #endif
             },
             showsAirPlay: !(engine is MPVEngine),
@@ -955,63 +1002,66 @@ struct PlayerView: View {
 
     @ViewBuilder
     private func bottomBarView(bottomPad: CGFloat) -> some View {
-        PlayerBottomBar(
-            currentTime: $currentTime,
-            duration: duration,
-            bufferProgress: bufferProgress,
-            playbackSpeed: Binding(
-                get: { Float(playbackSpeed) },
-                set: { playbackSpeed = Double($0) }
-            ),
-            onSeek: { time in seekTo(time) },
-            onSliderDragStart: {
-                hideTask?.cancel()
-                videoScrubStartTime = currentTime
-                videoScrubTime = currentTime
-                scrubWasPlaying = isPlaying
-                engine?.pause()
-                isPlaying = false
-                isScrubbing = true
-                isVideoScrubbing = true
-                beginScrubbing()
-            },
-            onSliderDragChange: { dragTime in
-                videoScrubTime = dragTime
-                seekSmoothly(to: dragTime)
-            },
-            onSliderDragEnd: {
-                isVideoScrubbing = false
-                isScrubbing = false
-                endScrubbing()
-                if scrubWasPlaying && !castManager.isConnected {
-                    engine?.rate = Float(playbackSpeed)
-                    isPlaying = true
-                }
-                scheduleHide()
-            },
-            onFillTap: { isFilled.toggle() },
-            isFilled: isFilled,
-            onSkip85: { skip(by: Double(skipLong)) },
-            skipLongAmount: skipLong,
-            subtitleMenu: subtitleMenu,
-            // With tracks but no default, or with none yet on a video that can take a file,
-            // the menu is the only way to choose one or import one.
-            hasSubtitles: currentStream.subtitle != nil || !(subtitleTracks ?? []).isEmpty || canImportSubtitles,
-            audioTrackCount: audioOptions.count,
-            audioMenuItems: audioMenuItems,
-            streamCount: availableStreams.count,
-            sourceMenuItems: sourceMenuItems,
-            qualityCount: hlsQualities.count,
-            qualityMenuItems: qualityMenuItems,
-            onMenuOpen: { overlayActive = true; hideTask?.cancel() },
-            bottomPadding: bottomPad,
-            onNextEpisodeTap: (onWatchNext != nil || onSequelNeeded != nil) ? { Task { @MainActor in await loadAndAdvance() } } : nil,
-            hasActiveSkipSegment: activeSkipSegment != nil,
-            skipSegments: skipSegments,
-            episodeNumber: currentContext?.episodeNumber,
-            tvdbEpisodeTitle: tvdbEpisodeTitle,
-            mediaTitle: currentContext?.mediaTitle
-        )
+        // Redrawn with the clock on its own; the rest of the player isn't.
+        ClockReader(clock: clock) { clock in
+            PlayerBottomBar(
+                currentTime: Binding(get: { clock.currentTime }, set: { clock.currentTime = $0 }),
+                duration: duration,
+                bufferProgress: clock.bufferProgress,
+                playbackSpeed: Binding(
+                    get: { Float(playbackSpeed) },
+                    set: { playbackSpeed = Double($0) }
+                ),
+                onSeek: { time in seekTo(time) },
+                onSliderDragStart: {
+                    hideTask?.cancel()
+                    videoScrubStartTime = currentTime
+                    videoScrubTime = currentTime
+                    scrubWasPlaying = isPlaying
+                    engine?.pause()
+                    isPlaying = false
+                    isScrubbing = true
+                    isVideoScrubbing = true
+                    beginScrubbing()
+                },
+                onSliderDragChange: { dragTime in
+                    videoScrubTime = dragTime
+                    seekSmoothly(to: dragTime)
+                },
+                onSliderDragEnd: {
+                    isVideoScrubbing = false
+                    isScrubbing = false
+                    endScrubbing()
+                    if scrubWasPlaying && !castManager.isConnected {
+                        engine?.rate = Float(playbackSpeed)
+                        isPlaying = true
+                    }
+                    scheduleHide()
+                },
+                onFillTap: { isFilled.toggle() },
+                isFilled: isFilled,
+                onSkip85: { skip(by: Double(skipLong)) },
+                skipLongAmount: skipLong,
+                subtitleMenu: subtitleMenu,
+                // With tracks but no default, or with none yet on a video that can take a file,
+                // the menu is the only way to choose one or import one.
+                hasSubtitles: currentStream.subtitle != nil || !(subtitleTracks ?? []).isEmpty || canImportSubtitles,
+                audioTrackCount: audioOptions.count,
+                audioMenuItems: audioMenuItems,
+                streamCount: availableStreams.count,
+                sourceMenuItems: sourceMenuItems,
+                qualityCount: hlsQualities.count,
+                qualityMenuItems: qualityMenuItems,
+                onMenuOpen: { overlayActive = true; hideTask?.cancel() },
+                bottomPadding: bottomPad,
+                onNextEpisodeTap: (onWatchNext != nil || onSequelNeeded != nil) ? { Task { @MainActor in await loadAndAdvance() } } : nil,
+                hasActiveSkipSegment: activeSkipSegment != nil,
+                skipSegments: skipSegments,
+                episodeNumber: currentContext?.episodeNumber,
+                tvdbEpisodeTitle: tvdbEpisodeTitle,
+                mediaTitle: currentContext?.mediaTitle
+            )
+        }
         .buttonStyle(CircularButtonStyle())
     }
 
@@ -1872,7 +1922,7 @@ struct PlayerView: View {
         events.tick = {
             guard !isScrubbing, let engine else { return }
             currentTime = engine.currentTime
-            if let d = engine.duration { duration = d }
+            if let d = engine.duration, d != duration { duration = d }
             if duration > 0 {
                 bufferProgress = min(engine.bufferedUntil / duration, 1)
             }
@@ -1932,10 +1982,10 @@ struct PlayerView: View {
                         skippedSegments.insert(type)
                         activeSkipSegment = nil
                         engine.seek(to: seg.endMs / 1000, precision: .exact, completion: nil)
-                    } else {
+                    } else if activeSkipSegment != newActive {
                         activeSkipSegment = newActive
                     }
-                } else {
+                } else if activeSkipSegment != newActive {
                     activeSkipSegment = newActive
                 }
             }
@@ -2112,19 +2162,21 @@ struct PlayerView: View {
         }
 
         let target = PlaybackRouting.target(isCasting: castManager.isConnected, hasLocalPlayer: true)
+        let elapsed = PlaybackRouting.nowPlayingElapsed(
+            target: target,
+            castPosition: castManager.currentPosition,
+            localPosition: engine?.currentTime ?? 0
+        )
+        let rate = PlaybackRouting.nowPlayingRate(
+            target: target,
+            isPlaying: isPlaying,
+            playbackSpeed: playbackSpeed
+        )
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: mediaTitle,
             MPNowPlayingInfoPropertyIsLiveStream: false,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: PlaybackRouting.nowPlayingElapsed(
-                target: target,
-                castPosition: castManager.currentPosition,
-                localPosition: engine?.currentTime ?? 0
-            ),
-            MPNowPlayingInfoPropertyPlaybackRate: PlaybackRouting.nowPlayingRate(
-                target: target,
-                isPlaying: isPlaying,
-                playbackSpeed: playbackSpeed
-            )
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: elapsed,
+            MPNowPlayingInfoPropertyPlaybackRate: rate
         ]
         if duration > 0 { info[MPMediaItemPropertyPlaybackDuration] = duration }
         if !subtitleString.isEmpty {
@@ -2133,13 +2185,22 @@ struct PlayerView: View {
         }
 
         let artworkUrl = currentContext?.thumbnailUrl ?? currentContext?.imageUrl
-        if let key = artworkUrl, let cached = artworkCache[key] {
-            info[MPMediaItemPropertyArtwork] = cached
+        let artwork = artworkUrl.flatMap { artworkCache[$0] }
+        if let artwork {
+            info[MPMediaItemPropertyArtwork] = artwork
         }
 
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        let snapshot = NowPlayingSnapshot(
+            details: NowPlayingDetails(title: mediaTitle, subtitle: subtitleString,
+                                       duration: duration, artworkKey: artwork == nil ? nil : artworkUrl),
+            elapsed: elapsed, rate: rate, time: ProcessInfo.processInfo.systemUptime)
+        if PlaybackRouting.nowPlayingNeedsUpdate(last: nowPlaying.sent, next: snapshot) {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            nowPlaying.sent = snapshot
+        }
 
-        if let urlStr = artworkUrl, artworkCache[urlStr] == nil, let url = URL(string: urlStr) {
+        if let urlStr = artworkUrl, artworkCache[urlStr] == nil,
+           nowPlaying.requestedArtwork.insert(urlStr).inserted, let url = URL(string: urlStr) {
             Task { @MainActor in
                 guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
                 #if os(iOS) || os(tvOS)
@@ -2156,6 +2217,7 @@ struct PlayerView: View {
 
     private func tearDownNowPlaying() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        nowPlaying.sent = nil
         #if os(iOS)
         remoteCommands.unregister()
         #endif

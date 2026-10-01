@@ -35,6 +35,17 @@ final class MPVOptionsTests: XCTestCase {
         XCTAssertEqual(MPVOptions.hlsBitrate(2_500_000), "2500000")
     }
 
+    /// mpv plays the highest variant at or under the cap, the lowest when none is, and the
+    /// highest with no cap.
+    func testACapPicksTheVariantMPVPlays() {
+        let variants = [2_376_000, 946_000, 3_476_000]
+        XCTAssertEqual(MPVOptions.hlsVariant(among: variants, cap: nil), 3_476_000)
+        XCTAssertEqual(MPVOptions.hlsVariant(among: variants, cap: 3_476_000), 3_476_000)
+        XCTAssertEqual(MPVOptions.hlsVariant(among: variants, cap: 3_000_000), 2_376_000)
+        XCTAssertEqual(MPVOptions.hlsVariant(among: variants, cap: 500_000), 946_000)
+        XCTAssertNil(MPVOptions.hlsVariant(among: [], cap: nil))
+    }
+
     /// The overlay shows a cue at `time + delay`, so positive is sooner; mpv's positive is later.
     func testTheSubtitleDelayFlipsSign() {
         XCTAssertEqual(MPVOptions.subDelay(fromOverlayDelay: 1.5), -1.5)

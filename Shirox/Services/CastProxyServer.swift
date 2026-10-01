@@ -104,18 +104,66 @@ final class CastProxyServer: @unchecked Sendable {
             stateQueue.async {
                 self.proxyHeaders = headers
                 self.reasons.insert(reason)
-                if self.running {
-                    continuation.resume(returning: true)
+                guard self.running else {
+                    self.waitLocked(for: continuation, timeout: timeout)
                     return
                 }
-                let waiter = UUID()
-                self.readyContinuations[waiter] = continuation
-                if self.listener == nil { self.startListenerLocked() }
-                self.stateQueue.asyncAfter(deadline: .now() + timeout) {
-                    self.readyContinuations.removeValue(forKey: waiter)?.resume(returning: self.running)
+                // THE BUG: iOS takes a suspended app's listening socket back and the listener
+                // isn't told — it stayed ready while every connection was refused, so after the
+                // phone had been locked a while mpv couldn't reopen a stream until the player
+                // was closed. So a running listener is checked before it's trusted.
+                let probed = self.listener
+                self.probeLocked { accepting in
+                    // Only the listener probed is replaced: another wait may have replaced it already.
+                    if !accepting, let probed, self.listener === probed {
+                        Logger.shared.log("[CastProxy] Listener stopped taking connections; re-arming", type: "Stream")
+                        probed.stateUpdateHandler = nil
+                        probed.cancel()
+                        self.listener = nil
+                        self.running = false
+                    }
+                    if self.running {
+                        continuation.resume(returning: true)
+                    } else {
+                        self.waitLocked(for: continuation, timeout: timeout)
+                    }
                 }
             }
         }
+    }
+
+    /// Resumes `continuation` once the listener is ready — starting one if there's none — or
+    /// with whether it is once `timeout` passes.
+    private func waitLocked(for continuation: CheckedContinuation<Bool, Never>, timeout: TimeInterval) {
+        let waiter = UUID()
+        readyContinuations[waiter] = continuation
+        if listener == nil { startListenerLocked() }
+        stateQueue.asyncAfter(deadline: .now() + timeout) {
+            self.readyContinuations.removeValue(forKey: waiter)?.resume(returning: self.running)
+        }
+    }
+
+    /// Answers on `stateQueue` whether anything takes a connection on the proxy's port.
+    private func probeLocked(_ answer: @escaping (Bool) -> Void) {
+        let probe = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
+        var answered = false
+        let finish = { (accepting: Bool) in
+            guard !answered else { return }
+            answered = true
+            probe.stateUpdateHandler = nil
+            probe.cancel()
+            answer(accepting)
+        }
+        probe.stateUpdateHandler = { state in
+            switch state {
+            case .ready: finish(true)
+            // A refused connection waits for the network to change rather than failing.
+            case .waiting, .failed: finish(false)
+            default: break
+            }
+        }
+        probe.start(queue: stateQueue)
+        stateQueue.asyncAfter(deadline: .now() + 1) { finish(false) }
     }
 
     func start(headers: [String: String], reason: String = "cast") {

@@ -1,5 +1,7 @@
 import Foundation
 import QuartzCore
+import CoreVideo
+import Accelerate
 import Libmpv
 #if os(iOS) || os(tvOS)
 import UIKit
@@ -41,7 +43,8 @@ final class MPVMetalLayer: CAMetalLayer {
 }
 
 /// `PlaybackEngine` over libmpv (MPVKit): the engine for formats, codecs and subtitle styles
-/// AVPlayer doesn't handle. It has no Picture in Picture or AirPlay video.
+/// AVPlayer doesn't handle. It has no AirPlay video; Picture in Picture goes through its software
+/// renderer (see `beginSoftwareOutput`).
 ///
 /// mpv reports through events, which are drained on a queue of their own after its wakeup
 /// callback and applied here on the main actor to the state the getters read. Setters update that
@@ -94,8 +97,10 @@ final class MPVEngine: PlaybackEngine {
     /// A seek asked for while the file was still opening, which mpv can't do yet; made once it has.
     private var seekAfterLoad: (seconds: Double, precision: SeekPrecision, completion: ((Bool) -> Void)?)?
     /// A bitrate cap set while the file was still opening. mpv picks the variant as it opens a
-    /// file, so the cap needs a reload once it's open.
+    /// file, maybe before the cap came, so once it's open it's reloaded if it's on another one.
     private var reloadAfterLoad = false
+    /// The bitrate cap; nil lets mpv take the highest variant.
+    private var peakBitRate: Int?
     /// What the player asked to play.
     private var source: PlaybackSource?
     /// What mpv was actually given — `source`, or where the router sent it.
@@ -108,6 +113,14 @@ final class MPVEngine: PlaybackEngine {
     private var pendingRefit: DispatchWorkItem?
     /// Whether the aspect override currently holds the invisible nudge (see `refitVideoOutput`).
     private var aspectNudged = false
+    /// While set, mpv draws through its software renderer into this, for Picture in Picture.
+    private(set) var softwareOutput: MPVSoftwareOutput?
+    /// Told once mpv shows its first frame back on the Metal layer.
+    private var whenMetalShown: (() -> Void)?
+    /// Counts returns to Metal, so a fallback meant for one doesn't answer another.
+    private var metalReturns = 0
+    /// Between the app's going to the background and its coming back, when mpv draws nothing.
+    private var isInBackground = false
 
     private(set) var currentTime: Double = 0
     private(set) var duration: Double?
@@ -150,6 +163,9 @@ final class MPVEngine: PlaybackEngine {
         setOption("input-vo-keyboard", "no")
         setOption("ytdl", "no")
         setOption("cache", "yes")
+        // Two minutes ahead, not as far as 150 MB goes: minutes of a stream through the proxy and
+        // decrypted as fast as the network allowed, warming the phone, and thrown away by a seek.
+        setOption("cache-secs", "120")
         // Subtitles are the player's overlay's for now; mpv draws none of its own.
         setOption("sub-auto", "no")
         setOption("sid", "no")
@@ -162,7 +178,15 @@ final class MPVEngine: PlaybackEngine {
             setOption("vo", "gpu-next")
             setOption("gpu-api", "vulkan")
             setOption("gpu-context", "moltenvk")
-            setOption("hwdec", "videotoolbox")
+            // Copy mode second, for the software renderer Picture in Picture uses, which can't take
+            // VideoToolbox's GPU frames. mpv's own fallback to software stays as it is: the decoder
+            // a change of output restarts starts from a keyframe, and more slack only blanked a file
+            // VideoToolbox can't decode for seconds before giving up on it.
+            setOption("hwdec", "videotoolbox,videotoolbox-copy")
+            // mpv's defaults are a desktop's: Lanczos scaling, dithering, downscaling in linear
+            // light, each its own GPU pass on every frame. On a phone's screen bilinear looks the
+            // same, and the fast profile cut the renderer's CPU by a third, and the GPU's work with it.
+            setOption("profile", "fast")
         case .none:
             setOption("vo", "null")
             setOption("ao", "null")
@@ -188,6 +212,9 @@ final class MPVEngine: PlaybackEngine {
             Unmanaged<MPVEngine>.fromOpaque(context).takeUnretainedValue().drainSoon()
         }, Unmanaged.passUnretained(self).toOpaque())
         if output == .metal {
+            #if os(iOS) || os(tvOS)
+            isInBackground = UIApplication.shared.applicationState == .background
+            #endif
             observeBackground()
             // Layout resizes it on the main thread, but MoltenVK works the layer from mpv's own.
             layer.onResize = { [weak self] in
@@ -294,8 +321,10 @@ final class MPVEngine: PlaybackEngine {
         case .fileLoaded:
             if reloadAfterLoad {
                 reloadAfterLoad = false
-                reload(at: seekAfterLoad?.seconds ?? currentTime)
-                return
+                if capChangesVariant {
+                    reload(at: seekAfterLoad?.seconds ?? currentTime)
+                    return
+                }
             }
             isItemReady = true
             events.itemReady()
@@ -325,6 +354,7 @@ final class MPVEngine: PlaybackEngine {
             if let time = getDouble("time-pos") { currentTime = time }
             finishTakenSeeks()
             tick(force: true)
+            tellMetalShown()
         case .commandReply(let reply, let error):
             guard let index = pendingSeeks.firstIndex(where: { $0.reply == reply }) else { return }
             if error < 0 {
@@ -503,6 +533,7 @@ final class MPVEngine: PlaybackEngine {
     func stop() {
         guard !isStopped else { return }
         isStopped = true
+        tellMetalShown()
         finishPendingSeeks(false)
         seekAfterLoad?.completion?(false)
         seekAfterLoad = nil
@@ -589,15 +620,36 @@ final class MPVEngine: PlaybackEngine {
         didSet { setProperty("cache-pause-initial", waitsToMinimizeStalling ? "yes" : "no") }
     }
 
-    /// mpv picks a variant as a file opens, so a new cap reloads the stream where it is.
+    /// mpv picks a variant as a file opens, so a cap that picks another one reloads the stream
+    /// where it is.
     func setPeakBitRate(_ bitsPerSecond: Int?) {
+        peakBitRate = bitsPerSecond
         setProperty("hls-bitrate", MPVOptions.hlsBitrate(bitsPerSecond))
         guard source != nil, !isItemFailed else { return }
         if isItemReady {
-            reload(at: currentTime)
+            if capChangesVariant { reload(at: currentTime) }
         } else {
             reloadAfterLoad = true
         }
+    }
+
+    /// Whether the cap picks another variant than the one playing. A reload opens the whole stream
+    /// again — every variant's playlist and first segment — so it's only worth it then: the saved
+    /// preference, which arrives as the stream opens, used to double every open.
+    private var capChangesVariant: Bool {
+        let count = Int(getInt64("track-list/count") ?? 0)
+        for type in ["video", "audio"] {
+            var bitrates: [Int] = []
+            var playing: Int?
+            for index in 0..<count where getString("track-list/\(index)/type") == type {
+                // Only a variant's own tracks carry its bitrate; a rendition shared by all has none.
+                guard let bitrate = getInt64("track-list/\(index)/hls-bitrate"), bitrate > 0 else { continue }
+                bitrates.append(Int(bitrate))
+                if getString("track-list/\(index)/selected") == "yes" { playing = Int(bitrate) }
+            }
+            if let playing, MPVOptions.hlsVariant(among: bitrates, cap: peakBitRate) != playing { return true }
+        }
+        return false
     }
 
     func selectAudioOption(_ id: PlaybackAudioOption.ID) {
@@ -724,10 +776,21 @@ final class MPVEngine: PlaybackEngine {
         let center = NotificationCenter.default
         observers = [
             center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.setProperty("vid", "no") }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.isInBackground = true
+                    // The software renderer, drawing for Picture in Picture, uses no GPU.
+                    guard self.softwareOutput == nil else { return }
+                    self.setProperty("vid", "no")
+                }
             },
             center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.setProperty("vid", "auto") }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.isInBackground = false
+                    self.setProperty("vid", "auto")
+                    self.tellMetalShownAtLatestSoon()
+                }
             },
         ]
         #endif
@@ -803,5 +866,184 @@ final class MPVEngine: PlaybackEngine {
             Logger.shared.log("[MPV] \(arguments.first ?? "command") failed: \(String(cString: mpv_error_string(status)))", type: "Error")
         }
         return status >= 0
+    }
+}
+
+// MARK: - Picture in Picture through mpv's software renderer
+
+extension MPVEngine {
+    /// Moves mpv's picture off the Metal layer into `onFrame`, as pixel buffers drawn on the CPU.
+    /// Nil if mpv wouldn't make a software render context.
+    func beginSoftwareOutput(_ onFrame: @escaping (CVPixelBuffer) -> Void) -> MPVSoftwareOutput? {
+        if let softwareOutput { return softwareOutput }
+        guard let mpv = handle, let output = MPVSoftwareOutput(mpv: mpv, onFrame: onFrame) else { return nil }
+        softwareOutput = output
+        let width = getInt64("video-params/dw") ?? 1920, height = getInt64("video-params/dh") ?? 1080
+        output.setVideoSize(CGSize(width: Int(width), height: Int(height)))
+        // mpv seeks back to where it was by itself when its output changes; one more seek here
+        // only flushed the sound and decoded from the keyframe a second time.
+        setProperty("vo", "libmpv")
+        return output
+    }
+
+    /// Back to the Metal layer.
+    /// - Parameter whenShown: called once mpv shows its first frame back on the Metal layer — when
+    ///   whatever stood in for it can go — or at once if nothing will be drawn, and in 2 s at most.
+    func endSoftwareOutput(whenShown: (() -> Void)? = nil) {
+        guard let output = softwareOutput else {
+            whenShown?()
+            return
+        }
+        softwareOutput = nil
+        tellMetalShown()
+        whenMetalShown = whenShown
+        // No GPU work in the background: a PiP closed from another app has no picture until the
+        // app is back, and isn't shown till then.
+        if isInBackground { setProperty("vid", "no") }
+        setProperty("vo", "gpu-next")
+        output.destroy()
+        if !isInBackground { tellMetalShownAtLatestSoon() }
+    }
+
+    /// Answers a return to Metal that mpv hasn't shown within 2 s, so nothing waits on it forever.
+    private func tellMetalShownAtLatestSoon() {
+        guard whenMetalShown != nil else { return }
+        metalReturns += 1
+        let thisReturn = metalReturns
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.metalReturns == thisReturn else { return }
+                self.tellMetalShown()
+            }
+        }
+    }
+
+    private func tellMetalShown() {
+        guard let shown = whenMetalShown else { return }
+        whenMetalShown = nil
+        shown()
+    }
+}
+
+/// mpv's software renderer (`vo=libmpv`, `MPV_RENDER_API_TYPE_SW`) drawing into pixel buffers
+/// on a queue of its own. No GPU: it keeps working in the background, where PiP runs.
+final class MPVSoftwareOutput: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "shirox.mpv.software", qos: .userInteractive)
+    private var context: OpaquePointer?
+    private let onFrame: (CVPixelBuffer) -> Void
+    private var pool: CVPixelBufferPool?
+    private var poolSize = CGSize.zero
+    private var videoSize = CGSize(width: 1920, height: 1080)
+    private var maxWidth: CGFloat = 960
+    /// mpv won't blend subtitles onto a format with alpha ("Failed rendering OSD"), so "bgr0",
+    /// whose fourth byte is padding, made opaque after each frame.
+    private let format = "bgr0"
+
+    init?(mpv: OpaquePointer, onFrame: @escaping (CVPixelBuffer) -> Void) {
+        self.onFrame = onFrame
+        guard let api = strdup("sw") else { return nil }
+        defer { free(api) }
+        var params = [mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: UnsafeMutableRawPointer(api)),
+                      mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)]
+        var created: OpaquePointer?
+        let status = mpv_render_context_create(&created, mpv, &params)
+        guard status >= 0, let created else {
+            Logger.shared.log("[MPV] Couldn't make a software render context: \(String(cString: mpv_error_string(status)))", type: "Error")
+            return nil
+        }
+        context = created
+        mpv_render_context_set_update_callback(created, { raw in
+            guard let raw else { return }
+            Unmanaged<MPVSoftwareOutput>.fromOpaque(raw).takeUnretainedValue().renderSoon()
+        }, Unmanaged.passUnretained(self).toOpaque())
+    }
+
+    func setVideoSize(_ size: CGSize) {
+        queue.async { if size.width > 0, size.height > 0 { self.videoSize = size } }
+    }
+
+    /// The PiP window's width in pixels, which is as wide as it's worth drawing.
+    func setMaxWidth(_ width: CGFloat) {
+        queue.async { if width > 0 { self.maxWidth = width } }
+    }
+
+    /// Stops drawing and frees the render context. The VO must have left it first.
+    func destroy() {
+        queue.sync {
+            guard let context else { return }
+            self.context = nil
+            mpv_render_context_set_update_callback(context, nil, nil)
+            mpv_render_context_free(context)
+        }
+    }
+
+    /// Called on one of mpv's threads, where no mpv call may be made.
+    private func renderSoon() {
+        queue.async { self.render() }
+    }
+
+    private func targetSize() -> CGSize {
+        let width = min(maxWidth, videoSize.width)
+        let height = (width * videoSize.height / videoSize.width)
+        // Even sizes, which every video path is happiest with.
+        return CGSize(width: (width / 2).rounded() * 2, height: (height / 2).rounded() * 2)
+    }
+
+    private func makeBuffer(_ size: CGSize) -> CVPixelBuffer? {
+        if pool == nil || poolSize != size {
+            let attributes: [CFString: Any] = [
+                kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey: Int(size.width),
+                kCVPixelBufferHeightKey: Int(size.height),
+                kCVPixelBufferBytesPerRowAlignmentKey: 64,
+                kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,
+            ]
+            var created: CVPixelBufferPool?
+            CVPixelBufferPoolCreate(kCFAllocatorDefault, nil, attributes as CFDictionary, &created)
+            pool = created
+            poolSize = size
+        }
+        guard let pool else { return nil }
+        var buffer: CVPixelBuffer?
+        CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &buffer)
+        return buffer
+    }
+
+    private func render() {
+        guard let context else { return }
+        let flags = mpv_render_context_update(context)
+        guard flags & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue) != 0 else { return }
+        let size = targetSize()
+        guard let buffer = makeBuffer(size) else { return }
+        CVPixelBufferLockBaseAddress(buffer, [])
+        var dimensions: [Int32] = [Int32(size.width), Int32(size.height)]
+        var stride = CVPixelBufferGetBytesPerRow(buffer)
+        let pixels = CVPixelBufferGetBaseAddress(buffer)
+        let status: Int32 = format.withCString { name in
+            dimensions.withUnsafeMutableBufferPointer { dims in
+                withUnsafeMutablePointer(to: &stride) { stridePointer in
+                    var params = [
+                        mpv_render_param(type: MPV_RENDER_PARAM_SW_SIZE, data: UnsafeMutableRawPointer(dims.baseAddress)),
+                        mpv_render_param(type: MPV_RENDER_PARAM_SW_FORMAT, data: UnsafeMutableRawPointer(mutating: name)),
+                        mpv_render_param(type: MPV_RENDER_PARAM_SW_STRIDE, data: UnsafeMutableRawPointer(stridePointer)),
+                        mpv_render_param(type: MPV_RENDER_PARAM_SW_POINTER, data: pixels),
+                        mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil),
+                    ]
+                    return mpv_render_context_render(context, &params)
+                }
+            }
+        }
+        if status >= 0, let pixels {
+            // The padding byte is alpha to Core Video.
+            var image = vImage_Buffer(data: pixels, height: vImagePixelCount(size.height),
+                                      width: vImagePixelCount(size.width), rowBytes: stride)
+            vImageOverwriteChannelsWithScalar_ARGB8888(255, &image, &image, 0x1, vImage_Flags(kvImageNoFlags))
+        }
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+        guard status >= 0 else {
+            Logger.shared.log("[MPV] Software render as \(format) failed: \(String(cString: mpv_error_string(status)))", type: "Error")
+            return
+        }
+        onFrame(buffer)
     }
 }

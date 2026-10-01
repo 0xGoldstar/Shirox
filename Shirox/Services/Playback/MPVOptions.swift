@@ -40,6 +40,12 @@ enum MPVOptions {
         bitsPerSecond.map(String.init) ?? "max"
     }
 
+    /// The variant mpv plays under `hls-bitrate`, by bitrate: the highest at or under the cap, else
+    /// the lowest; the highest with no cap.
+    static func hlsVariant(among bitrates: [Int], cap: Int?) -> Int? {
+        bitrates.filter { $0 <= cap ?? .max }.max() ?? bitrates.min()
+    }
+
     /// `sub-delay` for the delay the subtitle settings hold. The overlay shows a cue at
     /// `time + delay`, so a positive delay shows it sooner; mpv's positive shows it later.
     static func subDelay(fromOverlayDelay delay: Double) -> Double {

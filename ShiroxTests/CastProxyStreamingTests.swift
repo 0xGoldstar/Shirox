@@ -37,6 +37,22 @@ final class CastProxyStreamingTests: XCTestCase {
         XCTAssertEqual(data.count, 12 * 1024, "the proxy hung up part way through")
     }
 
+    /// iOS takes a suspended app's listening socket back without the listener hearing of it: it
+    /// still reads as ready while every connection is refused. After the phone had been locked a
+    /// while, mpv's reopen was refused on every retry until the player was closed.
+    ///
+    /// Moving the port under the running proxy stands in for that: nothing answers where its URLs
+    /// point, though its listener still reads as ready.
+    func testAListenerThatStoppedTakingConnectionsIsReopened() async throws {
+        proxy.port = 18768
+        let up = await proxy.startAndWait(headers: [:], reason: "test")
+        XCTAssertTrue(up)
+        let url = try XCTUnwrap(proxy.loopbackURL(for: upstream.url))
+        let (data, response) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(data.count, 12 * 1024)
+    }
+
     /// A connection with nothing moving on it is still reclaimed.
     func testAConnectionWithNothingMovingIsClosed() async throws {
         let closed = expectation(description: "closed")

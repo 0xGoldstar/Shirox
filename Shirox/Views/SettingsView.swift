@@ -601,7 +601,7 @@ struct PlayerSettingsView: View {
                     Text("Native").tag(PlaybackEngineKind.native.rawValue)
                     Text("MPV").tag(PlaybackEngineKind.mpv.rawValue)
                 }
-                Text("MPV plays more formats, like MKV, and more subtitle styles, but has no Picture in Picture or AirPlay video. Native switches to MPV by itself when it can't play something.")
+                Text("MPV plays more formats, like MKV, and more subtitle styles, but has no AirPlay video. Native switches to MPV by itself when it can't play something.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 #endif
