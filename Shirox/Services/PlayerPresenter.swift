@@ -11,6 +11,7 @@ import Combine
 
 #if os(iOS)
 import UIKit
+import CoreMotion
 #endif
 
 #if canImport(GoogleCast)
@@ -41,6 +42,8 @@ final class PlayerPresenter: ObservableObject {
     /// Last interface orientation observed during a player session via device-orientation notifications.
     private var trackedPlayerOrientation: UIInterfaceOrientation = .portrait
     private var orientationObserver: NSObjectProtocol?
+    private let motionManager = CMMotionManager()
+    private var landscapeRotationTimer: Timer?
     #endif
 
     nonisolated private init() {}
@@ -139,6 +142,7 @@ final class PlayerPresenter: ObservableObject {
         hostingController.modalPresentationStyle = UIModalPresentationStyle.fullScreen
 
         let forceLandscape = UserDefaults.standard.bool(forKey: "forceLandscape")
+        let autoRotateLandscape = UserDefaults.standard.bool(forKey: "autoRotateForcedLandscape")
         let lastRaw = UserDefaults.standard.integer(forKey: "lastLandscapeOrientation")
         let lastLandscape = UIInterfaceOrientation(rawValue: lastRaw)
         let preferredLandscape: UIInterfaceOrientation = (lastLandscape != nil && lastLandscape!.isLandscape) ? lastLandscape! : .landscapeRight
@@ -157,7 +161,9 @@ final class PlayerPresenter: ObservableObject {
         // from the very first frame. preferredInterfaceOrientationForPresentation on
         // PlayerHostingController returns the last landscape side, so iOS
         // will present the VC directly in that side.
-        self.orientationLock = forceLandscape ? .landscape : .allButUpsideDown
+        self.orientationLock = forceLandscape
+            ? (autoRotateLandscape ? .landscape : (preferredLandscape == .landscapeLeft ? .landscapeLeft : .landscapeRight))
+            : .allButUpsideDown
         // Seed the tracker with where the player will actually open. Seeding it with a landscape
         // side unconditionally meant a player opened and closed in portrait (without ever
         // rotating, so no orientation notification corrected it) looked landscape to
@@ -165,6 +171,9 @@ final class PlayerPresenter: ObservableObject {
         // `lastLandscapeOrientation` the user never chose.
         trackedPlayerOrientation = forceLandscape ? preferredLandscape : snapshotCurrentOrientation()
         startTrackingOrientation()
+        if forceLandscape && autoRotateLandscape {
+            startLandscapeRotationTracking()
+        }
 
         topVC.present(hostingController, animated: true)
     }
@@ -177,6 +186,7 @@ final class PlayerPresenter: ObservableObject {
             UserDefaults.standard.set(trackedPlayerOrientation.rawValue, forKey: "lastLandscapeOrientation")
         }
         stopTrackingOrientation()
+        stopLandscapeRotationTracking()
         // Reset orientation without animation before dismissing.
         // UIView.performWithoutAnimation suppresses the system rotation animation on the
         // root VC so the app snaps to portrait instantly instead of animating.
@@ -195,6 +205,7 @@ final class PlayerPresenter: ObservableObject {
             UserDefaults.standard.set(trackedPlayerOrientation.rawValue, forKey: "lastLandscapeOrientation")
         }
         stopTrackingOrientation()
+        stopLandscapeRotationTracking()
         orientationLock = .portrait
         UIView.performWithoutAnimation { refreshSupportedOrientations() }
         playerVC.dismiss(animated: false) { [weak self] in
@@ -269,6 +280,15 @@ final class PlayerPresenter: ObservableObject {
                 let mapped = self?.snapshotCurrentOrientation()
                 // Only update for concrete orientations (ignore faceUp/faceDown/unknown).
                 if let o = mapped, o != .unknown {
+                    if UserDefaults.standard.bool(forKey: "forceLandscape") {
+                        guard o.isLandscape,
+                              UserDefaults.standard.bool(forKey: "autoRotateForcedLandscape"),
+                              o != self?.trackedPlayerOrientation else { return }
+                        self?.trackedPlayerOrientation = o
+                        UserDefaults.standard.set(o.rawValue, forKey: "lastLandscapeOrientation")
+                        self?.requestRotation(to: o == .landscapeLeft ? .landscapeLeft : .landscapeRight)
+                        return
+                    }
                     self?.trackedPlayerOrientation = o
                     if o.isLandscape {
                         UserDefaults.standard.set(o.rawValue, forKey: "lastLandscapeOrientation")
@@ -284,6 +304,29 @@ final class PlayerPresenter: ObservableObject {
             orientationObserver = nil
         }
         UIDevice.current.endGeneratingDeviceOrientationNotifications()
+    }
+
+    private func startLandscapeRotationTracking() {
+        guard motionManager.isDeviceMotionAvailable else { return }
+        motionManager.deviceMotionUpdateInterval = 0.2
+        motionManager.startDeviceMotionUpdates()
+        landscapeRotationTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let gravity = self.motionManager.deviceMotion?.gravity,
+                      abs(gravity.x) > 0.75, abs(gravity.x) > abs(gravity.y) else { return }
+                let target: UIInterfaceOrientation = gravity.x > 0 ? .landscapeLeft : .landscapeRight
+                guard target != self.trackedPlayerOrientation else { return }
+                self.trackedPlayerOrientation = target
+                UserDefaults.standard.set(target.rawValue, forKey: "lastLandscapeOrientation")
+                self.requestRotation(to: target == .landscapeLeft ? .landscapeLeft : .landscapeRight)
+            }
+        }
+    }
+
+    private func stopLandscapeRotationTracking() {
+        landscapeRotationTimer?.invalidate()
+        landscapeRotationTimer = nil
+        motionManager.stopDeviceMotionUpdates()
     }
 
     /// Converts the live device orientation to an interface orientation.
@@ -329,9 +372,13 @@ final class PlayerPresenter: ObservableObject {
 
     func requestRotation(to orientation: UIInterfaceOrientationMask) {
         #if !targetEnvironment(macCatalyst)
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+        guard let scene = playerVC?.viewIfLoaded?.window?.windowScene
+            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
         if #available(iOS 16, *) {
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: orientation)) { _ in }
+            playerVC?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: orientation)) { error in
+                Logger.shared.log("[Player] Rotation request failed: \(error)", type: "Error")
+            }
         } else {
             let value: Int
             switch orientation {
