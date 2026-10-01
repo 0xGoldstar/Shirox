@@ -141,6 +141,7 @@ struct SettingsBackupSection: BackupSection {
         "autoDeleteWatched", "autoNextEpisode", "autoPickLastSearchResult",
         "autoPickLastStream", "autoResumeDownloads", "autoSkipSegments",
         "backgroundDownloadsEnabled", "defaultReverseSort", "forceLandscape",
+        "autoRotateForcedLandscape",
         "librarySortAscending", "playerLiquidGlass", "rateOnFinish",
         "readerLiquidGlass", "readerPageCurl", "skipReWatchTracking", "useDefaultExtension",
         "dataSaverEnabled", "gooeyRefresh"

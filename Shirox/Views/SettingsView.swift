@@ -564,6 +564,7 @@ struct AccountsSettingsView: View {
 
 struct PlayerSettingsView: View {
     @AppStorage("forceLandscape") private var forceLandscape = false
+    @AppStorage("autoRotateForcedLandscape") private var autoRotateForcedLandscape = false
     @AppStorage("playerLiquidGlass") private var playerLiquidGlass = true
     @AppStorage("playerEngine") private var playerEngine = PlaybackEngineKind.native.rawValue
     @AppStorage("preferredQuality") private var preferredQuality: String = "auto"
@@ -587,6 +588,11 @@ struct PlayerSettingsView: View {
                         PlayerPresenter.shared.resetToAppOrientation(shouldRotate: true)
                     }
                     #endif
+
+                if forceLandscape {
+                    Toggle("Auto-Rotate in Landscape", isOn: $autoRotateForcedLandscape)
+                        .tint(.secondary)
+                }
 
                 if #available(iOS 26.0, macOS 26.0, *) {
                     Toggle("Liquid Glass Controls", isOn: $playerLiquidGlass)
