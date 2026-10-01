@@ -65,7 +65,7 @@ struct ContinueWatchingSection: View {
             .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
+                LazyHStack(spacing: 12) {
                     ForEach(items) { item in
                         itemView(for: item)
                             .frame(width: cardWidth)

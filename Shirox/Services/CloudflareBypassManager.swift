@@ -189,8 +189,11 @@ final class CloudflareBypassManager: ObservableObject {
             request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         }
 
-        guard let (data, response) = try? await session.data(for: request),
+        guard let (raw, response) = try? await session.data(for: request),
               let http = response as? HTTPURLResponse else { return nil }
+        // Decoded so the wall check can read a zstd body. One that won't decode goes back as it
+        // came, and fetchv2's own decode reports it, rather than passing here for a wall.
+        let data = (try? HTTPBodyDecoding.decoded(raw, response: http)) ?? raw
 
         let text = String(data: data, encoding: .utf8) ?? ""
         if JSEngine.isTurnstileResponse(status: http.statusCode, body: text) {

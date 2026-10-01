@@ -564,7 +564,9 @@ struct AccountsSettingsView: View {
 
 struct PlayerSettingsView: View {
     @AppStorage("forceLandscape") private var forceLandscape = false
+    @AppStorage("autoRotateForcedLandscape") private var autoRotateForcedLandscape = false
     @AppStorage("playerLiquidGlass") private var playerLiquidGlass = true
+    @AppStorage("playerEngine") private var playerEngine = PlaybackEngineKind.native.rawValue
     @AppStorage("preferredQuality") private var preferredQuality: String = "auto"
     @AppStorage("speedBoostTolerance") private var speedBoostTolerance: Int = 10
     @AppStorage("playerHoldAction") private var playerHoldAction = "speed"
@@ -588,6 +590,11 @@ struct PlayerSettingsView: View {
                     }
                     #endif
 
+                if forceLandscape {
+                    Toggle("Auto-Rotate in Landscape", isOn: $autoRotateForcedLandscape)
+                        .tint(.secondary)
+                }
+
                 if #available(iOS 26.0, macOS 26.0, *) {
                     Toggle("Liquid Glass Controls", isOn: $playerLiquidGlass)
                         .tint(.secondary)
@@ -595,6 +602,16 @@ struct PlayerSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                #if !os(tvOS)
+                Picker("Player Engine", selection: $playerEngine) {
+                    Text("Native").tag(PlaybackEngineKind.native.rawValue)
+                    Text("MPV").tag(PlaybackEngineKind.mpv.rawValue)
+                }
+                Text("MPV plays more formats, like MKV, and more subtitle styles, but has no AirPlay video. Native switches to MPV by itself when it can't play something.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                #endif
             }
 
             Section("Playback Quality & Gestures") {

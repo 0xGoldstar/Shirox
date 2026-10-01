@@ -38,4 +38,12 @@ enum PlayerForegroundRecovery {
         // Below the threshold the source likely survived — don't churn a refetch.
         return suspendedFor >= recoverThreshold(isLocalPlayback: isLocalPlayback)
     }
+
+    /// Whether the player needs its resume nudge on return — a seek to where it is, and play
+    /// again if it should be playing — for a player iOS suspended. One that kept playing while
+    /// away (Picture in Picture, background audio) wasn't suspended, and the seek only cut its
+    /// sound out for a second.
+    static func needsResumeNudge(isPlaying: Bool, timeControl: PlaybackTimeControl) -> Bool {
+        !(isPlaying && timeControl == .playing)
+    }
 }

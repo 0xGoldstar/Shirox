@@ -35,9 +35,11 @@ final class CastProxyServer: @unchecked Sendable {
 
     // MARK: - Configuration
 
-    private let port: NWEndpoint.Port = 8766
-    /// How long a kept-alive connection may sit idle before it is reclaimed.
-    private let idleTimeout: TimeInterval = 60
+    // `port` and `idleTimeout` change only while the proxy is down — tests move them, clear of
+    // a copy of the app running in a simulator on the same Mac, which shares its ports.
+    var port: NWEndpoint.Port = 8766
+    /// How long a connection may go with nothing moving on it before it is reclaimed.
+    var idleTimeout: TimeInterval = 60
     /// Backoff before re-arming a listener that failed.
     private let restartDelay: TimeInterval = 1.0
 
@@ -48,7 +50,7 @@ final class CastProxyServer: @unchecked Sendable {
 
     private var listener: NWListener?
     private var proxyHeaders: [String: String] = [:]
-    private var readyContinuations: [CheckedContinuation<Void, Never>] = []
+    private var readyContinuations: [UUID: CheckedContinuation<Bool, Never>] = [:]
     private var connections: [ObjectIdentifier: ProxyConnection] = [:]
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     private var pathMonitor: NWPathMonitor?
@@ -90,21 +92,78 @@ final class CastProxyServer: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
-    /// Starts the server (if not already running) and suspends until the listener is ready.
+    /// Starts the server (if not already running) and suspends until the listener is ready, or
+    /// until `timeout` passes: a port something else holds never becomes ready, and waiting
+    /// for it used to hang forever. The listener keeps retrying either way until stopped.
     /// - Parameter reason: who needs it up; pass the same value to ``stop(reason:)``.
-    func startAndWait(headers: [String: String], reason: String = "cast") async {
+    /// - Returns: whether the proxy is up.
+    @discardableResult
+    func startAndWait(headers: [String: String], reason: String = "cast",
+                      timeout: TimeInterval = 10) async -> Bool {
         await withCheckedContinuation { continuation in
             stateQueue.async {
                 self.proxyHeaders = headers
                 self.reasons.insert(reason)
-                if self.running {
-                    continuation.resume()
+                guard self.running else {
+                    self.waitLocked(for: continuation, timeout: timeout)
                     return
                 }
-                self.readyContinuations.append(continuation)
-                if self.listener == nil { self.startListenerLocked() }
+                // THE BUG: iOS takes a suspended app's listening socket back and the listener
+                // isn't told — it stayed ready while every connection was refused, so after the
+                // phone had been locked a while mpv couldn't reopen a stream until the player
+                // was closed. So a running listener is checked before it's trusted.
+                let probed = self.listener
+                self.probeLocked { accepting in
+                    // Only the listener probed is replaced: another wait may have replaced it already.
+                    if !accepting, let probed, self.listener === probed {
+                        Logger.shared.log("[CastProxy] Listener stopped taking connections; re-arming", type: "Stream")
+                        probed.stateUpdateHandler = nil
+                        probed.cancel()
+                        self.listener = nil
+                        self.running = false
+                    }
+                    if self.running {
+                        continuation.resume(returning: true)
+                    } else {
+                        self.waitLocked(for: continuation, timeout: timeout)
+                    }
+                }
             }
         }
+    }
+
+    /// Resumes `continuation` once the listener is ready — starting one if there's none — or
+    /// with whether it is once `timeout` passes.
+    private func waitLocked(for continuation: CheckedContinuation<Bool, Never>, timeout: TimeInterval) {
+        let waiter = UUID()
+        readyContinuations[waiter] = continuation
+        if listener == nil { startListenerLocked() }
+        stateQueue.asyncAfter(deadline: .now() + timeout) {
+            self.readyContinuations.removeValue(forKey: waiter)?.resume(returning: self.running)
+        }
+    }
+
+    /// Answers on `stateQueue` whether anything takes a connection on the proxy's port.
+    private func probeLocked(_ answer: @escaping (Bool) -> Void) {
+        let probe = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
+        var answered = false
+        let finish = { (accepting: Bool) in
+            guard !answered else { return }
+            answered = true
+            probe.stateUpdateHandler = nil
+            probe.cancel()
+            answer(accepting)
+        }
+        probe.stateUpdateHandler = { state in
+            switch state {
+            case .ready: finish(true)
+            // A refused connection waits for the network to change rather than failing.
+            case .waiting, .failed: finish(false)
+            default: break
+            }
+        }
+        probe.start(queue: stateQueue)
+        stateQueue.asyncAfter(deadline: .now() + 1) { finish(false) }
     }
 
     func start(headers: [String: String], reason: String = "cast") {
@@ -142,9 +201,9 @@ final class CastProxyServer: @unchecked Sendable {
     }
 
     private func resumeWaitersLocked() {
-        let waiting = readyContinuations
+        let waiting = Array(readyContinuations.values)
         readyContinuations.removeAll()
-        waiting.forEach { $0.resume() }
+        waiting.forEach { $0.resume(returning: running) }
     }
 
     private func startListenerLocked() {
@@ -271,17 +330,34 @@ final class CastProxyServer: @unchecked Sendable {
             let host = cachedIP ?? Self.currentLocalIP()
             cachedIP = host
             guard let host, host != "127.0.0.1" else { return nil }
-            var c = URLComponents()
-            c.scheme = "http"
-            c.host = host
-            c.port = Int(port.rawValue)
-            c.path = "/proxy"
-            c.queryItems = [
-                URLQueryItem(name: "url", value: url.absoluteString),
-                URLQueryItem(name: "t", value: token)
-            ]
-            return c.url
+            return mintLocked(url, host: host)
         }
+    }
+
+    /// Returns a proxied URL on loopback, signed with this run's token — for a client on this
+    /// device (mpv), which reaches the proxy with or without Wi-Fi.
+    func loopbackURL(for url: URL) -> URL? {
+        stateQueue.sync { mintLocked(url, host: "127.0.0.1") }
+    }
+
+    private func mintLocked(_ url: URL, host: String) -> URL? {
+        var c = URLComponents()
+        c.scheme = "http"
+        c.host = host
+        c.port = Int(port.rawValue)
+        c.path = "/proxy"
+        c.queryItems = [
+            URLQueryItem(name: "url", value: url.absoluteString),
+            URLQueryItem(name: "t", value: token)
+        ]
+        return c.url
+    }
+
+    /// Whether a request reached the proxy over loopback, going by its `Host`. Its playlists are
+    /// then rewritten with loopback URLs too, so the segments don't depend on Wi-Fi either.
+    static func isLoopback(hostHeader: String?) -> Bool {
+        guard let host = hostHeader?.split(separator: ":").first?.lowercased() else { return false }
+        return host == "127.0.0.1" || host == "localhost"
     }
 
     private static func makeToken() -> String {
@@ -333,12 +409,15 @@ final class CastProxyServer: @unchecked Sendable {
             request.setValue(range, forHTTPHeaderField: "Range")
         }
 
+        let loopback = Self.isLoopback(hostHeader: head.value(for: "host"))
         await exchanges.run(request: request,
                             on: upstream,
                             connection: connection,
                             wantsBody: head.wantsBody,
                             rewriteManifestFrom: target,
-                            proxy: { [weak self] in self?.proxyURL(for: $0) })
+                            proxy: { [weak self] in
+                                loopback ? self?.loopbackURL(for: $0) : self?.proxyURL(for: $0)
+                            })
     }
 
     // MARK: - Local IP
@@ -385,6 +464,10 @@ fileprivate final class ProxyConnection: @unchecked Sendable {
     private var buffer = Data()
     private var closed = false
     private var idleTimer: DispatchSourceTimer?
+    /// When bytes last moved either way. Idle means nothing moved for `idleTimeout`, not that
+    /// the request is older than that: a whole episode goes out over one response, and timing
+    /// from the request cut mpv off mid-file once a minute.
+    private var lastActivity = DispatchTime.now()
 
     /// A head larger than this is not a real request — refuse it rather than buffer forever.
     private static let maxHeadBytes = 64 * 1024
@@ -466,7 +549,7 @@ fileprivate final class ProxyConnection: @unchecked Sendable {
             semaphore.signal()
         })
         semaphore.wait()
-        if !ok { close() }
+        if !ok { close() } else { markActivity() }
         return ok
     }
 
@@ -483,13 +566,34 @@ fileprivate final class ProxyConnection: @unchecked Sendable {
 
     private func armIdleTimer() {
         lock.lock()
+        lastActivity = .now()
         idleTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + idleTimeout)
-        timer.setEventHandler { [weak self] in self?.close() }
+        timer.setEventHandler { [weak self] in self?.idleTimerFired() }
         idleTimer = timer
         timer.resume()
         lock.unlock()
+    }
+
+    private func markActivity() {
+        lock.lock()
+        lastActivity = .now()
+        lock.unlock()
+    }
+
+    /// Closes the connection if nothing has moved for the whole timeout; otherwise waits out
+    /// the rest of it from the last activity.
+    private func idleTimerFired() {
+        lock.lock()
+        let deadline = lastActivity + idleTimeout
+        if deadline > .now(), let timer = idleTimer {
+            timer.schedule(deadline: deadline)
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        close()
     }
 
     /// Idempotent — every path (idle, peer hangup, send failure, server shutdown) lands here.
@@ -577,6 +681,10 @@ fileprivate final class ProxyExchangeRegistry: NSObject, URLSessionDataDelegate,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard let exchange = exchange(for: dataTask) else { completionHandler(.cancel); return }
         let http = response as? HTTPURLResponse
+        if let http, http.statusCode >= 400 {
+            // Passed on as is; logged so a refusal is plainly the server's, not the proxy's.
+            Logger.shared.log("[CastProxy] \(http.url?.host ?? "Upstream") answered \(http.statusCode)", type: "Error")
+        }
         let mime = http?.value(forHTTPHeaderField: "Content-Type")
             ?? response.mimeType
             ?? Self.mimeType(for: exchange.manifestBase.pathExtension)

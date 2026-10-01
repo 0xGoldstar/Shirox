@@ -26,12 +26,35 @@ enum PageCurl {
         guard let id else { return false }
         return neighbor(of: id, offset: forward ? 1 : -1, in: ids) != nil
     }
+
+    /// The reading-order step for the page UIKit asks for. UIKit asks for the page "after" on a
+    /// leftward swipe and "before" on a rightward one, with the spine on either side and wherever
+    /// the page is grabbed — so right to left, where a swipe right turns to the next page, its
+    /// "before" is the next page. Taking its "before" as the previous page turned right-to-left
+    /// reading backwards, and a swipe right on a chapter's first page asked for a page before it.
+    static func readingOffset(uikitAfter: Bool, rightToLeft: Bool) -> Int {
+        uikitAfter != rightToLeft ? 1 : -1
+    }
+
+    /// Whether a pan may start a curl: only toward a page that exists. The swipe's motion and its
+    /// distance must agree on that — a finger that doubled back may say either — and a pan that
+    /// hasn't moved needs a page both ways. UIKit turned to no page otherwise, and threw "The
+    /// number of view controllers provided (0) doesn't match the number required (1) for the
+    /// requested transition".
+    static func canBeginCurl(from id: Int?, velocityX: CGFloat, translationX: CGFloat,
+                             rightToLeft: Bool, in ids: [Int]) -> Bool {
+        var ways: [Bool] = []
+        if velocityX != 0 { ways.append(isForward(velocityX: velocityX, rightToLeft: rightToLeft)) }
+        if translationX != 0 { ways.append(isForward(velocityX: translationX, rightToLeft: rightToLeft)) }
+        if ways.isEmpty { ways = [true, false] }
+        return ways.allSatisfy { canTurn(from: id, forward: $0, in: ids) }
+    }
 }
 
 /// The paged reader with Apple Books' page curl — `UIPageViewController`'s own `.pageCurl`, which
 /// tracks the finger and lights the paper.
 ///
-/// Pages stay in reading order in both directions; right to left only moves the spine. A zoomed
+/// Right to left binds the pages on the right and turns to the next one with a swipe right. A zoomed
 /// page pans instead of turning, and taps belong to the page (they toggle the reader's controls),
 /// never to the curl's edge-tap.
 struct PageCurlPager<Page: View>: UIViewControllerRepresentable {
@@ -52,31 +75,37 @@ struct PageCurlPager<Page: View>: UIViewControllerRepresentable {
         controller.dataSource = context.coordinator
         controller.delegate = context.coordinator
         controller.view.backgroundColor = .black
-        context.coordinator.controller = controller
         context.coordinator.uikitDelegate = controller.gestureRecognizers.first?.delegate
         for recognizer in controller.gestureRecognizers {
             recognizer.delegate = context.coordinator
         }
         if let first = context.coordinator.host(for: current) {
             controller.setViewControllers([first], direction: .forward, animated: false)
+            context.coordinator.displayed = current
         }
         return controller
     }
 
     func updateUIViewController(_ controller: UIPageViewController, context: Context) {
-        context.coordinator.parent = self
+        let coordinator = context.coordinator
+        coordinator.parent = self
+        // Hands off while a curl is under the finger. UIKit reports the incoming page as shown
+        // from the moment the curl starts, so the reader re-rendering meanwhile (it does, as pages
+        // warm and progress saves) looked like a jump and put the old page back mid-turn: the
+        // page jumped, the finished turn landed on the wrong page, and UIKit could crash.
+        guard !coordinator.isTurning else { return }
         // A jump from outside — the page slider, a chapter pick, a resume — turns straight there,
         // as does the first page once there is one to show.
-        let shown = (controller.viewControllers?.first as? CurlPageHost)?.pageID
-        guard shown != current, let target = context.coordinator.host(for: current) else { return }
+        let shown = coordinator.displayed
+        guard shown != current, let target = coordinator.host(for: current) else { return }
         let forward = shown.map { (pageIDs.firstIndex(of: current) ?? 0) > (pageIDs.firstIndex(of: $0) ?? 0) } ?? true
         controller.setViewControllers([target], direction: forward ? .forward : .reverse, animated: false)
+        coordinator.displayed = current
     }
 
     final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate,
                              UIGestureRecognizerDelegate {
         var parent: PageCurlPager
-        weak var controller: UIPageViewController?
         /// UIKit's own delegate for the curl's gestures — the page view controller, which checks
         /// the data source before a curl starts. Replacing it outright dropped that check, and a
         /// swipe back on the first page (or on past the last) asked UIKit to turn to no page:
@@ -84,6 +113,11 @@ struct PageCurlPager<Page: View>: UIViewControllerRepresentable {
         weak var uikitDelegate: UIGestureRecognizerDelegate?
         /// Pages zoomed past 1×, whose pans move the page rather than turn it.
         private var zoomed: Set<Int> = []
+        /// The page on screen by the pager's own account: the one it put there or last finished
+        /// turning to. Not `viewControllers`, which names the incoming page all through a curl.
+        var displayed: Int?
+        /// A curl is under way, from UIKit's word that it's starting until its word that it's over.
+        private(set) var isTurning = false
 
         init(parent: PageCurlPager) {
             self.parent = parent
@@ -101,33 +135,50 @@ struct PageCurlPager<Page: View>: UIViewControllerRepresentable {
 
         func pageViewController(_ pageViewController: UIPageViewController,
                                 viewControllerBefore viewController: UIViewController) -> UIViewController? {
-            guard let id = (viewController as? CurlPageHost)?.pageID,
-                  let previous = PageCurl.neighbor(of: id, offset: -1, in: parent.pageIDs) else { return nil }
-            return host(for: previous)
+            page(beside: viewController,
+                 offset: PageCurl.readingOffset(uikitAfter: false, rightToLeft: parent.rightToLeft))
         }
 
         func pageViewController(_ pageViewController: UIPageViewController,
                                 viewControllerAfter viewController: UIViewController) -> UIViewController? {
-            guard let id = (viewController as? CurlPageHost)?.pageID,
-                  let next = PageCurl.neighbor(of: id, offset: 1, in: parent.pageIDs) else { return nil }
-            return host(for: next)
+            page(beside: viewController,
+                 offset: PageCurl.readingOffset(uikitAfter: true, rightToLeft: parent.rightToLeft))
+        }
+
+        /// The neighbouring page — or, past either end, the same page again. A curl can only be
+        /// started toward a page that exists (`gestureRecognizerShouldBegin`), but UIKit re-aims
+        /// one whose finger drags back past where it started, and then asks for the page before the
+        /// first or after the last. Answering with none threw "The number of view controllers
+        /// provided (0) doesn't match the number required (1) for the requested transition"; the
+        /// same page lets that curl land where it began.
+        private func page(beside viewController: UIViewController, offset: Int) -> UIViewController? {
+            guard let id = (viewController as? CurlPageHost)?.pageID else { return nil }
+            return host(for: PageCurl.neighbor(of: id, offset: offset, in: parent.pageIDs) ?? id)
+        }
+
+        func pageViewController(_ pageViewController: UIPageViewController,
+                                willTransitionTo pendingViewControllers: [UIViewController]) {
+            isTurning = true
         }
 
         func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool,
                                 previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
+            isTurning = false
             guard completed, let id = (pageViewController.viewControllers?.first as? CurlPageHost)?.pageID else { return }
+            displayed = id
             parent.current = id
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             // Taps toggle the reader's controls, never turn the page.
             if gestureRecognizer is UITapGestureRecognizer { return false }
-            guard let shown = (controller?.viewControllers?.first as? CurlPageHost)?.pageID,
-                  !zoomed.contains(shown) else { return false }
-            if let pan = gestureRecognizer as? UIPanGestureRecognizer {
-                let forward = PageCurl.isForward(velocityX: pan.velocity(in: pan.view).x,
-                                                 rightToLeft: parent.rightToLeft)
-                guard PageCurl.canTurn(from: shown, forward: forward, in: parent.pageIDs) else { return false }
+            guard let shown = displayed, !zoomed.contains(shown) else { return false }
+            if let pan = gestureRecognizer as? UIPanGestureRecognizer, let view = pan.view {
+                guard PageCurl.canBeginCurl(from: shown,
+                                            velocityX: pan.velocity(in: view).x,
+                                            translationX: pan.translation(in: view).x,
+                                            rightToLeft: parent.rightToLeft,
+                                            in: parent.pageIDs) else { return false }
             }
             return uikitDelegate?.gestureRecognizerShouldBegin?(gestureRecognizer) ?? true
         }
@@ -136,7 +187,7 @@ struct PageCurlPager<Page: View>: UIViewControllerRepresentable {
         /// curl runs beside it.
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-            guard let shown = (controller?.viewControllers?.first as? CurlPageHost)?.pageID else { return false }
+            guard let shown = displayed else { return false }
             return !zoomed.contains(shown)
         }
     }

@@ -2,11 +2,13 @@ import Foundation
 
 final class IDMappingService: @unchecked Sendable {
     static let shared = IDMappingService()
-    private let cacheKey = "id_mappings_cache"
     private let prefetchedKey = "id_mappings_prefetched_v2"
-    private let mediaCacheKey = "id_media_mappings_cache"
     private let mediaPrefetchedKey = "id_media_mappings_prefetched_v1"
-    private let tvdbGroupsCacheKey = "id_tvdb_groups_cache"
+    // Megabytes between them, kept out of UserDefaults (see `StoredFile`): one was written back
+    // whole on every lookup the bulk list didn't have.
+    private let cacheFile = StoredFile(name: "id-mappings.json", legacyKey: "id_mappings_cache")
+    private let mediaCacheFile = StoredFile(name: "id-media-mappings.json", legacyKey: "id_media_mappings_cache")
+    private let tvdbGroupsFile = StoredFile(name: "id-tvdb-groups.json", legacyKey: "id_tvdb_groups_cache")
     private var cache: [String: Int] = [:]
     private var mediaCache: [Int: MediaMapping] = [:]
     private var anilistToTvdb: [Int: Int] = [:]
@@ -21,12 +23,14 @@ final class IDMappingService: @unchecked Sendable {
     }
 
     private init() {
-        cache = (UserDefaults.standard.dictionary(forKey: cacheKey) as? [String: Int]) ?? [:]
-        if let data = UserDefaults.standard.data(forKey: mediaCacheKey),
+        if let data = cacheFile.load(), let decoded = try? JSONDecoder().decode([String: Int].self, from: data) {
+            cache = decoded
+        }
+        if let data = mediaCacheFile.load(),
            let decoded = try? JSONDecoder().decode([Int: MediaMapping].self, from: data) {
             mediaCache = decoded
         }
-        if let data = UserDefaults.standard.data(forKey: tvdbGroupsCacheKey),
+        if let data = tvdbGroupsFile.load(),
            let decoded = try? JSONDecoder().decode([Int: [SiblingSeason]].self, from: data) {
             tvdbGroups = decoded
             for (tvdb, sibs) in decoded {
@@ -73,7 +77,7 @@ final class IDMappingService: @unchecked Sendable {
                     }
                 }
                 self.cache = newCache
-                UserDefaults.standard.set(newCache, forKey: self.cacheKey)
+                self.saveCache()
 
                 // Build tvdb sibling groups (used by SeasonChainMapper to remap continuous
                 // module episode numbers onto the correct AniList/MAL season entry).
@@ -98,7 +102,7 @@ final class IDMappingService: @unchecked Sendable {
                     }
                 }
                 if let encoded = try? JSONEncoder().encode(newGroups) {
-                    UserDefaults.standard.set(encoded, forKey: self.tvdbGroupsCacheKey)
+                    self.tvdbGroupsFile.save(encoded)
                 }
                 Logger.shared.log("[Tracking] tvdb groups built: \(newGroups.count) shows", type: "Debug")
 
@@ -119,7 +123,7 @@ final class IDMappingService: @unchecked Sendable {
                 }
                 self.mediaCache = newMediaCache
                 if let encoded = try? JSONEncoder().encode(newMediaCache) {
-                    UserDefaults.standard.set(encoded, forKey: self.mediaCacheKey)
+                    self.mediaCacheFile.save(encoded)
                 }
                 UserDefaults.standard.set(true, forKey: self.mediaPrefetchedKey)
             }
@@ -151,7 +155,7 @@ final class IDMappingService: @unchecked Sendable {
               let mappings = try? JSONDecoder().decode([AniraMapping].self, from: data),
               let id = mappings.first?.anilist_id else { return nil }
         cache[key] = id
-        UserDefaults.standard.set(cache, forKey: cacheKey)
+        saveCache()
         return id
     }
 
@@ -163,7 +167,7 @@ final class IDMappingService: @unchecked Sendable {
               let mappings = try? JSONDecoder().decode([AniraMapping].self, from: data),
               let id = mappings.first?.mal_id else { return nil }
         cache[key] = id
-        UserDefaults.standard.set(cache, forKey: cacheKey)
+        saveCache()
         return id
     }
 
@@ -196,7 +200,7 @@ final class IDMappingService: @unchecked Sendable {
                                    tmdbMovieId: m.tmdb_movie_id, mediaType: m.media_type)
         mediaCache[anilistId] = mapping
         if let encoded = try? JSONEncoder().encode(mediaCache) {
-            UserDefaults.standard.set(encoded, forKey: mediaCacheKey)
+            mediaCacheFile.save(encoded)
         }
     }
 
@@ -206,10 +210,17 @@ final class IDMappingService: @unchecked Sendable {
         tvdbGroups = [:]
         anilistToTvdb = [:]
         malToTvdb = [:]
-        UserDefaults.standard.removeObject(forKey: cacheKey)
+        cacheFile.remove()
+        mediaCacheFile.remove()
+        tvdbGroupsFile.remove()
         UserDefaults.standard.removeObject(forKey: prefetchedKey)
-        UserDefaults.standard.removeObject(forKey: mediaCacheKey)
         UserDefaults.standard.removeObject(forKey: mediaPrefetchedKey)
-        UserDefaults.standard.removeObject(forKey: tvdbGroupsCacheKey)
+    }
+
+    /// The mappings' size on disk, for the storage view.
+    var storageSize: Int { cacheFile.size + mediaCacheFile.size + tvdbGroupsFile.size }
+
+    private func saveCache() {
+        if let encoded = try? JSONEncoder().encode(cache) { cacheFile.save(encoded) }
     }
 }

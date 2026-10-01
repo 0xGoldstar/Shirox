@@ -17,16 +17,18 @@ final class HostBlocklist {
     /// Parses a hosts-file (`0.0.0.0 host` / `127.0.0.1 host`) or bare-host list into a
     /// normalized lowercase set. Skips comments, blank lines, `localhost`, and tokens
     /// without a dot.
+    ///
+    /// Read as bytes: it runs on every launch over some 60,000 lines, and trimming and splitting
+    /// each one as a Foundation string took a second of a core.
     static func parse(_ contents: String) -> Set<String> {
         var result = Set<String>()
-        contents.enumerateLines { line, _ in
-            var s = line
-            if let hash = s.firstIndex(of: "#") { s = String(s[..<hash]) }
-            s = s.trimmingCharacters(in: .whitespaces)
-            guard !s.isEmpty else { return }
-            let parts = s.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
-            let host = (parts.last ?? "").lowercased()
-            guard !host.isEmpty, host != "localhost", host.contains(".") else { return }
+        let newline = UInt8(ascii: "\n"), hash = UInt8(ascii: "#")
+        for line in contents.utf8.split(separator: newline) {
+            let uncommented = line.firstIndex(of: hash).map { line[..<$0] } ?? line[...]
+            let tokens = uncommented.split(whereSeparator: { $0 == 0x20 || $0 == 0x09 || $0 == 0x0D })
+            guard let last = tokens.last else { continue }
+            let host = String(decoding: last, as: UTF8.self).lowercased()
+            guard host != "localhost", host.contains(".") else { continue }
             result.insert(host)
         }
         return result

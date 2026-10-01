@@ -13,15 +13,18 @@ final class PlayerSubtitleMenuTests: XCTestCase {
         var delay: Double?
         var fontSize: Double?
         var selected: SubtitleTrack??
+        var embedded: Int?
         var imported = false
         var moreSettings = false
     }
 
     private func menu(enabled: Bool = true, delay: Double = 0, fontSize: Double = 24,
                       tracks: [SubtitleTrack] = [], selected: SubtitleTrack? = nil,
+                      embedded: [PlaybackSubtitleOption] = [], selectedEmbedded: Int? = nil,
                       canImport: Bool = false, log: Log = Log()) -> [PlayerMenuElement] {
         PlayerSubtitleMenu.elements(
             enabled: enabled, delay: delay, fontSize: fontSize, tracks: tracks, selected: selected,
+            embedded: embedded, selectedEmbedded: selectedEmbedded,
             actions: PlayerSubtitleMenu.Actions(
                 setEnabled: { log.enabled = $0 },
                 currentDelay: { log.delay ?? delay },
@@ -29,7 +32,8 @@ final class PlayerSubtitleMenuTests: XCTestCase {
                 setFontSize: { log.fontSize = $0 },
                 selectTrack: { log.selected = .some($0) },
                 importFile: canImport ? { log.imported = true } : nil,
-                moreSettings: { log.moreSettings = true }))
+                moreSettings: { log.moreSettings = true },
+                selectEmbedded: { log.embedded = $0 }))
     }
 
     // MARK: - Labels
@@ -41,10 +45,33 @@ final class PlayerSubtitleMenuTests: XCTestCase {
         XCTAssertEqual(PlayerSubtitleMenu.delayLabel(-0.04), "0.0s", "No minus on a zero that rounds")
     }
 
-    func testAStepLandsOnATenthAndStaysInTheSheetsRange() {
+    func testAStepLandsOnATenthWithNoCap() {
         XCTAssertEqual(PlayerSubtitleMenu.stepped(0.1, by: 0.2), 0.3)
-        XCTAssertEqual(PlayerSubtitleMenu.stepped(4.8, by: 0.5), 5)
-        XCTAssertEqual(PlayerSubtitleMenu.stepped(-4.9, by: -0.5), -5)
+        XCTAssertEqual(PlayerSubtitleMenu.stepped(4.8, by: 0.5), 5.3)
+        XCTAssertEqual(PlayerSubtitleMenu.stepped(-4.9, by: -0.5), -5.4)
+        XCTAssertEqual(PlayerSubtitleMenu.stepped(83, by: 5), 88)
+        XCTAssertEqual(PlayerSubtitleMenu.stepped(-120, by: -1), -121)
+    }
+
+    func testALargeDelayStillReadsInSeconds() {
+        XCTAssertEqual(PlayerSubtitleMenu.delayLabel(83.5), "+83.5s")
+        XCTAssertEqual(PlayerSubtitleMenu.delayLabel(-600), "−600.0s")
+    }
+
+    func testATypedDelayReadsWithEitherMinusOrDecimalMark() {
+        XCTAssertEqual(PlayerSubtitleMenu.parseDelay("83.5"), 83.5)
+        XCTAssertEqual(PlayerSubtitleMenu.parseDelay("+2"), 2)
+        XCTAssertEqual(PlayerSubtitleMenu.parseDelay("-1.26"), -1.3, "On a tenth, like the steps")
+        XCTAssertEqual(PlayerSubtitleMenu.parseDelay("−0.4"), -0.4, "The minus sign the labels show")
+        XCTAssertEqual(PlayerSubtitleMenu.parseDelay(" 1,5 s "), 1.5, "A comma decimal mark and a trailing unit")
+    }
+
+    func testATypedDelayThatIsntANumberIsRefused() {
+        XCTAssertNil(PlayerSubtitleMenu.parseDelay(""))
+        XCTAssertNil(PlayerSubtitleMenu.parseDelay("abc"))
+        XCTAssertNil(PlayerSubtitleMenu.parseDelay("1.2.3"))
+        XCTAssertNil(PlayerSubtitleMenu.parseDelay("inf"), "Double() reads this as infinity")
+        XCTAssertNil(PlayerSubtitleMenu.parseDelay("nan"))
     }
 
     func testTheSizeReadsAsItsPresetOrItsPoints() {
@@ -81,6 +108,23 @@ final class PlayerSubtitleMenuTests: XCTestCase {
         XCTAssertNil(Self.item("Default", in: menu(tracks: [])))
     }
 
+    /// A file's own tracks get their own section; the one on screen is checked.
+    func testTheFilesOwnTracksAreListed() {
+        let log = Log()
+        let embedded = [PlaybackSubtitleOption(id: 3, title: "English"), PlaybackSubtitleOption(id: 4, title: "Signs")]
+        let elements = menu(tracks: [english], embedded: embedded, selectedEmbedded: 3, log: log)
+        let fileTracks = Self.section("In This Video", in: elements)
+        XCTAssertEqual(Self.item("English", in: fileTracks)?.isOn, true)
+        XCTAssertEqual(Self.item("Signs", in: fileTracks)?.isOn, false)
+        XCTAssertEqual(Self.item("Default", in: elements)?.isOn, false, "something's on screen")
+        Self.item("Signs", in: fileTracks)?.action()
+        XCTAssertEqual(log.embedded, 4)
+    }
+
+    func testNoFileSectionWithoutTracksInTheFile() {
+        XCTAssertTrue(Self.section("In This Video", in: menu(tracks: [english])).isEmpty)
+    }
+
     func testTheDelayStepsKeepTheMenuOpenAndReset() {
         let log = Log()
         let elements = menu(delay: 1.2, log: log)
@@ -91,11 +135,12 @@ final class PlayerSubtitleMenuTests: XCTestCase {
         XCTAssertEqual(value, "+1.2s")
 
         let steps = Self.items(in: children)
-        XCTAssertEqual(steps.map(\.title), ["−0.5s", "−0.1s", "+0.1s", "+0.5s", "Reset"])
+        XCTAssertEqual(steps.map(\.title),
+                       ["−5.0s", "−1.0s", "−0.5s", "−0.1s", "+0.1s", "+0.5s", "+1.0s", "+5.0s", "Reset"])
         XCTAssertTrue(steps.dropLast().allSatisfy(\.keepsMenuOpen))
-        steps[3].action()
+        steps[5].action()   // +0.5s
         XCTAssertEqual(log.delay, 1.7)
-        steps[4].action()
+        steps[8].action()   // Reset
         XCTAssertEqual(log.delay, 0)
     }
 
@@ -105,10 +150,19 @@ final class PlayerSubtitleMenuTests: XCTestCase {
         guard case let .submenu(_, _, children)? = Self.submenu("Delay", in: menu(delay: 1.2, log: log)) else {
             return XCTFail("No Delay submenu")
         }
-        let plusATenth = Self.items(in: children)[2]
+        let plusATenth = Self.items(in: children)[4]
         plusATenth.action()
         plusATenth.action()
         XCTAssertEqual(log.delay, 1.4)
+    }
+
+    func testTheMenuStepsPastFiveSeconds() {
+        let log = Log()
+        guard case let .submenu(_, _, children)? = Self.submenu("Delay", in: menu(delay: 4.8, log: log)) else {
+            return XCTFail("No Delay submenu")
+        }
+        Self.item("+5.0s", in: children)?.action()
+        XCTAssertEqual(log.delay, 9.8)
     }
 
     func testTheSizesAreChecked() {
@@ -153,6 +207,12 @@ final class PlayerSubtitleMenuTests: XCTestCase {
 
     private static func item(_ title: String, in elements: [PlayerMenuElement]) -> PlayerMenuItem? {
         items(in: elements).first { $0.title == title }
+    }
+
+    /// The rows of the top-level section with this heading; empty if there's none.
+    private static func section(_ heading: String, in elements: [PlayerMenuElement]) -> [PlayerMenuElement] {
+        for case .section(let title, let children) in elements where title == heading { return children }
+        return []
     }
 
     private static func submenu(_ title: String, in elements: [PlayerMenuElement]) -> PlayerMenuElement? {

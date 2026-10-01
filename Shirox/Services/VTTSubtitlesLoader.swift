@@ -9,6 +9,14 @@ struct SubtitleCue: Identifiable {
     let text: String   // plain text, HTML tags stripped
 }
 
+/// What a subtitle file turned out to be.
+enum LoadedSubtitles {
+    /// WebVTT or SRT, as plain-text cues `PlayerSubtitleOverlay` draws.
+    case cues([SubtitleCue])
+    /// An ASS/SSA script, kept whole: its styles, positions and fonts are libass's (or mpv's) to draw.
+    case ass(String)
+}
+
 // MARK: - VTTSubtitlesLoader
 
 enum VTTSubtitlesLoader {
@@ -22,14 +30,14 @@ enum VTTSubtitlesLoader {
             switch self {
             case .invalidURL:     return "The subtitle URL is invalid."
             case .decodingFailed: return "Could not decode subtitle data as UTF-8."
-            case .unknownFormat:  return "Subtitle format is not recognised (expected VTT or SRT)."
+            case .unknownFormat:  return "Subtitle format is not recognised (expected VTT, SRT or ASS)."
             }
         }
     }
 
     // MARK: Public entry point
 
-    static func load(from urlString: String, headers: [String: String] = [:]) async throws -> [SubtitleCue] {
+    static func load(from urlString: String, headers: [String: String] = [:]) async throws -> LoadedSubtitles {
         guard let url = URL(string: urlString) else {
             throw LoadError.invalidURL
         }
@@ -47,12 +55,14 @@ enum VTTSubtitlesLoader {
             request.setValue(value, forHTTPHeaderField: key)
         }
 
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let (data, _) = try await URLSession.shared.decodedData(for: request)
+        return try parse(data)
+    }
 
-        guard let content = String(data: data, encoding: .utf8) ??
-                            String(data: data, encoding: .isoLatin1) else {
-            throw LoadError.decodingFailed
-        }
+    /// Tells the format by content, not by extension: modules serve ASS from URLs without one.
+    static func parse(_ data: Data) throws -> LoadedSubtitles {
+        guard let content = decode(data) else { throw LoadError.decodingFailed }
+        if isASS(content) { return .ass(content) }
 
         let cues: [SubtitleCue]
         if isVTT(content) {
@@ -63,10 +73,23 @@ enum VTTSubtitlesLoader {
             throw LoadError.unknownFormat
         }
 
-        return cues.sorted { $0.start < $1.start }
+        return .cues(cues.sorted { $0.start < $1.start })
+    }
+
+    /// UTF-16 when it says so with a byte-order mark — older fansub scripts are saved that way.
+    private static func decode(_ data: Data) -> String? {
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]) {
+            return String(data: data, encoding: .utf16)
+        }
+        return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
     }
 
     // MARK: Format detection
+
+    private static func isASS(_ content: String) -> Bool {
+        let start = content.drop { $0 == "\u{FEFF}" || $0.isWhitespace }
+        return start.prefix(13).lowercased() == "[script info]"
+    }
 
     private static func isVTT(_ content: String) -> Bool {
         let stripped = content.hasPrefix("\u{FEFF}") ? String(content.dropFirst()) : content

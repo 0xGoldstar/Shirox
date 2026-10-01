@@ -238,8 +238,9 @@ private struct FeaturedCarousel: View {
     var onRefresh: (() async -> Void)? = nil
     var leadingInset: CGFloat = 0
 
-    @State private var selectedTab = 1000
+    @State private var selectedTab = HeroPages.middle
     @State private var hasTriggeredThreshold = false
+    @State private var placement = HeroPlacement()
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var realItems: [Media] { items.prefix(8).map { $0 } }
@@ -277,7 +278,7 @@ private struct FeaturedCarousel: View {
 
         VStack(spacing: 0) {
             GeometryReader { geo in
-                let minY = geo.frame(in: .named("homeScroll")).minY
+                let minY = placement.pull
                 // Stretch from the first point of the pull, by the whole distance: the content
                 // moves down by `minY`, so anything less leaves a gap above the artwork.
                 let isPullingDown = minY > 0
@@ -290,29 +291,13 @@ private struct FeaturedCarousel: View {
                 let isWideCard = isIPad && geo.size.width > baseHeight
                 // Where a page rests, so each page's parallax is measured from there — not from
                 // the screen's edge, which the iPad sidebar moves.
-                let carouselMidX = geo.frame(in: .global).midX
+                // Unknown (zero) until the first layout hands it up; no parallax till then.
+                let carouselMidX: CGFloat? = placement.midX == 0 ? nil : placement.midX
 
                 ZStack(alignment: .bottom) {
-                    TabView(selection: $selectedTab) {
-                        ForEach(0..<2000, id: \.self) { index in
-                            if !displayItems.isEmpty {
-                                FeaturedCard(
-                                    media: displayItems[index % displayCount],
-                                    isWide: isWideCard,
-                                    width: geo.size.width,
-                                    height: baseHeight,
-                                    carouselMidX: carouselMidX
-                                )
-                                .frame(width: geo.size.width, height: baseHeight)
-                                .clipped()
-                                .tag(index)
-                            }
-                        }
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .frame(width: geo.size.width, height: baseHeight)
-                    .clipped()
-                    .scaleEffect(isPullingDown ? scale : 1.0, anchor: .bottom)
+                    HeroPager(items: displayItems, selection: $selectedTab, width: geo.size.width,
+                              height: baseHeight, isWide: isWideCard, carouselMidX: carouselMidX)
+                        .scaleEffect(isPullingDown ? scale : 1.0, anchor: .bottom)
 
                     ZStack(alignment: .bottom) {
                         CurvedGradientShadow(height: 350, color: platformBackground, style: .prominent)
@@ -399,6 +384,18 @@ private struct FeaturedCarousel: View {
             }
             .frame(height: baseHeight)
             .background {
+                // Where the hero sits, read apart from it: the Home scroll moves it every frame,
+                // and read in the hero's own body that rebuilt all of it — logo, genres, text —
+                // on every frame of a scroll. Handed up, it changes the hero only when it does:
+                // while pulled past the top, or when the carousel moves sideways.
+                GeometryReader { geo in
+                    Color.clear.preference(key: HeroPlacementKey.self, value: HeroPlacement(
+                        pull: max(0, geo.frame(in: .named("homeScroll")).minY),
+                        midX: geo.frame(in: .global).midX))
+                }
+            }
+            .onPreferenceChange(HeroPlacementKey.self) { if let measured = $0 { placement = measured } }
+            .background {
                 // Hidden preloader — triggers image fetch for all items into NSCache
                 ForEach(displayItems.indices, id: \.self) { i in
                     TVDBPosterImage(media: displayItems[i], type: .fanart)
@@ -425,7 +422,7 @@ private struct FeaturedCarousel: View {
         }
         .onAppear {
             if displayCount > 0 {
-                selectedTab = (1000 / displayCount) * displayCount
+                selectedTab = (HeroPages.middle / displayCount) * displayCount
             }
         }
         #elseif !os(tvOS)
@@ -433,6 +430,69 @@ private struct FeaturedCarousel: View {
         #endif
     }
 }
+
+/// Where the hero sits in the Home scroll: how far it's pulled down past the top, and its centre
+/// on screen.
+private struct HeroPlacement: Equatable {
+    var pull: CGFloat = 0
+    var midX: CGFloat = 0
+}
+
+/// nil from every view but the one that measures it. Combined with a view that sets nothing, a
+/// value has to survive: with a zero default instead, the hero's own content overwrote the reading,
+/// and with it went the stretch and the parallax.
+private struct HeroPlacementKey: PreferenceKey {
+    static let defaultValue: HeroPlacement? = nil
+    static func reduce(value: inout HeroPlacement?, nextValue: () -> HeroPlacement?) {
+        value = value ?? nextValue()
+    }
+}
+
+/// The hero pager's pages: many, so a swipe either way never reaches an end, but not thousands.
+/// The page view keeps every one of them in step with the Home scroll, which at 2,000 cost as much
+/// as all the rest of a scroll frame. At 200 it's a tenth, and still a hundred swipes to an end.
+private enum HeroPages {
+    static let count = 200
+    /// Where the pager starts, with as many pages to either side.
+    static let middle = count / 2
+}
+
+#if os(iOS) && !targetEnvironment(macCatalyst)
+/// The hero's pages, on their own so the Home scroll can't reach them: given only what the pages
+/// show, SwiftUI skips this view while those stay the same. Inside the carousel's body, which once
+/// re-ran on every frame of a scroll, all the pages were rebuilt 120 times a second.
+private struct HeroPager: View {
+    let items: [Media]
+    @Binding var selection: Int
+    let width: CGFloat
+    let height: CGFloat
+    let isWide: Bool
+    /// The carousel's centre on screen, which each page's parallax is measured from. nil: no parallax.
+    let carouselMidX: CGFloat?
+
+    var body: some View {
+        TabView(selection: $selection) {
+            // One page per index, so the page view needn't build every one to count them: with an
+            // `if` inside, each could have been none.
+            ForEach(items.isEmpty ? 0..<0 : 0..<HeroPages.count, id: \.self) { index in
+                FeaturedCard(
+                    media: items[index % items.count],
+                    isWide: isWide,
+                    width: width,
+                    height: height,
+                    carouselMidX: carouselMidX
+                )
+                .frame(width: width, height: height)
+                .clipped()
+                .tag(index)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .frame(width: width, height: height)
+        .clipped()
+    }
+}
+#endif
 
 // MARK: - macOS Featured Carousel (lightweight, no TabView with 2000 items)
 

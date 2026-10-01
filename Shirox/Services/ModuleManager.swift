@@ -22,7 +22,8 @@ final class ModuleManager: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    private let storageKey = "savedModules"
+    /// Megabytes of scripts, kept out of UserDefaults (see `StoredFile`).
+    private let storage = StoredFile(name: "modules.json", legacyKey: "savedModules")
     private let activeKey = "activeModuleId"
 
     private init() {
@@ -237,12 +238,12 @@ final class ModuleManager: ObservableObject {
 
     private func saveToStorage() {
         if let data = try? JSONEncoder().encode(modules) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+            storage.save(data)
         }
     }
 
     private func loadFromStorage() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
+        guard let data = storage.load(),
               let saved = try? JSONDecoder().decode([ModuleDefinition].self, from: data) else { return }
         modules = saved
     }
