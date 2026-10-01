@@ -69,38 +69,44 @@ final class MPVEngine: PlaybackEngine {
     let layer = MPVMetalLayer()
 
     #if os(iOS)
-    private struct PendingScreenshot {
-        let file: URL
-        let completion: @MainActor (UIImage?) -> Void
-    }
-    private var pendingScreenshots: [UInt64: PendingScreenshot] = [:]
+    private var pendingScreenshots: [UInt64: @MainActor (UIImage?) -> Void] = [:]
 
     func captureCurrentFrame(completion: @escaping @MainActor (UIImage?) -> Void) {
         guard isItemReady, !isStopped else { completion(nil); return }
-        let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString).appendingPathExtension("png")
         let reply = nextSeekReply
         nextSeekReply += 1
-        pendingScreenshots[reply] = PendingScreenshot(file: file, completion: completion)
-        // Screenshot encoding can finish after the command is queued. Keep the file until mpv
-        // reports completion instead of reading and deleting it immediately.
-        if !commandAsync(reply: reply, "screenshot-to-file", file.path, "video") {
+        pendingScreenshots[reply] = completion
+        // The bundled libavcodec cannot encode PNG screenshots. Ask mpv for raw BGRA pixels and
+        // make the Photos image with Core Graphics instead.
+        if !commandAsync(reply: reply, "screenshot-raw", "video", "bgra") {
             pendingScreenshots.removeValue(forKey: reply)
             completion(nil)
         }
     }
 
-    private func finishScreenshot(reply: UInt64, error: Int32) -> Bool {
-        guard let pending = pendingScreenshots.removeValue(forKey: reply) else { return false }
-        let image = error >= 0 ? UIImage(contentsOfFile: pending.file.path) : nil
+    private func finishScreenshot(reply: UInt64, error: Int32, pixels: ScreenshotPixels?) -> Bool {
+        guard let completion = pendingScreenshots.removeValue(forKey: reply) else { return false }
+        let image = error >= 0 ? pixels.flatMap(Self.image(from:)) : nil
         if error < 0 {
             Logger.shared.log("[MPV] Screenshot failed: \(String(cString: mpv_error_string(error)))", type: "Error")
         } else if image == nil {
-            Logger.shared.log("[MPV] Screenshot completed without an image", type: "Error")
+            Logger.shared.log("[MPV] Raw screenshot had no usable image", type: "Error")
         }
-        try? FileManager.default.removeItem(at: pending.file)
-        pending.completion(image)
+        completion(image)
         return true
+    }
+
+    private static func image(from pixels: ScreenshotPixels) -> UIImage? {
+        guard let provider = CGDataProvider(data: pixels.data as CFData),
+              let image = CGImage(width: pixels.width, height: pixels.height,
+                                  bitsPerComponent: 8, bitsPerPixel: 32,
+                                  bytesPerRow: pixels.width * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue)
+                                      .union(.byteOrder32Little),
+                                  provider: provider, decode: nil,
+                                  shouldInterpolate: false, intent: .defaultIntent) else { return nil }
+        return UIImage(cgImage: image)
     }
     #endif
 
@@ -281,11 +287,17 @@ final class MPVEngine: PlaybackEngine {
         case endFile(reason: UInt32, error: Int32)
         case playbackRestart
         /// mpv took (or refused) the command sent with this reply number.
-        case commandReply(UInt64, error: Int32)
+        case commandReply(UInt64, error: Int32, pixels: ScreenshotPixels?)
         case double(String, Double?)
         case flag(String, Bool?)
         case int(String, Int64?)
         case log(String)
+    }
+
+    private struct ScreenshotPixels: Sendable {
+        let width: Int
+        let height: Int
+        let data: Data
     }
 
     /// Called on one of mpv's threads, where no mpv call may be made: hop to the event queue.
@@ -319,7 +331,9 @@ final class MPVEngine: PlaybackEngine {
         case MPV_EVENT_PLAYBACK_RESTART:
             return .playbackRestart
         case MPV_EVENT_COMMAND_REPLY:
-            return .commandReply(event.reply_userdata, error: event.error)
+            let result = event.data?.assumingMemoryBound(to: mpv_event_command.self).pointee.result
+            return .commandReply(event.reply_userdata, error: event.error,
+                                 pixels: result.flatMap(Self.screenshotPixels))
         case MPV_EVENT_END_FILE:
             guard let data = event.data?.assumingMemoryBound(to: mpv_event_end_file.self).pointee else { return nil }
             return .endFile(reason: data.reason.rawValue, error: data.error)
@@ -345,6 +359,39 @@ final class MPVEngine: PlaybackEngine {
         default:
             return nil
         }
+    }
+
+    /// mpv owns command result memory only until the next event is read, so copy the rows here.
+    private nonisolated static func screenshotPixels(_ result: mpv_node) -> ScreenshotPixels? {
+        guard result.format == MPV_FORMAT_NODE_MAP, let list = result.u.list?.pointee,
+              list.num > 0 else { return nil }
+        func field(_ name: String) -> mpv_node? {
+            for index in 0..<Int(list.num) {
+                guard let key = list.keys?[index], String(cString: key) == name else { continue }
+                return list.values?[index]
+            }
+            return nil
+        }
+        guard let w = field("w"), w.format == MPV_FORMAT_INT64,
+              let h = field("h"), h.format == MPV_FORMAT_INT64,
+              let s = field("stride"), s.format == MPV_FORMAT_INT64,
+              let format = field("format"), format.format == MPV_FORMAT_STRING,
+              let formatName = format.u.string, String(cString: formatName) == "bgra",
+              let pixels = field("data"), pixels.format == MPV_FORMAT_BYTE_ARRAY,
+              let byteArray = pixels.u.ba?.pointee, let source = byteArray.data,
+              let width = Int(exactly: w.u.int64), let height = Int(exactly: h.u.int64),
+              let stride = Int(exactly: s.u.int64), stride != Int.min,
+              width > 0, height > 0, width <= 16_384, height <= 16_384 else { return nil }
+        let rowBytes = width * 4
+        let rowStride = abs(stride)
+        guard rowStride >= rowBytes, height <= (256 * 1024 * 1024) / rowBytes,
+              Int(byteArray.size) >= rowStride * (height - 1) + rowBytes else { return nil }
+        var data = Data(capacity: rowBytes * height)
+        for row in 0..<height {
+            let start = source.advanced(by: row * stride).assumingMemoryBound(to: UInt8.self)
+            data.append(start, count: rowBytes)
+        }
+        return ScreenshotPixels(width: width, height: height, data: data)
     }
 
     private func apply(_ event: Event) {
@@ -391,9 +438,9 @@ final class MPVEngine: PlaybackEngine {
             finishTakenSeeks()
             tick(force: true)
             tellMetalShown()
-        case .commandReply(let reply, let error):
+        case .commandReply(let reply, let error, let pixels):
             #if os(iOS)
-            if finishScreenshot(reply: reply, error: error) { return }
+            if finishScreenshot(reply: reply, error: error, pixels: pixels) { return }
             #endif
             guard let index = pendingSeeks.firstIndex(where: { $0.reply == reply }) else { return }
             if error < 0 {
@@ -575,10 +622,7 @@ final class MPVEngine: PlaybackEngine {
         #if os(iOS)
         let screenshots = Array(pendingScreenshots.values)
         pendingScreenshots = [:]
-        for screenshot in screenshots {
-            try? FileManager.default.removeItem(at: screenshot.file)
-            screenshot.completion(nil)
-        }
+        for completion in screenshots { completion(nil) }
         #endif
         tellMetalShown()
         finishPendingSeeks(false)
