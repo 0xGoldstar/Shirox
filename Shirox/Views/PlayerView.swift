@@ -85,6 +85,8 @@ struct PlayerView: View {
     /// Owns the Control Center / lock screen transport registration. Held here so a player
     /// rebuild replaces the handlers instead of stacking a second set on top.
     #if os(iOS)
+    private static let frameSaveQueue = DispatchQueue(label: "com.shirox.framePhotoSaves")
+
     @State private var remoteCommands = RemoteCommandCoordinator()
     #endif
     /// Non-nil while playback is routed through `CastProxyServer` for an AirPlay receiver,
@@ -831,21 +833,48 @@ struct PlayerView: View {
         }
 
         let image = UIImage(cgImage: cgImage)
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            guard status == .authorized || status == .limited else {
-                DispatchQueue.main.async {
-                    frameSaveMessage = "Allow Photos access in Settings to save video frames."
-                    showFrameSaveAlert = true
+        PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
+            Self.frameSaveQueue.async {
+                let canUseAlbum = status == .authorized
+                let canSave = canUseAlbum || status == .limited ||
+                    PHPhotoLibrary.authorizationStatus(for: .addOnly) == .authorized
+                guard canSave else {
+                    DispatchQueue.main.async {
+                        frameSaveMessage = "Allow Photos access in Settings to save video frames."
+                        showFrameSaveAlert = true
+                    }
+                    return
                 }
-                return
-            }
-            PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
-            } completionHandler: { success, error in
-                DispatchQueue.main.async {
-                    frameSaveMessage = success ? "Frame saved to Photos." :
-                        "Could not save the frame: \(error?.localizedDescription ?? "Unknown error")"
-                    showFrameSaveAlert = true
+
+                do {
+                    let album: PHAssetCollection? = canUseAlbum ? {
+                        let options = PHFetchOptions()
+                        options.predicate = NSPredicate(format: "title = %@", "Shirox")
+                        return PHAssetCollection.fetchAssetCollections(
+                            with: .album, subtype: .albumRegular, options: options).firstObject
+                    }() : nil
+                    try PHPhotoLibrary.shared().performChangesAndWait {
+                        if canUseAlbum {
+                            let albumRequest = album.flatMap { PHAssetCollectionChangeRequest(for: $0) }
+                                ?? PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: "Shirox")
+                            let asset = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                            if let placeholder = asset.placeholderForCreatedAsset {
+                                albumRequest.addAssets([placeholder] as NSArray)
+                            }
+                        } else {
+                            PHAssetChangeRequest.creationRequestForAsset(from: image)
+                        }
+                    }
+                    DispatchQueue.main.async {
+                        frameSaveMessage = canUseAlbum ? "Frame saved to the Shirox album in Photos." :
+                            "Frame saved to Photos. Allow Full Access in Settings to use the Shirox album."
+                        showFrameSaveAlert = true
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        frameSaveMessage = "Could not save the frame: \(error.localizedDescription)"
+                        showFrameSaveAlert = true
+                    }
                 }
             }
         }
